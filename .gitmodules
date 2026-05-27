@@ -1,0 +1,4 @@
+[submodule "SillyTavern"]
+	path = SillyTavern
+	url = git@github.com:xianningqixi/SillyTavern.git
+	branch = codex/aibar-local-deploy

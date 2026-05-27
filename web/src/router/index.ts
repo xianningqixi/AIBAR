@@ -1,0 +1,68 @@
+import { createRouter, createWebHashHistory } from 'vue-router'
+
+const router = createRouter({
+  history: createWebHashHistory(),
+  routes: [
+    {
+      path: '/',
+      redirect: '/browse',
+    },
+    {
+      path: '/browse',
+      name: 'browse',
+      component: () => import('@/pages/BrowsePage.vue'),
+    },
+    {
+      path: '/chat/:avatar',
+      name: 'chat',
+      component: () => import('@/pages/ChatPage.vue'),
+    },
+    {
+      path: '/characters',
+      name: 'characters',
+      component: () => import('@/pages/CharacterManagerPage.vue'),
+    },
+    {
+      path: '/character/new',
+      name: 'characterNew',
+      component: () => import('@/pages/CharacterEditorPage.vue'),
+    },
+    {
+      path: '/character/:avatar/edit',
+      name: 'characterEdit',
+      component: () => import('@/pages/CharacterEditorPage.vue'),
+    },
+    {
+      path: '/character/:avatar',
+      name: 'characterDetail',
+      component: () => import('@/pages/CharacterDetailPage.vue'),
+    },
+    {
+      path: '/story/new',
+      name: 'storyNew',
+      component: () => import('@/pages/StoryNewPage.vue'),
+    },
+    {
+      path: '/story/:id',
+      name: 'storyDetail',
+      component: () => import('@/pages/StoryDetailPage.vue'),
+    },
+    {
+      path: '/settings',
+      name: 'settings',
+      component: () => import('@/pages/SettingsPage.vue'),
+    },
+    {
+      path: '/mods',
+      name: 'mods',
+      component: () => import('@/pages/SettingsPage.vue'),
+    },
+    {
+      path: '/:pathMatch(.*)*',
+      name: 'notFound',
+      component: () => import('@/pages/NotFoundPage.vue'),
+    },
+  ],
+})
+
+export default router

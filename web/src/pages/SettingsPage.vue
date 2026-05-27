@@ -1,0 +1,860 @@
+<script setup lang="ts">
+import { computed, onMounted, reactive, ref, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
+import { useModelProfilesStore } from '@/stores/modelProfiles'
+import { useUiStore } from '@/stores/ui'
+import { useModsStore, type ModItem } from '@/stores/mods'
+import AppButton from '@/components/ui/AppButton.vue'
+import AppInput from '@/components/ui/AppInput.vue'
+import AppSelect from '@/components/ui/AppSelect.vue'
+import AppTextarea from '@/components/ui/AppTextarea.vue'
+import AppCard from '@/components/ui/AppCard.vue'
+import AppFormField from '@/components/ui/AppFormField.vue'
+import AppPageHeader from '@/components/ui/AppPageHeader.vue'
+import AppTabs from '@/components/ui/AppTabs.vue'
+import AppEmpty from '@/components/ui/AppEmpty.vue'
+import { providerConfigs } from '@/lib/providers'
+import { testConnection } from '@/api/generate'
+import type { ModelProfile, WorldInfoFile, WorldInfoSummary } from '@/api/types'
+import {
+  deleteWorldInfo,
+  getWorldInfo,
+  importWorldInfo,
+  listWorldInfo,
+  saveWorldInfo,
+} from '@/api/worldinfo'
+import WorldInfoEditor from '@/components/world/WorldInfoEditor.vue'
+
+const models = useModelProfilesStore()
+const ui = useUiStore()
+const mods = useModsStore()
+const route = useRoute()
+const router = useRouter()
+
+function initialTab(): string {
+  const raw = String(route.query.tab || '')
+  if (['model', 'mods', 'world', 'about'].includes(raw)) return raw
+  return route.path === '/mods' ? 'mods' : 'model'
+}
+
+function syncTabFromRoute() {
+  const next = initialTab()
+  if (activeTab.value !== next) {
+    activeTab.value = next
+  }
+}
+
+const activeTab = ref(initialTab())
+const apiKeyDrafts = ref<Record<string, string>>({})
+const selectedProfileId = ref('')
+const selectedModId = ref('')
+
+interface TestResult {
+  ok: boolean
+  message: string
+  models?: number
+}
+const testResults = reactive<Record<string, TestResult>>({})
+const testing = reactive<Record<string, boolean>>({})
+
+const worlds = ref<WorldInfoSummary[]>([])
+const selectedWorld = ref('')
+const worldFile = ref<WorldInfoFile | null>(null)
+const worldLoading = ref(false)
+const worldMode = ref<'entry' | 'json'>('entry')
+const worldJson = ref('')
+
+const tabs = [
+  { key: 'model', label: '模型配置' },
+  { key: 'mods', label: 'MOD' },
+  { key: 'world', label: '世界书' },
+  { key: 'about', label: '关于' },
+]
+
+const positionLabels: Record<string, string> = {
+  system_prepend: '系统前缀',
+  system_append: '系统后缀',
+  user_suffix: '用户后缀',
+}
+
+const selectedProfile = computed<ModelProfile | null>(() => {
+  return models.profiles.find((profile) => profile.id === selectedProfileId.value) || models.profiles[0] || null
+})
+
+const selectedMod = computed<ModItem | null>(() => {
+  return mods.mods.find((mod) => mod.id === selectedModId.value) || mods.mods[0] || null
+})
+
+const worldJsonValid = computed(() => {
+  if (!worldJson.value.trim()) return true
+  try {
+    JSON.parse(worldJson.value)
+    return true
+  } catch {
+    return false
+  }
+})
+
+async function saveKey(profileId: string) {
+  const value = apiKeyDrafts.value[profileId]
+  if (!value?.trim()) {
+    ui.addToast('请输入 API Key', 'warning')
+    return
+  }
+  try {
+    await models.saveApiKey(profileId, value)
+    apiKeyDrafts.value = { ...apiKeyDrafts.value, [profileId]: '' }
+    ui.addToast('API Key 已写入 ST secrets', 'success')
+  } catch (e: any) {
+    ui.addToast(`保存失败：${e.message}`, 'error')
+  }
+}
+
+async function runTest(profile: ModelProfile) {
+  testing[profile.id] = true
+  delete testResults[profile.id]
+  try {
+    const r = await testConnection(profile)
+    testResults[profile.id] = r
+    ui.addToast(r.ok ? `连接正常${r.models ? ` · ${r.models} 个模型` : ''}` : `连接失败：${r.message}`, r.ok ? 'success' : 'error')
+  } catch (e: any) {
+    testResults[profile.id] = { ok: false, message: e?.message || '未知错误' }
+  } finally {
+    testing[profile.id] = false
+  }
+}
+
+function addProfile(source = 'custom') {
+  const profile = models.createProfile(source)
+  selectedProfileId.value = profile.id
+}
+
+function deleteProfile(profile: ModelProfile) {
+  models.deleteProfile(profile.id)
+  selectedProfileId.value = models.activeProfileId || models.profiles[0]?.id || ''
+}
+
+function writeSampleProfiles() {
+  const local =
+    models.profiles.find((profile) => profile.name === '示例 · 本地 Ollama') ||
+    models.createProfile('custom')
+  models.updateProfile(local.id, {
+    name: '示例 · 本地 Ollama',
+    source: 'custom',
+    model: 'llama3.1',
+    endpoint: 'http://127.0.0.1:11434/v1',
+    temperature: 0.7,
+    maxTokens: 2048,
+  })
+
+  const openrouter =
+    models.profiles.find((profile) => profile.name === '示例 · OpenRouter') ||
+    models.createProfile('openrouter')
+  models.updateProfile(openrouter.id, {
+    name: '示例 · OpenRouter',
+    source: 'openrouter',
+    model: 'openai/gpt-4o-mini',
+    temperature: 0.8,
+    maxTokens: 4096,
+  })
+
+  selectedProfileId.value = local.id
+  ui.addToast('已写入 2 个示例模型配置', 'success')
+}
+
+function addMod() {
+  const mod = mods.createMod()
+  selectedModId.value = mod.id
+}
+
+function deleteSelectedMod(mod: ModItem) {
+  mods.deleteMod(mod.id)
+  selectedModId.value = mods.mods[0]?.id || ''
+}
+
+function writeSampleMods() {
+  const pacing =
+    mods.mods.find((mod) => mod.name === '示例 · 慢节奏推进') ||
+    mods.createMod()
+  mods.updateMod(pacing.id, {
+    name: '示例 · 慢节奏推进',
+    description: '降低剧情推进速度,每次回复聚焦当前场景。',
+    content: '叙事保持慢节奏,不要跳过关键动作和情绪变化。每次回复只推进一个主要动作或一个明确信息点。',
+    position: 'system_append',
+    enabled: false,
+  })
+
+  const userSuffix =
+    mods.mods.find((mod) => mod.name === '示例 · 要求可操作') ||
+    mods.createMod()
+  mods.updateMod(userSuffix.id, {
+    name: '示例 · 要求可操作',
+    description: '把玩家输入补充为需要明确后果和可操作反馈。',
+    content: '请在回复中给出清晰的即时反馈,并让场景保留可继续互动的选择空间。',
+    position: 'user_suffix',
+    enabled: false,
+  })
+
+  selectedModId.value = pacing.id
+  ui.addToast('已写入 2 个示例 MOD', 'success')
+}
+
+async function loadWorlds() {
+  worldLoading.value = true
+  try {
+    worlds.value = await listWorldInfo()
+    if (!selectedWorld.value && worlds.value[0]) {
+      await selectWorld(worlds.value[0].file_id)
+    }
+  } catch (e: any) {
+    ui.addToast(`世界书加载失败：${e.message}`, 'error')
+  } finally {
+    worldLoading.value = false
+  }
+}
+
+async function selectWorld(name: string) {
+  selectedWorld.value = name
+  try {
+    const data = await getWorldInfo(name)
+    worldFile.value = data
+    worldJson.value = JSON.stringify(data, null, 2)
+  } catch (e: any) {
+    ui.addToast(`读取失败：${e.message}`, 'error')
+  }
+}
+
+async function saveCurrentWorld(payload?: WorldInfoFile) {
+  if (!selectedWorld.value) {
+    ui.addToast('未选择世界书', 'warning')
+    return
+  }
+  let data: WorldInfoFile | null = null
+  if (payload) {
+    data = payload
+    worldFile.value = payload
+    worldJson.value = JSON.stringify(payload, null, 2)
+  } else if (worldMode.value === 'json') {
+    if (!worldJsonValid.value) {
+      ui.addToast('JSON 格式无效', 'warning')
+      return
+    }
+    data = JSON.parse(worldJson.value) as WorldInfoFile
+    worldFile.value = data
+  } else {
+    data = worldFile.value
+  }
+  if (!data) {
+    ui.addToast('没有可保存的内容', 'warning')
+    return
+  }
+  try {
+    await saveWorldInfo(selectedWorld.value, data)
+    ui.addToast('世界书已保存', 'success')
+    await loadWorlds()
+  } catch (e: any) {
+    ui.addToast(`保存失败：${e.message}`, 'error')
+  }
+}
+
+async function deleteWorld() {
+  if (!selectedWorld.value) return
+  if (!window.confirm(`删除世界书「${selectedWorld.value}」？`)) return
+  try {
+    await deleteWorldInfo(selectedWorld.value)
+    ui.addToast('世界书已删除', 'success')
+    selectedWorld.value = ''
+    worldFile.value = null
+    worldJson.value = ''
+    await loadWorlds()
+  } catch (e: any) {
+    ui.addToast(`删除失败：${e.message}`, 'error')
+  }
+}
+
+async function importWorldClick() {
+  const input = document.createElement('input')
+  input.type = 'file'
+  input.accept = '.json'
+  input.onchange = async () => {
+    const file = input.files?.[0]
+    if (!file) return
+    try {
+      const result = await importWorldInfo(file)
+      ui.addToast(`已导入世界书：${result.name}`, 'success')
+      await loadWorlds()
+      await selectWorld(result.name)
+    } catch (e: any) {
+      ui.addToast(`导入失败：${e.message}`, 'error')
+    }
+  }
+  input.click()
+}
+
+async function createWorld() {
+  const name = window.prompt('新世界书名称', 'AIBAR 示例世界书')
+  const trimmed = name?.trim()
+  if (!trimmed) return
+  try {
+    const data: WorldInfoFile = {
+      name: trimmed,
+      entries: {},
+    }
+    await saveWorldInfo(trimmed, data)
+    ui.addToast('世界书已创建', 'success')
+    selectedWorld.value = trimmed
+    worldFile.value = data
+    worldJson.value = JSON.stringify(data, null, 2)
+    await loadWorlds()
+    await selectWorld(trimmed)
+  } catch (e: any) {
+    ui.addToast(`创建失败：${e.message}`, 'error')
+  }
+}
+
+async function writeSampleWorld() {
+  const name = 'AIBAR 示例世界书'
+  const data: WorldInfoFile = {
+    name,
+    entries: {
+      '0': {
+        uid: 0,
+        key: ['月港', '银潮城'],
+        keysecondary: [],
+        comment: '月港',
+        content: '月港是一座建在潮汐断崖上的港城,夜晚会被蓝白色潮光照亮。这里的居民相信潮声能带来旧日记忆。',
+        constant: false,
+        disable: false,
+        order: 100,
+      },
+      '1': {
+        uid: 1,
+        key: [],
+        keysecondary: [],
+        comment: '叙事基调',
+        content: '世界整体基调偏神秘、克制、细腻。重要信息应通过场景细节和角色行动逐步显露。',
+        constant: true,
+        disable: false,
+        order: 80,
+      },
+    },
+  }
+  try {
+    await saveWorldInfo(name, data)
+    ui.addToast('已写入示例世界书', 'success')
+    await loadWorlds()
+    await selectWorld(name)
+  } catch (e: any) {
+    ui.addToast(`写入失败：${e.message}`, 'error')
+  }
+}
+
+function exportWorld() {
+  if (!selectedWorld.value || !worldFile.value) return
+  const blob = new Blob([JSON.stringify(worldFile.value, null, 2)], { type: 'application/json' })
+  const url = URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = url
+  link.download = `${selectedWorld.value}.json`
+  link.click()
+  URL.revokeObjectURL(url)
+}
+
+function switchWorldMode(mode: 'entry' | 'json') {
+  if (worldMode.value === mode) return
+  if (worldMode.value === 'json' && mode === 'entry') {
+    if (!worldJsonValid.value) {
+      ui.addToast('JSON 格式无效,无法切换到条目视图', 'warning')
+      return
+    }
+    if (worldJson.value.trim()) {
+      worldFile.value = JSON.parse(worldJson.value) as WorldInfoFile
+    }
+  } else if (worldMode.value === 'entry' && mode === 'json' && worldFile.value) {
+    worldJson.value = JSON.stringify(worldFile.value, null, 2)
+  }
+  worldMode.value = mode
+}
+
+onMounted(async () => {
+  await models.loadSecrets()
+  await mods.load()
+  selectedProfileId.value = models.activeProfileId || models.profiles[0]?.id || ''
+  selectedModId.value = mods.mods[0]?.id || ''
+  await loadWorlds()
+})
+
+watch(activeTab, (tab) => {
+  if (route.path === '/settings') {
+    router.replace({ query: { ...route.query, tab } })
+  }
+})
+
+watch(() => [route.path, route.query.tab], syncTabFromRoute)
+
+watch(
+  () => models.profiles.map((profile) => profile.id).join('|'),
+  () => {
+    if (!selectedProfileId.value || !models.getProfile(selectedProfileId.value)) {
+      selectedProfileId.value = models.activeProfileId || models.profiles[0]?.id || ''
+    }
+  },
+)
+
+watch(
+  () => mods.mods.map((mod) => mod.id).join('|'),
+  () => {
+    if (!selectedModId.value || !mods.getMod(selectedModId.value)) {
+      selectedModId.value = mods.mods[0]?.id || ''
+    }
+  },
+)
+</script>
+
+<template>
+  <div class="min-h-screen flex flex-col bg-bg">
+    <AppPageHeader title="设置" back-to="/browse" />
+
+    <div class="max-w-6xl mx-auto w-full px-5 py-6 flex-1">
+      <section class="relative overflow-hidden rounded-2xl ring-1 ring-border-subtle bg-hero-radial mb-6">
+        <div class="absolute -top-12 -right-12 w-56 h-56 rounded-full bg-brand-500/20 blur-3xl pointer-events-none" />
+        <div class="absolute -bottom-16 -left-8 w-56 h-56 rounded-full bg-accent-500/15 blur-3xl pointer-events-none" />
+        <div class="relative grid md:grid-cols-[1fr_auto] gap-6 items-end p-5 md:p-7">
+          <div>
+            <p class="text-[11px] uppercase tracking-[0.2em] text-brand-300/80 mb-2">配置中心</p>
+            <h2 class="text-xl md:text-2xl font-semibold text-ink-primary">
+              管理 <span class="text-brand-300">模型 · MOD · 世界书</span>
+            </h2>
+            <p class="mt-1.5 text-xs md:text-sm text-ink-secondary max-w-xl">
+              API Key 写入 ST secrets,不落本地。所有 MOD / 世界书写回 ST 原生目录,可与原版 UI 并存。
+            </p>
+          </div>
+          <div class="grid grid-cols-3 gap-2.5 md:min-w-[300px]">
+            <div class="rounded-xl bg-surface/70 backdrop-blur ring-1 ring-border-subtle p-3 text-center">
+              <p class="text-[10px] uppercase tracking-wider text-ink-muted">模型</p>
+              <p class="mt-1 text-xl font-semibold text-ink-primary tabular-nums">{{ models.profiles.length }}</p>
+            </div>
+            <div class="rounded-xl bg-surface/70 backdrop-blur ring-1 ring-border-subtle p-3 text-center">
+              <p class="text-[10px] uppercase tracking-wider text-ink-muted">MOD</p>
+              <p class="mt-1 text-xl font-semibold text-ink-primary tabular-nums">{{ mods.mods.length }}</p>
+            </div>
+            <div class="rounded-xl bg-surface/70 backdrop-blur ring-1 ring-border-subtle p-3 text-center">
+              <p class="text-[10px] uppercase tracking-wider text-ink-muted">世界书</p>
+              <p class="mt-1 text-xl font-semibold text-ink-primary tabular-nums">{{ worlds.length }}</p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <AppTabs v-model="activeTab" :tabs="tabs" class="mb-6" />
+
+      <div v-if="activeTab === 'model'" class="grid lg:grid-cols-[300px_1fr] gap-4">
+        <AppCard padding="md">
+          <div class="flex flex-wrap gap-2 mb-4">
+            <AppButton size="sm" @click="addProfile()">+ 新建</AppButton>
+            <AppButton size="sm" variant="secondary" @click="writeSampleProfiles">写入示例</AppButton>
+          </div>
+          <div class="space-y-1">
+            <button
+              v-for="profile in models.profiles"
+              :key="profile.id"
+              :class="[
+                'relative w-full text-left px-3 py-2.5 rounded-lg transition-colors',
+                selectedProfileId === profile.id
+                  ? 'bg-brand-500/15 text-brand-300 ring-1 ring-brand-500/30'
+                  : 'text-ink-secondary hover:bg-white/5 hover:text-ink-primary',
+              ]"
+              @click="selectedProfileId = profile.id"
+            >
+              <span
+                v-if="selectedProfileId === profile.id"
+                class="absolute left-0 top-2 bottom-2 w-0.5 rounded-full bg-brand-gradient"
+              />
+              <div class="flex items-center justify-between gap-2">
+                <span class="text-sm font-medium truncate">{{ profile.name }}</span>
+                <span v-if="models.activeProfileId === profile.id" class="text-[10px] text-emerald-300 shrink-0">默认</span>
+              </div>
+              <div class="mt-1 text-[11px] text-ink-muted truncate">
+                {{ providerConfigs[profile.source]?.label || profile.source }} · {{ profile.model || '未填模型' }}
+              </div>
+            </button>
+          </div>
+        </AppCard>
+
+        <AppCard v-if="selectedProfile" padding="none">
+          <div
+            v-if="testResults[selectedProfile.id]"
+            :class="[
+              'px-4 py-2 text-xs rounded-t-xl flex items-center gap-2',
+              testResults[selectedProfile.id].ok
+                ? 'bg-emerald-500/10 text-emerald-300 border-b border-emerald-500/20'
+                : 'bg-red-500/10 text-red-300 border-b border-red-500/20',
+            ]"
+          >
+            <span class="w-1.5 h-1.5 rounded-full" :class="testResults[selectedProfile.id].ok ? 'bg-emerald-400' : 'bg-red-400'" />
+            <span class="flex-1">
+              {{ testResults[selectedProfile.id].ok ? '连接正常' : '连接失败' }}
+              <template v-if="testResults[selectedProfile.id].ok && testResults[selectedProfile.id].models">
+                · 可用 {{ testResults[selectedProfile.id].models }} 个模型
+              </template>
+              <template v-if="!testResults[selectedProfile.id].ok">
+                · {{ testResults[selectedProfile.id].message }}
+              </template>
+            </span>
+          </div>
+
+          <div class="p-5 space-y-4">
+            <div class="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <h2 class="text-sm font-semibold text-ink-primary">模型配置详情</h2>
+                <p class="text-xs text-ink-muted mt-1">左侧浏览已有 Profile,右侧编辑当前选中项。</p>
+              </div>
+              <div class="flex items-center gap-3">
+                <span
+                  :class="[
+                    'text-[11px] inline-flex items-center gap-1.5',
+                    models.hasSavedApiKey(selectedProfile) || selectedProfile.source === 'custom' ? 'text-emerald-300' : 'text-amber-300',
+                  ]"
+                >
+                  <span class="w-1.5 h-1.5 rounded-full" :class="models.hasSavedApiKey(selectedProfile) || selectedProfile.source === 'custom' ? 'bg-emerald-400' : 'bg-amber-400'" />
+                  {{ selectedProfile.source === 'custom' ? '本地/兼容可无 Key' : models.getProviderSecretLabel(selectedProfile) }}
+                </span>
+                <label class="flex items-center gap-1.5 text-xs text-ink-secondary cursor-pointer">
+                  <input
+                    type="radio"
+                    :checked="models.activeProfileId === selectedProfile.id"
+                    class="accent-brand-500"
+                    @change="models.setActive(selectedProfile.id)"
+                  />
+                  默认
+                </label>
+                <AppButton
+                  size="sm"
+                  variant="secondary"
+                  :disabled="testing[selectedProfile.id]"
+                  @click="runTest(selectedProfile)"
+                >
+                  {{ testing[selectedProfile.id] ? '测试中…' : '测试连接' }}
+                </AppButton>
+                <button
+                  v-if="models.profiles.length > 1"
+                  class="text-xs text-red-400 hover:text-red-300 transition-colors"
+                  @click="deleteProfile(selectedProfile)"
+                >
+                  删除
+                </button>
+              </div>
+            </div>
+
+            <AppFormField label="名称">
+              <AppInput
+                :model-value="selectedProfile.name"
+                @update:model-value="(value) => models.updateProfile(selectedProfile!.id, { name: value })"
+              />
+            </AppFormField>
+
+            <div class="grid md:grid-cols-3 gap-3">
+              <AppFormField label="服务商">
+                <AppSelect
+                  :model-value="selectedProfile.source"
+                  @update:model-value="(value) => {
+                    const provider = providerConfigs[value]
+                    models.updateProfile(selectedProfile!.id, {
+                      source: value,
+                      model: provider?.defaultModel || selectedProfile!.model,
+                      endpoint: provider?.defaultEndpoint || '',
+                      secretId: undefined,
+                      apiKeySaved: false,
+                    })
+                  }"
+                >
+                  <option v-for="opt in models.providerOptions" :key="opt.value" :value="opt.value">
+                    {{ opt.label }}
+                  </option>
+                </AppSelect>
+              </AppFormField>
+              <AppFormField label="模型名">
+                <AppInput
+                  :model-value="selectedProfile.model"
+                  @update:model-value="(value) => models.updateProfile(selectedProfile!.id, { model: value })"
+                />
+              </AppFormField>
+              <AppFormField label="API Key">
+                <div class="flex gap-2">
+                  <AppInput
+                    v-model="apiKeyDrafts[selectedProfile.id]"
+                    type="password"
+                    placeholder="留空不修改"
+                  />
+                  <AppButton size="sm" @click="saveKey(selectedProfile.id)">保存</AppButton>
+                </div>
+              </AppFormField>
+            </div>
+
+            <AppFormField
+              v-if="selectedProfile.source === 'custom' || providerConfigs[selectedProfile.source]?.endpointKey === 'reverse_proxy'"
+              label="自定义/反代端点"
+              hint="例如：http://127.0.0.1:11434/v1"
+            >
+              <AppInput
+                :model-value="selectedProfile.endpoint || ''"
+                placeholder="http://127.0.0.1:11434/v1"
+                @update:model-value="(value) => models.updateProfile(selectedProfile!.id, { endpoint: value })"
+              />
+            </AppFormField>
+
+            <div class="grid md:grid-cols-5 gap-3 pt-1">
+              <div>
+                <label class="block text-xs font-medium text-ink-secondary mb-1.5">
+                  Temperature
+                  <span class="text-ink-muted ml-1 tabular-nums">{{ selectedProfile.temperature }}</span>
+                </label>
+                <input
+                  type="range"
+                  min="0"
+                  max="2"
+                  step="0.1"
+                  :value="selectedProfile.temperature"
+                  class="w-full accent-brand-500"
+                  @input="(e) => models.updateProfile(selectedProfile!.id, { temperature: parseFloat((e.target as HTMLInputElement).value) })"
+                />
+              </div>
+              <div>
+                <label class="block text-xs font-medium text-ink-secondary mb-1.5">
+                  Top P
+                  <span class="text-ink-muted ml-1 tabular-nums">{{ selectedProfile.topP }}</span>
+                </label>
+                <input
+                  type="range"
+                  min="0"
+                  max="1"
+                  step="0.05"
+                  :value="selectedProfile.topP"
+                  class="w-full accent-brand-500"
+                  @input="(e) => models.updateProfile(selectedProfile!.id, { topP: parseFloat((e.target as HTMLInputElement).value) })"
+                />
+              </div>
+              <AppFormField label="Max Tokens">
+                <AppInput
+                  type="number"
+                  min="64"
+                  :model-value="selectedProfile.maxTokens"
+                  @update:model-value="(value) => models.updateProfile(selectedProfile!.id, { maxTokens: parseInt(String(value)) || 4096 })"
+                />
+              </AppFormField>
+              <AppFormField label="Presence">
+                <AppInput
+                  type="number"
+                  step="0.1"
+                  :model-value="selectedProfile.presencePenalty"
+                  @update:model-value="(value) => models.updateProfile(selectedProfile!.id, { presencePenalty: parseFloat(String(value)) || 0 })"
+                />
+              </AppFormField>
+              <AppFormField label="Frequency">
+                <AppInput
+                  type="number"
+                  step="0.1"
+                  :model-value="selectedProfile.frequencyPenalty"
+                  @update:model-value="(value) => models.updateProfile(selectedProfile!.id, { frequencyPenalty: parseFloat(String(value)) || 0 })"
+                />
+              </AppFormField>
+            </div>
+          </div>
+        </AppCard>
+      </div>
+
+      <div v-if="activeTab === 'mods'" class="grid lg:grid-cols-[300px_1fr] gap-4">
+        <AppCard padding="md">
+          <div class="flex flex-wrap gap-2 mb-4">
+            <AppButton size="sm" @click="addMod">+ 新建</AppButton>
+            <AppButton size="sm" variant="secondary" @click="writeSampleMods">写入示例</AppButton>
+          </div>
+          <div class="space-y-1">
+            <button
+              v-for="mod in mods.mods"
+              :key="mod.id"
+              :class="[
+                'relative w-full text-left px-3 py-2.5 rounded-lg transition-colors',
+                selectedModId === mod.id
+                  ? 'bg-brand-500/15 text-brand-300 ring-1 ring-brand-500/30'
+                  : 'text-ink-secondary hover:bg-white/5 hover:text-ink-primary',
+              ]"
+              @click="selectedModId = mod.id"
+            >
+              <span
+                v-if="selectedModId === mod.id"
+                class="absolute left-0 top-2 bottom-2 w-0.5 rounded-full bg-brand-gradient"
+              />
+              <div class="flex items-center justify-between gap-2">
+                <span class="text-sm font-medium truncate">{{ mod.name }}</span>
+                <span v-if="mod.enabled" class="text-[10px] text-emerald-300 shrink-0">全局</span>
+              </div>
+              <div class="mt-1 text-[11px] text-ink-muted truncate">
+                {{ mod.builtin ? '公用Mod' : '我的Mod' }} · {{ positionLabels[mod.position] }} · {{ mod.content.length }} 字
+              </div>
+            </button>
+            <AppEmpty v-if="!mods.mods.length" icon="box" title="暂无 MOD" description="点击上方新建或写入示例。" />
+          </div>
+        </AppCard>
+
+        <AppCard v-if="selectedMod" padding="md" class="space-y-4">
+          <div class="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <h2 class="text-sm font-semibold text-ink-primary">MOD 详情</h2>
+              <p class="text-xs text-ink-muted mt-1">左侧浏览已有 MOD,右侧编辑当前选中项。</p>
+            </div>
+            <div class="flex items-center gap-2">
+              <span v-if="selectedMod.builtin" class="text-[10px] uppercase tracking-wider text-ink-muted bg-surface-sunken px-1.5 py-0.5 rounded">内置</span>
+              <label class="flex items-center gap-1.5 text-xs text-ink-secondary cursor-pointer">
+                <input
+                  type="checkbox"
+                  :checked="selectedMod.enabled"
+                  class="accent-brand-500"
+                  @change="(e) => mods.updateMod(selectedMod!.id, { enabled: (e.target as HTMLInputElement).checked })"
+                />
+                全局启用
+              </label>
+              <button
+                v-if="!selectedMod.builtin"
+                class="text-xs text-red-400 hover:text-red-300 transition-colors"
+                @click="deleteSelectedMod(selectedMod)"
+              >
+                删除
+              </button>
+            </div>
+          </div>
+
+          <AppFormField label="名称">
+            <AppInput
+              :model-value="selectedMod.name"
+              @update:model-value="(v) => mods.updateMod(selectedMod!.id, { name: v as string })"
+            />
+          </AppFormField>
+
+          <div class="grid md:grid-cols-2 gap-3">
+            <AppFormField label="位置">
+              <AppSelect
+                :model-value="selectedMod.position"
+                @update:model-value="(v) => mods.updateMod(selectedMod!.id, { position: v as any })"
+              >
+                <option value="system_prepend">系统前缀(放在所有角色描述之前)</option>
+                <option value="system_append">系统后缀(放在角色提示末尾)</option>
+                <option value="user_suffix">用户后缀(拼到最后一条用户消息)</option>
+              </AppSelect>
+            </AppFormField>
+            <AppFormField label="简介">
+              <AppInput
+                :model-value="selectedMod.description"
+                placeholder="给自己看的备注"
+                @update:model-value="(v) => mods.updateMod(selectedMod!.id, { description: v as string })"
+              />
+            </AppFormField>
+          </div>
+
+          <AppFormField label="内容" hint="这段文本会按位置注入生成请求。">
+            <AppTextarea
+              :model-value="selectedMod.content"
+              :rows="10"
+              auto-grow
+              :placeholder="positionLabels[selectedMod.position]"
+              @update:model-value="(v) => mods.updateMod(selectedMod!.id, { content: v })"
+            />
+          </AppFormField>
+        </AppCard>
+      </div>
+
+      <div v-if="activeTab === 'world'" class="grid lg:grid-cols-[280px_1fr] gap-4">
+        <AppCard padding="md">
+          <div class="flex flex-wrap gap-2 mb-4">
+            <AppButton size="sm" @click="createWorld">+ 新建</AppButton>
+            <AppButton size="sm" @click="importWorldClick">导入</AppButton>
+            <AppButton size="sm" variant="secondary" @click="loadWorlds">刷新</AppButton>
+            <AppButton size="sm" variant="secondary" @click="writeSampleWorld">写入示例</AppButton>
+          </div>
+          <div v-if="worldLoading" class="text-xs text-ink-muted">加载中…</div>
+          <div v-else class="space-y-1">
+            <button
+              v-for="world in worlds"
+              :key="world.file_id"
+              :class="[
+                'relative w-full text-left px-3 py-2 rounded-lg text-sm truncate transition-colors',
+                selectedWorld === world.file_id
+                  ? 'bg-brand-500/15 text-brand-300 ring-1 ring-brand-500/30'
+                  : 'text-ink-secondary hover:bg-white/5 hover:text-ink-primary',
+              ]"
+              @click="selectWorld(world.file_id)"
+            >
+              <span
+                v-if="selectedWorld === world.file_id"
+                class="absolute left-0 top-2 bottom-2 w-0.5 rounded-full bg-brand-gradient"
+              />
+              {{ world.name || world.file_id }}
+            </button>
+            <AppEmpty
+              v-if="worlds.length === 0"
+              icon="book"
+              title="暂无世界书"
+              description="从原生 ST 或外部 JSON 导入。"
+            />
+          </div>
+        </AppCard>
+
+        <AppCard padding="md" class="min-h-[520px] flex flex-col">
+          <div class="flex flex-wrap items-center justify-between gap-3 mb-3">
+            <div>
+              <h2 class="text-sm font-semibold text-ink-primary">{{ selectedWorld || '选择世界书' }}</h2>
+              <p class="text-xs text-ink-muted mt-0.5">条目编辑器 / 原始 JSON 双视图,保存后写回原文件。</p>
+            </div>
+            <div class="flex gap-2">
+              <div class="inline-flex rounded-lg border border-border-subtle overflow-hidden text-xs">
+                <button
+                  :class="['px-2.5 py-1', worldMode === 'entry' ? 'bg-brand-500/20 text-brand-300' : 'text-ink-secondary hover:bg-white/5']"
+                  @click="switchWorldMode('entry')"
+                >条目</button>
+                <button
+                  :class="['px-2.5 py-1 border-l border-border-subtle', worldMode === 'json' ? 'bg-brand-500/20 text-brand-300' : 'text-ink-secondary hover:bg-white/5']"
+                  @click="switchWorldMode('json')"
+                >JSON</button>
+              </div>
+              <AppButton size="sm" variant="secondary" @click="exportWorld">导出</AppButton>
+              <AppButton size="sm" variant="danger" @click="deleteWorld">删除</AppButton>
+              <AppButton size="sm" @click="() => saveCurrentWorld()">保存</AppButton>
+            </div>
+          </div>
+          <div v-if="!selectedWorld" class="flex-1 flex items-center justify-center text-xs text-ink-muted">
+            从左侧选择一本世界书。
+          </div>
+          <template v-else>
+            <WorldInfoEditor
+              v-if="worldMode === 'entry' && worldFile"
+              :file="worldFile"
+              class="flex-1"
+              @update="(f) => { worldFile = f; worldJson = JSON.stringify(f, null, 2) }"
+            />
+            <AppTextarea
+              v-else
+              v-model="worldJson"
+              class="flex-1"
+              :rows="22"
+              placeholder="选择左侧世界书后,JSON 会显示在此处。"
+            />
+            <p v-if="worldMode === 'json' && worldJson && !worldJsonValid" class="mt-2 text-xs text-red-400">JSON 格式无效</p>
+          </template>
+        </AppCard>
+      </div>
+
+      <AppCard v-if="activeTab === 'about'" padding="lg" tone="glow">
+        <div class="flex items-start gap-4">
+          <div class="w-12 h-12 rounded-xl bg-brand-gradient shadow-glow flex items-center justify-center shrink-0">
+            <span class="text-xl font-bold text-white">A</span>
+          </div>
+          <div class="space-y-2">
+            <h2 class="text-base font-semibold text-ink-primary">AIBAR Web</h2>
+            <p class="text-sm text-ink-secondary leading-relaxed">v0.1.0 · 基于 SillyTavern 后端 API 的简化前端。</p>
+            <p class="text-ink-muted text-xs">所有角色卡、聊天记录、世界书、MOD 都写入 ST 原生目录 / settings,可与原生 UI 并存。</p>
+          </div>
+        </div>
+      </AppCard>
+    </div>
+  </div>
+</template>
