@@ -5,9 +5,9 @@ import { useCharactersStore } from '@/stores/characters'
 import { useUiStore } from '@/stores/ui'
 import { useModsStore } from '@/stores/mods'
 import { useModelProfilesStore } from '@/stores/modelProfiles'
-import { saveStory } from '@/api/stories'
+import { getStory, saveStory } from '@/api/stories'
 import { listWorldInfo } from '@/api/worldinfo'
-import type { Character, WorldInfoSummary } from '@/api/types'
+import type { Character, StoryCard, WorldInfoSummary } from '@/api/types'
 import AppButton from '@/components/ui/AppButton.vue'
 import AppInput from '@/components/ui/AppInput.vue'
 import AppSelect from '@/components/ui/AppSelect.vue'
@@ -15,6 +15,7 @@ import AppTextarea from '@/components/ui/AppTextarea.vue'
 import AppCard from '@/components/ui/AppCard.vue'
 import AppFormField from '@/components/ui/AppFormField.vue'
 import AppPageHeader from '@/components/ui/AppPageHeader.vue'
+import AppSpinner from '@/components/ui/AppSpinner.vue'
 import ModPicker from '@/components/mods/ModPicker.vue'
 
 const route = useRoute()
@@ -23,6 +24,10 @@ const chars = useCharactersStore()
 const ui = useUiStore()
 const mods = useModsStore()
 const models = useModelProfilesStore()
+
+const isEdit = computed(() => route.name === 'storyEdit')
+const editId = computed(() => isEdit.value ? decodeURIComponent((route.params.id as string) || '') : '')
+const loadingStory = ref(false)
 
 const characterAvatar = ref<string>((route.query.avatar as string) || '')
 const title = ref('')
@@ -53,6 +58,9 @@ const defaultTitle = computed(() => {
   return selectedCharacter.value ? `${selectedCharacter.value.name} 的新故事` : ''
 })
 
+const pageTitle = computed(() => isEdit.value ? '编辑故事卡' : '新建故事卡')
+const backTo = computed(() => isEdit.value ? `/story/${editId.value}` : '/browse?tab=stories')
+
 function parseTags(value: string): string[] {
   return value
     .split(/[,，、\n]/)
@@ -60,7 +68,31 @@ function parseTags(value: string): string[] {
     .filter(Boolean)
 }
 
-async function createStory() {
+function fillFromStory(story: StoryCard) {
+  title.value = story.title || ''
+  summary.value = story.summary || ''
+  scenario.value = story.scenario || ''
+  openingUserMessage.value = story.openingUserMessage || ''
+  systemAppend.value = story.systemAppend || ''
+  tags.value = (story.tags || []).join(', ')
+  world.value = story.world || ''
+  modelProfileId.value = story.modelProfileId || ''
+  modIds.value = [...(story.modIds || [])]
+  characterAvatar.value = story.characterAvatar || ''
+  if (story.openingAssistantMessage) {
+    const data = selectedCharacter.value?.data
+    const charGreeting = (data?.first_mes || '').trim()
+    if (charGreeting && story.openingAssistantMessage.trim() === charGreeting) {
+      useCharGreeting.value = true
+      customAssistantOpening.value = ''
+    } else {
+      useCharGreeting.value = false
+      customAssistantOpening.value = story.openingAssistantMessage
+    }
+  }
+}
+
+async function saveHandler() {
   if (!selectedCharacter.value) {
     ui.addToast('请先选择角色', 'warning')
     return
@@ -73,7 +105,7 @@ async function createStory() {
 
   submitting.value = true
   try {
-    const story = await saveStory({
+    const payload: Partial<StoryCard> = {
       title: storyTitle,
       summary: summary.value.trim(),
       characterAvatar: selectedCharacter.value.avatar,
@@ -85,8 +117,12 @@ async function createStory() {
       systemAppend: systemAppend.value.trim(),
       modelProfileId: modelProfileId.value,
       modIds: modIds.value,
-    })
-    ui.addToast('故事卡已保存', 'success')
+    }
+    if (isEdit.value) {
+      payload.id = editId.value
+    }
+    const story = await saveStory(payload)
+    ui.addToast(isEdit.value ? '故事卡已更新' : '故事卡已保存', 'success')
     router.push(`/story/${encodeURIComponent(story.id)}`)
   } catch (e: any) {
     ui.addToast(`保存失败：${e.message}`, 'error')
@@ -102,7 +138,18 @@ onMounted(async () => {
     models.loadSecrets(),
   ])
   worlds.value = await listWorldInfo().catch(() => [])
-  if (!characterAvatar.value && chars.characters.length) {
+  if (isEdit.value) {
+    loadingStory.value = true
+    try {
+      const existing = await getStory(editId.value)
+      fillFromStory(existing)
+    } catch (e: any) {
+      ui.addToast(`加载故事失败：${e.message}`, 'error')
+      router.push('/browse?tab=stories')
+    } finally {
+      loadingStory.value = false
+    }
+  } else if (!characterAvatar.value && chars.characters.length) {
     characterAvatar.value = chars.characters[0].avatar
   }
 })
@@ -110,25 +157,30 @@ onMounted(async () => {
 
 <template>
   <div class="min-h-screen bg-bg">
-    <AppPageHeader title="新建故事卡" back-to="/browse?tab=stories">
+    <AppPageHeader :title="pageTitle" :back-to="backTo">
       <template #actions>
-        <AppButton variant="gradient" :disabled="submitting" @click="createStory">
-          {{ submitting ? '保存中…' : '保存故事卡' }}
+        <AppButton variant="gradient" :disabled="submitting" @click="saveHandler">
+          {{ submitting ? '保存中…' : isEdit ? '更新故事卡' : '保存故事卡' }}
         </AppButton>
       </template>
     </AppPageHeader>
 
-    <main class="max-w-4xl mx-auto px-5 py-6 space-y-4">
+    <div v-if="loadingStory" class="flex justify-center py-16">
+      <AppSpinner size="lg" />
+    </div>
+
+    <main v-else class="max-w-4xl mx-auto px-5 py-6 space-y-4">
       <section class="relative overflow-hidden rounded-2xl ring-1 ring-border-subtle bg-hero-radial">
         <div class="absolute -top-12 -right-12 w-56 h-56 rounded-full bg-accent-500/20 blur-3xl pointer-events-none" />
         <div class="absolute -bottom-16 -left-8 w-56 h-56 rounded-full bg-brand-500/15 blur-3xl pointer-events-none" />
         <div class="relative p-5 md:p-7 max-w-2xl">
-          <p class="text-[11px] uppercase tracking-[0.2em] text-accent-300/80 mb-2">故事模板</p>
+          <p class="text-[11px] uppercase tracking-[0.2em] text-accent-300/80 mb-2">{{ isEdit ? '编辑故事模板' : '故事模板' }}</p>
           <h2 class="text-xl md:text-2xl font-semibold text-ink-primary">
-            把一段 <span class="text-brand-300">设定</span> 保存成可复用的故事卡
+            <template v-if="isEdit">修改 <span class="text-brand-300">{{ title || '故事卡' }}</span> 的设定</template>
+            <template v-else>把一段 <span class="text-brand-300">设定</span> 保存成可复用的故事卡</template>
           </h2>
           <p class="mt-1.5 text-xs md:text-sm text-ink-secondary">
-            标题 / 场景 / 开场消息 / 默认 MOD,都会写入故事卡。下次进入聊天前可以快速基于它开新存档。
+            {{ isEdit ? '修改标题、场景、开场消息、默认 MOD，保存后立即生效。' : '标题 / 场景 / 开场消息 / 默认 MOD,都会写入故事卡。下次进入聊天前可以快速基于它开新存档。' }}
           </p>
         </div>
       </section>
@@ -139,12 +191,13 @@ onMounted(async () => {
           基本信息
         </h3>
         <AppFormField label="选择角色" required>
-          <AppSelect v-model="characterAvatar">
+          <AppSelect v-model="characterAvatar" :disabled="isEdit">
             <option value="" disabled>请选择…</option>
             <option v-for="c in chars.characters" :key="c.avatar" :value="c.avatar">
               {{ c.name }}
             </option>
           </AppSelect>
+          <p v-if="isEdit" class="mt-1 text-[11px] text-ink-muted">编辑模式下角色不可更改。</p>
         </AppFormField>
 
         <div v-if="selectedCharacter" class="flex items-center gap-3 p-3 bg-surface-sunken rounded-lg ring-1 ring-border-subtle">
@@ -242,7 +295,7 @@ onMounted(async () => {
       </AppCard>
 
       <p class="text-xs text-ink-muted">
-        故事卡是可复用模板。点击开始故事时才会创建新的 ST 聊天记录,同一个故事可以开多条不同存档。
+        {{ isEdit ? '保存后修改立即生效，已从该模板创建的聊天记录不受影响。' : '故事卡是可复用模板。点击开始故事时才会创建新的 ST 聊天记录,同一个故事可以开多条不同存档。' }}
       </p>
     </main>
   </div>

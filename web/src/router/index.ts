@@ -43,6 +43,11 @@ const router = createRouter({
       component: () => import('@/pages/StoryNewPage.vue'),
     },
     {
+      path: '/story/:id/edit',
+      name: 'storyEdit',
+      component: () => import('@/pages/StoryNewPage.vue'),
+    },
+    {
       path: '/story/:id',
       name: 'storyDetail',
       component: () => import('@/pages/StoryDetailPage.vue'),

@@ -21,8 +21,10 @@ defineEmits<{
 const { render } = useMarkdown()
 const editing = ref(false)
 const editContent = ref(props.message.content)
+const thinkingOpen = ref(false)
 
 const isUser = computed(() => props.message.role === 'user')
+const hasReasoning = computed(() => !isUser.value && Boolean(props.message.reasoning))
 
 function startEditing() {
   editContent.value = props.message.content
@@ -49,6 +51,24 @@ function copyToClipboard(text: string) {
           : 'bg-surface-elevated text-ink-primary border border-border-subtle rounded-bl-md',
       ]"
     >
+      <div v-if="hasReasoning" class="mb-2">
+        <button
+          class="flex items-center gap-1.5 text-[10px] uppercase tracking-wider text-ink-muted hover:text-ink-secondary transition-colors font-medium"
+          @click="thinkingOpen = !thinkingOpen"
+        >
+          <svg
+            class="w-3.5 h-3.5 transition-transform"
+            :class="thinkingOpen ? 'rotate-90' : ''"
+            fill="none" stroke="currentColor" viewBox="0 0 24 24"
+          ><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" /></svg>
+          {{ thinkingOpen ? '收起思考' : '思考过程' }}
+        </button>
+        <div
+          v-if="thinkingOpen"
+          class="mt-1.5 text-xs text-ink-muted leading-relaxed whitespace-pre-wrap bg-surface-sunken rounded-lg p-3 border border-border-subtle max-h-60 overflow-y-auto"
+        >{{ message.reasoning }}</div>
+      </div>
+
       <div v-if="editing" class="flex flex-col gap-2 min-w-[260px]">
         <textarea
           v-model="editContent"

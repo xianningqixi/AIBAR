@@ -6,6 +6,8 @@ import { useCharactersStore } from '@/stores/characters'
 import { useUiStore } from '@/stores/ui'
 import { useModelProfilesStore } from '@/stores/modelProfiles'
 import { useModsStore } from '@/stores/mods'
+import { usePresetsStore } from '@/stores/presets'
+import { usePersonasStore } from '@/stores/personas'
 import ChatTopBar from '@/components/chat/ChatTopBar.vue'
 import MessageList from '@/components/chat/MessageList.vue'
 import ChatInput from '@/components/chat/ChatInput.vue'
@@ -17,6 +19,7 @@ import ModPicker from '@/components/mods/ModPicker.vue'
 import { deleteChat, exportChat, importChat, renameChat } from '@/api/chats'
 import { fetchCharacterChats, setCharacterChat } from '@/api/characters'
 import { listWorldInfo } from '@/api/worldinfo'
+import { saveStory } from '@/api/stories'
 import type { ChatEntry, Character, WorldInfoSummary } from '@/api/types'
 
 const route = useRoute()
@@ -26,6 +29,8 @@ const chars = useCharactersStore()
 const ui = useUiStore()
 const models = useModelProfilesStore()
 const modsStore = useModsStore()
+const presets = usePresetsStore()
+const personas = usePersonasStore()
 
 const character = ref<Character | null>(null)
 const chatList = ref<ChatEntry[]>([])
@@ -179,6 +184,49 @@ async function clearCurrent() {
   }
 }
 
+async function saveChatAsStory() {
+  if (!character.value) {
+    ui.addToast('没有当前角色', 'warning')
+    return
+  }
+  const msgs = chat.messages
+  if (!msgs.length) {
+    ui.addToast('当前聊天没有任何消息，无法保存为故事', 'warning')
+    return
+  }
+  const title = window.prompt('故事标题', `${character.value.name} - 故事`)
+  if (!title?.trim()) return
+  try {
+    const aibar = chat.metadata?.aibar && typeof chat.metadata.aibar === 'object'
+      ? (chat.metadata.aibar as Record<string, unknown>)
+      : {}
+    const summary = typeof aibar.storySummary === 'string' ? aibar.storySummary : ''
+    const scenario = typeof aibar.storyScenario === 'string' ? aibar.storyScenario : ''
+    const systemAppend = typeof aibar.storySystemAppend === 'string' ? aibar.storySystemAppend : ''
+    const world = typeof aibar.world === 'string' ? aibar.world : ''
+
+    const userMsg = msgs.find((m) => m.role === 'user')
+    const firstAssistantMsg = msgs.find((m) => m.role === 'assistant')
+
+    const story = await saveStory({
+      title: title.trim(),
+      summary: summary || (msgs.length > 0 ? `从聊天「${chat.currentChatFile}」反向保存` : ''),
+      characterAvatar: character.value.avatar,
+      world,
+      scenario,
+      openingUserMessage: userMsg?.content || '',
+      openingAssistantMessage: firstAssistantMsg?.content || '',
+      systemAppend,
+      modelProfileId: chat.selectedProfileId,
+      modIds: chat.selectedModIds,
+    })
+    ui.addToast('已保存为故事模板', 'success')
+    router.push(`/story/${encodeURIComponent(story.id)}`)
+  } catch (e: any) {
+    ui.addToast(`保存失败：${e.message}`, 'error')
+  }
+}
+
 function handleSend(text: string) { chat.sendMessage(text) }
 function handleStop() { chat.stopGeneration() }
 function handleRegenerate() { chat.regenerateLast() }
@@ -190,6 +238,11 @@ function handleSwipe(index: number, direction: -1 | 1) { chat.applySwipe(index, 
 async function handleProfileSelect(profileId: string) {
   await chat.setSelectedProfileId(profileId)
   ui.addToast('本聊天的模型配置已更新', 'success')
+}
+
+async function handlePresetSelect(presetId: string) {
+  await chat.setSelectedPresetId(presetId)
+  ui.addToast(presetId ? '已应用预设参数' : '已取消预设', 'success')
 }
 
 async function handleWorldSelect(value: string) {
@@ -207,8 +260,12 @@ function handleModIdsUpdate(ids: string[]) {
 }
 
 onMounted(async () => {
-  await models.loadSecrets()
-  await modsStore.load()
+  await Promise.all([
+    models.loadSecrets(),
+    modsStore.load(),
+    presets.load(),
+    personas.load(),
+  ])
   try {
     worlds.value = await listWorldInfo()
   } catch {
@@ -242,12 +299,21 @@ watch(() => route.fullPath, initChat)
       @swipe="handleSwipe"
     />
 
-    <ChatInput
-      :disabled="chat.loading"
-      :is-streaming="chat.isStreaming"
-      @send="handleSend"
-      @stop="handleStop"
-    />
+    <div class="border-t border-border-subtle bg-bg/85 backdrop-blur">
+      <div class="max-w-3xl mx-auto px-5 py-1.5 flex items-center gap-3 text-[10px] text-ink-muted/60 flex-wrap">
+        <span>Enter 发送</span><span class="text-ink-muted/30">|</span>
+        <span>Shift+Enter 换行</span><span class="text-ink-muted/30">|</span>
+        <span>Esc 停止</span>
+        <span class="flex-1" />
+        <span class="hidden sm:inline">⌨ 快捷键</span>
+      </div>
+      <ChatInput
+        :disabled="chat.loading"
+        :is-streaming="chat.isStreaming"
+        @send="handleSend"
+        @stop="handleStop"
+      />
+    </div>
 
     <input
       ref="importInput"
@@ -273,6 +339,7 @@ watch(() => route.fullPath, initChat)
             {{ importing ? '导入中…' : '导入聊天' }}
           </AppButton>
           <AppButton size="sm" variant="secondary" @click="exportCurrent">导出当前</AppButton>
+          <AppButton size="sm" variant="secondary" @click="saveChatAsStory">存为故事</AppButton>
           <AppButton size="sm" variant="danger" @click="clearCurrent">清空消息</AppButton>
         </div>
 
@@ -331,6 +398,22 @@ watch(() => route.fullPath, initChat)
               {{ profile.name }} · {{ profile.model }}
             </option>
           </AppSelect>
+        </div>
+
+        <div>
+          <label class="block text-[11px] font-semibold uppercase tracking-wider text-ink-muted mb-2">
+            生成预设
+          </label>
+          <AppSelect
+            :model-value="chat.selectedPresetId"
+            @update:model-value="handlePresetSelect"
+          >
+            <option value="">不使用预设</option>
+            <option v-for="p in presets.presets" :key="p.id" :value="p.id">
+              {{ p.name }} · T{{ p.temperature }}
+            </option>
+          </AppSelect>
+          <p class="mt-1.5 text-[11px] text-ink-muted">预设会覆盖模型的温度和长度参数。</p>
         </div>
 
         <AppCard padding="sm">

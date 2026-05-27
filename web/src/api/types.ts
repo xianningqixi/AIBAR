@@ -46,6 +46,7 @@ export interface ChatMessage {
   date?: string
   swipes?: string[]
   swipe_id?: number
+  reasoning?: string
   mes?: string
   name?: string
   is_user?: boolean

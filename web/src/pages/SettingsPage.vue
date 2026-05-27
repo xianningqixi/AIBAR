@@ -4,6 +4,9 @@ import { useRoute, useRouter } from 'vue-router'
 import { useModelProfilesStore } from '@/stores/modelProfiles'
 import { useUiStore } from '@/stores/ui'
 import { useModsStore, type ModItem } from '@/stores/mods'
+import { usePresetsStore } from '@/stores/presets'
+import { usePersonasStore } from '@/stores/personas'
+import type { Preset, Persona } from '@/api/types'
 import AppButton from '@/components/ui/AppButton.vue'
 import AppInput from '@/components/ui/AppInput.vue'
 import AppSelect from '@/components/ui/AppSelect.vue'
@@ -28,12 +31,14 @@ import WorldInfoEditor from '@/components/world/WorldInfoEditor.vue'
 const models = useModelProfilesStore()
 const ui = useUiStore()
 const mods = useModsStore()
+const presets = usePresetsStore()
+const personas = usePersonasStore()
 const route = useRoute()
 const router = useRouter()
 
 function initialTab(): string {
   const raw = String(route.query.tab || '')
-  if (['model', 'mods', 'world', 'about'].includes(raw)) return raw
+  if (['model', 'mods', 'world', 'presets', 'personas', 'about'].includes(raw)) return raw
   return route.path === '/mods' ? 'mods' : 'model'
 }
 
@@ -48,6 +53,8 @@ const activeTab = ref(initialTab())
 const apiKeyDrafts = ref<Record<string, string>>({})
 const selectedProfileId = ref('')
 const selectedModId = ref('')
+const selectedPresetId = ref('')
+const selectedPersonaId = ref('')
 
 interface TestResult {
   ok: boolean
@@ -68,6 +75,8 @@ const tabs = [
   { key: 'model', label: '模型配置' },
   { key: 'mods', label: 'MOD' },
   { key: 'world', label: '世界书' },
+  { key: 'presets', label: '预设' },
+  { key: 'personas', label: 'Persona' },
   { key: 'about', label: '关于' },
 ]
 
@@ -376,11 +385,45 @@ function switchWorldMode(mode: 'entry' | 'json') {
   worldMode.value = mode
 }
 
+const selectedPreset = computed<Preset | null>(() => {
+  return presets.presets.find((p) => p.id === selectedPresetId.value) || presets.presets[0] || null
+})
+
+function addPreset() {
+  const p = presets.createPreset()
+  selectedPresetId.value = p.id
+}
+
+function deleteSelectedPreset(preset: Preset) {
+  presets.deletePreset(preset.id)
+  selectedPresetId.value = presets.presets[0]?.id || ''
+}
+
+const selectedPersona = computed<Persona | null>(() => {
+  return personas.personas.find((p) => p.id === selectedPersonaId.value) || personas.personas[0] || null
+})
+
+function addPersona() {
+  const p = personas.createPersona()
+  selectedPersonaId.value = p.id
+}
+
+function deleteSelectedPersona(persona: Persona) {
+  personas.deletePersona(persona.id)
+  selectedPersonaId.value = personas.personas[0]?.id || ''
+}
+
 onMounted(async () => {
-  await models.loadSecrets()
-  await mods.load()
+  await Promise.all([
+    models.loadSecrets(),
+    mods.load(),
+    presets.load(),
+    personas.load(),
+  ])
   selectedProfileId.value = models.activeProfileId || models.profiles[0]?.id || ''
   selectedModId.value = mods.mods[0]?.id || ''
+  selectedPresetId.value = presets.activePresetId || presets.presets[0]?.id || ''
+  selectedPersonaId.value = personas.activePersonaId || personas.personas[0]?.id || ''
   await loadWorlds()
 })
 
@@ -758,6 +801,216 @@ watch(
               auto-grow
               :placeholder="positionLabels[selectedMod.position]"
               @update:model-value="(v) => mods.updateMod(selectedMod!.id, { content: v })"
+            />
+          </AppFormField>
+        </AppCard>
+      </div>
+
+      <div v-if="activeTab === 'presets'" class="grid lg:grid-cols-[300px_1fr] gap-4">
+        <AppCard padding="md">
+          <div class="flex flex-wrap gap-2 mb-4">
+            <AppButton size="sm" @click="addPreset">+ 新建</AppButton>
+          </div>
+          <div class="space-y-1">
+            <button
+              v-for="p in presets.presets"
+              :key="p.id"
+              :class="[
+                'relative w-full text-left px-3 py-2.5 rounded-lg transition-colors',
+                selectedPresetId === p.id
+                  ? 'bg-brand-500/15 text-brand-300 ring-1 ring-brand-500/30'
+                  : 'text-ink-secondary hover:bg-white/5 hover:text-ink-primary',
+              ]"
+              @click="selectedPresetId = p.id"
+            >
+              <span
+                v-if="selectedPresetId === p.id"
+                class="absolute left-0 top-2 bottom-2 w-0.5 rounded-full bg-brand-gradient"
+              />
+              <div class="flex items-center justify-between gap-2">
+                <span class="text-sm font-medium truncate">{{ p.name }}</span>
+                <span v-if="presets.activePresetId === p.id" class="text-[10px] text-emerald-300 shrink-0">当前</span>
+              </div>
+              <div class="mt-1 text-[11px] text-ink-muted truncate">
+                T {{ p.temperature }} · P {{ p.topP }} · {{ p.maxTokens }} tokens
+              </div>
+            </button>
+          </div>
+        </AppCard>
+
+        <AppCard v-if="selectedPreset" padding="md" class="space-y-4">
+          <div class="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <h2 class="text-sm font-semibold text-ink-primary">预设详情</h2>
+              <p class="text-xs text-ink-muted mt-1">预设可快速切换模型的温度、生成长度等参数。</p>
+            </div>
+            <div class="flex items-center gap-2">
+              <label class="flex items-center gap-1.5 text-xs text-ink-secondary cursor-pointer">
+                <input
+                  type="radio"
+                  :checked="presets.activePresetId === selectedPreset.id"
+                  class="accent-brand-500"
+                  @change="presets.setActive(selectedPreset!.id)"
+                />
+                设为当前
+              </label>
+              <button
+                v-if="presets.presets.length > 1"
+                class="text-xs text-red-400 hover:text-red-300 transition-colors"
+                @click="deleteSelectedPreset(selectedPreset)"
+              >
+                删除
+              </button>
+            </div>
+          </div>
+
+          <AppFormField label="名称">
+            <AppInput
+              :model-value="selectedPreset.name"
+              @update:model-value="(v) => presets.updatePreset(selectedPreset!.id, { name: v as string })"
+            />
+          </AppFormField>
+
+          <div class="grid md:grid-cols-2 gap-3">
+            <div>
+              <label class="block text-xs font-medium text-ink-secondary mb-1.5">
+                Temperature
+                <span class="text-ink-muted ml-1 tabular-nums">{{ selectedPreset.temperature }}</span>
+              </label>
+              <input
+                type="range"
+                min="0"
+                max="2"
+                step="0.1"
+                :value="selectedPreset.temperature"
+                class="w-full accent-brand-500"
+                @input="(e) => presets.updatePreset(selectedPreset!.id, { temperature: parseFloat((e.target as HTMLInputElement).value) })"
+              />
+            </div>
+            <div>
+              <label class="block text-xs font-medium text-ink-secondary mb-1.5">
+                Top P
+                <span class="text-ink-muted ml-1 tabular-nums">{{ selectedPreset.topP }}</span>
+              </label>
+              <input
+                type="range"
+                min="0"
+                max="1"
+                step="0.05"
+                :value="selectedPreset.topP"
+                class="w-full accent-brand-500"
+                @input="(e) => presets.updatePreset(selectedPreset!.id, { topP: parseFloat((e.target as HTMLInputElement).value) })"
+              />
+            </div>
+            <AppFormField label="Max Tokens">
+              <AppInput
+                type="number"
+                min="64"
+                :model-value="selectedPreset.maxTokens"
+                @update:model-value="(v) => presets.updatePreset(selectedPreset!.id, { maxTokens: parseInt(String(v)) || 4096 })"
+              />
+            </AppFormField>
+            <AppFormField label="Presence Penalty">
+              <AppInput
+                type="number"
+                step="0.1"
+                :model-value="selectedPreset.presencePenalty"
+                @update:model-value="(v) => presets.updatePreset(selectedPreset!.id, { presencePenalty: parseFloat(String(v)) || 0 })"
+              />
+            </AppFormField>
+            <AppFormField label="Frequency Penalty" class="md:col-span-2">
+              <AppInput
+                type="number"
+                step="0.1"
+                :model-value="selectedPreset.frequencyPenalty"
+                @update:model-value="(v) => presets.updatePreset(selectedPreset!.id, { frequencyPenalty: parseFloat(String(v)) || 0 })"
+              />
+            </AppFormField>
+            <AppFormField label="额外系统提示" class="md:col-span-2" hint="追加到角色系统提示末尾。">
+              <AppTextarea
+                :model-value="selectedPreset.systemPrompt"
+                :rows="3"
+                auto-grow
+                @update:model-value="(v) => presets.updatePreset(selectedPreset!.id, { systemPrompt: v as string })"
+              />
+            </AppFormField>
+          </div>
+        </AppCard>
+      </div>
+
+      <div v-if="activeTab === 'personas'" class="grid lg:grid-cols-[300px_1fr] gap-4">
+        <AppCard padding="md">
+          <div class="flex flex-wrap gap-2 mb-4">
+            <AppButton size="sm" @click="addPersona">+ 新建</AppButton>
+          </div>
+          <div class="space-y-1">
+            <button
+              v-for="p in personas.personas"
+              :key="p.id"
+              :class="[
+                'relative w-full text-left px-3 py-2.5 rounded-lg transition-colors',
+                selectedPersonaId === p.id
+                  ? 'bg-brand-500/15 text-brand-300 ring-1 ring-brand-500/30'
+                  : 'text-ink-secondary hover:bg-white/5 hover:text-ink-primary',
+              ]"
+              @click="selectedPersonaId = p.id"
+            >
+              <span
+                v-if="selectedPersonaId === p.id"
+                class="absolute left-0 top-2 bottom-2 w-0.5 rounded-full bg-brand-gradient"
+              />
+              <div class="flex items-center justify-between gap-2">
+                <span class="text-sm font-medium truncate">{{ p.name }}</span>
+                <span v-if="personas.activePersonaId === p.id" class="text-[10px] text-emerald-300 shrink-0">当前</span>
+              </div>
+              <div class="mt-1 text-[11px] text-ink-muted line-clamp-1">
+                {{ p.description || '无描述' }}
+              </div>
+            </button>
+            <AppEmpty v-if="!personas.personas.length" icon="chat" title="暂无 Persona" description="点击上方新建。" />
+          </div>
+        </AppCard>
+
+        <AppCard v-if="selectedPersona" padding="md" class="space-y-4">
+          <div class="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <h2 class="text-sm font-semibold text-ink-primary">Persona 详情</h2>
+              <p class="text-xs text-ink-muted mt-1">Persona 代表你的角色，生成时作为 user_name 使用。</p>
+            </div>
+            <div class="flex items-center gap-2">
+              <label class="flex items-center gap-1.5 text-xs text-ink-secondary cursor-pointer">
+                <input
+                  type="radio"
+                  :checked="personas.activePersonaId === selectedPersona.id"
+                  class="accent-brand-500"
+                  @change="personas.setActive(selectedPersona!.id)"
+                />
+                设为当前
+              </label>
+              <button
+                v-if="personas.personas.length > 1"
+                class="text-xs text-red-400 hover:text-red-300 transition-colors"
+                @click="deleteSelectedPersona(selectedPersona)"
+              >
+                删除
+              </button>
+            </div>
+          </div>
+
+          <AppFormField label="名称">
+            <AppInput
+              :model-value="selectedPersona.name"
+              @update:model-value="(v) => personas.updatePersona(selectedPersona!.id, { name: v as string })"
+            />
+          </AppFormField>
+
+          <AppFormField label="描述" hint="给模型看的你的身份描述。">
+            <AppTextarea
+              :model-value="selectedPersona.description"
+              :rows="6"
+              auto-grow
+              placeholder="例如：我是一名来自北方王国的旅行者，性格好奇且喜欢冒险。"
+              @update:model-value="(v) => personas.updatePersona(selectedPersona!.id, { description: v as string })"
             />
           </AppFormField>
         </AppCard>

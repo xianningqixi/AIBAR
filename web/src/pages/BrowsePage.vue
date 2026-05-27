@@ -24,6 +24,8 @@ function normalizeTab(value: unknown): BrowseTab {
 }
 
 const activeTab = ref<BrowseTab>(normalizeTab(route.query.tab))
+const charFilter = ref<'all' | 'recent' | 'favorites' | 'withChat'>('all')
+const noImage = ref(false)
 
 watch(activeTab, (tab) => {
   router.replace({ query: { ...route.query, tab } })
@@ -207,6 +209,32 @@ const sortedCharacters = computed(() =>
   }),
 )
 
+const filteredCharacters = computed(() => {
+  let list = sortedCharacters.value
+  const now = Date.now()
+  const dayMs = 24 * 3600 * 1000
+  if (charFilter.value === 'favorites') {
+    list = list.filter((c) => c.fav === 'true')
+  } else if (charFilter.value === 'withChat') {
+    list = list.filter((c) => Number(c.chat_size || 0) > 0)
+  } else if (charFilter.value === 'recent') {
+    list = list.filter((c) => {
+      const t = typeof c.date_last_chat === 'number' ? c.date_last_chat * 1000
+        : typeof c.date_last_chat === 'string' ? new Date(c.date_last_chat).getTime()
+        : 0
+      return t && (now - t) < 7 * dayMs
+    })
+  }
+  return list
+})
+
+const charFilters = [
+  { key: 'all' as const, label: '全部' },
+  { key: 'recent' as const, label: '最近' },
+  { key: 'favorites' as const, label: '收藏' },
+  { key: 'withChat' as const, label: '有聊天' },
+]
+
 function getCharacterTags(c: Character): string[] {
   return c.tags?.length ? c.tags : c.data?.tags || []
 }
@@ -382,7 +410,28 @@ onMounted(async () => {
           </div>
         </div>
 
-        <div v-if="popularTags.length" class="flex flex-wrap gap-2 mb-5">
+        <div class="flex flex-wrap items-center gap-3 mb-4">
+          <div class="flex items-center gap-1">
+            <button
+              v-for="f in charFilters"
+              :key="f.key"
+              :class="[
+                'px-3 py-1.5 rounded-lg text-sm font-medium transition-all',
+                charFilter === f.key
+                  ? 'bg-brand-500/20 text-brand-200 ring-1 ring-brand-500/40'
+                  : 'text-ink-secondary hover:text-ink-primary hover:bg-white/5',
+              ]"
+              @click="charFilter = f.key"
+            >{{ f.label }}</button>
+          </div>
+          <div class="flex-1" />
+          <label class="flex items-center gap-1.5 text-xs text-ink-muted cursor-pointer select-none">
+            <input v-model="noImage" type="checkbox" class="accent-brand-500" />
+            无图模式
+          </label>
+        </div>
+
+        <div v-if="popularTags.length && charFilter === 'all'" class="flex flex-wrap gap-2 mb-5">
           <button
             v-for="t in popularTags"
             :key="t.tag"
@@ -393,7 +442,7 @@ onMounted(async () => {
           </button>
         </div>
 
-        <div v-if="!sortedCharacters.length" class="rounded-2xl ring-1 ring-border-subtle bg-surface p-12 text-center">
+        <div v-if="!store.characters.length" class="rounded-2xl ring-1 ring-border-subtle bg-surface p-12 text-center">
           <p class="text-5xl mb-3">🎭</p>
           <p class="text-lg font-semibold text-ink-primary">还没有角色卡</p>
           <p class="text-sm text-ink-muted mt-2">导入一张 PNG 角色卡,或者从零开始新建。</p>
@@ -402,16 +451,22 @@ onMounted(async () => {
             <AppButton size="md" @click="router.push('/character/new')">+ 新建角色</AppButton>
           </div>
         </div>
+        <div v-else-if="!filteredCharacters.length" class="rounded-2xl ring-1 ring-border-subtle bg-surface p-12 text-center">
+          <p class="text-5xl mb-3">🔍</p>
+          <p class="text-lg font-semibold text-ink-primary">当前筛选下没有角色</p>
+          <p class="text-sm text-ink-muted mt-2">试试切换筛选条件。</p>
+          <AppButton size="md" variant="secondary" class="mt-4" @click="charFilter = 'all'">显示全部</AppButton>
+        </div>
         <div v-else class="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
           <button
-            v-for="c in sortedCharacters"
+            v-for="c in filteredCharacters"
             :key="c.avatar"
             class="text-left rounded-2xl ring-1 ring-border-subtle hover:ring-brand-500/40 hover:shadow-glow bg-surface transition-all p-5"
             @click="openCharacter(c)"
           >
             <div class="flex gap-4">
               <img
-                v-if="c.avatar && c.avatar !== 'none'"
+                v-if="!noImage && c.avatar && c.avatar !== 'none'"
                 :src="`/thumbnail?type=avatar&file=${encodeURIComponent(c.avatar)}`"
                 class="w-14 h-20 rounded-lg object-cover ring-1 ring-border-subtle shrink-0"
               />
@@ -451,8 +506,11 @@ onMounted(async () => {
         <div v-if="!stories.length" class="rounded-2xl ring-1 ring-border-subtle bg-surface p-12 text-center">
           <p class="text-5xl mb-3">📖</p>
           <p class="text-lg font-semibold text-ink-primary">还没有故事卡</p>
-          <p class="text-sm text-ink-muted mt-2">故事卡是开局模板。新建一个后可以反复创建聊天存档。</p>
-          <AppButton size="md" class="mt-5" @click="router.push('/story/new')">+ 创建第一个故事</AppButton>
+          <p class="text-sm text-ink-muted mt-2 max-w-md mx-auto">故事卡是可复用开局模板 — 绑定角色、场景、开场消息和默认 MOD。创建后每次都能基于同一设定快速开新存档。</p>
+          <div class="mt-5 flex justify-center gap-3">
+            <AppButton size="md" @click="router.push('/story/new')">+ 创建第一个故事</AppButton>
+            <AppButton size="md" variant="secondary" @click="goTab('characters')">先挑角色</AppButton>
+          </div>
         </div>
         <div v-else class="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
           <button

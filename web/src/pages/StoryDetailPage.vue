@@ -1,17 +1,25 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useCharactersStore } from '@/stores/characters'
 import { useUiStore } from '@/stores/ui'
 import { useModsStore } from '@/stores/mods'
 import { deleteStory, getStory, saveStory } from '@/api/stories'
 import { createChatFromStory } from '@/lib/storyStart'
-import type { Character, StoryCard } from '@/api/types'
+import { generateReply } from '@/api/generate'
+import { buildGeneratePayload } from '@/lib/buildPayload'
+import { getMatchedWorldInfo } from '@/lib/worldInfoMatch'
+import { useModelProfilesStore } from '@/stores/modelProfiles'
+import { listWorldInfo } from '@/api/worldinfo'
+import type { Character, StoryCard, WorldInfoSummary } from '@/api/types'
 import AppButton from '@/components/ui/AppButton.vue'
 import AppCard from '@/components/ui/AppCard.vue'
 import AppPageHeader from '@/components/ui/AppPageHeader.vue'
 import AppSpinner from '@/components/ui/AppSpinner.vue'
 import AppEmpty from '@/components/ui/AppEmpty.vue'
+import AppSelect from '@/components/ui/AppSelect.vue'
+import AppTextarea from '@/components/ui/AppTextarea.vue'
+import AppFormField from '@/components/ui/AppFormField.vue'
 import ModPicker from '@/components/mods/ModPicker.vue'
 
 const route = useRoute()
@@ -19,6 +27,7 @@ const router = useRouter()
 const chars = useCharactersStore()
 const ui = useUiStore()
 const mods = useModsStore()
+const models = useModelProfilesStore()
 
 const storyId = computed(() => decodeURIComponent((route.params.id as string) || ''))
 const story = ref<StoryCard | null>(null)
@@ -26,6 +35,16 @@ const character = ref<Character | null>(null)
 const loading = ref(false)
 const starting = ref(false)
 const startModIds = ref<string[]>([])
+const worlds = ref<WorldInfoSummary[]>([])
+
+const testModel = reactive({
+  profileId: '',
+  world: '',
+  prompt: '',
+  loading: false,
+  result: '',
+  error: '',
+})
 
 const tags = computed(() => story.value?.tags || [])
 const modCount = computed(() => startModIds.value.length)
@@ -42,10 +61,14 @@ async function loadData() {
     await Promise.all([
       chars.characters.length ? Promise.resolve() : chars.load(),
       mods.load(),
+      models.loadSecrets(),
     ])
     story.value = await getStory(storyId.value)
     character.value = chars.findCharacter(story.value.characterAvatar) || null
     startModIds.value = [...(story.value.modIds || [])]
+    worlds.value = await listWorldInfo().catch(() => [])
+    testModel.profileId = story.value.modelProfileId || models.activeProfileId
+    testModel.world = story.value.world || ''
   } catch (e: any) {
     ui.addToast(`加载失败：${e.message}`, 'error')
     router.push({ path: '/browse', query: { tab: 'stories' } })
@@ -105,6 +128,112 @@ async function quickTagEdit() {
   }
 }
 
+async function runStoryTest() {
+  if (!story.value || !character.value) {
+    ui.addToast('故事或角色数据不完整', 'warning')
+    return
+  }
+  if (!testModel.prompt.trim()) {
+    ui.addToast('请输入测试输入', 'warning')
+    return
+  }
+  const profile = models.getProfile(testModel.profileId) || models.activeProfile
+  if (!profile) {
+    ui.addToast('未配置可用模型', 'warning')
+    return
+  }
+  testModel.loading = true
+  testModel.result = ''
+  testModel.error = ''
+  try {
+    const worldName = testModel.world || story.value?.world || ''
+    const draftCharacter: Character = {
+      ...character.value,
+      scenario: story.value.scenario || character.value.scenario || '',
+      data: {
+        ...character.value.data,
+        name: character.value.name,
+        scenario: story.value.scenario || character.value.data?.scenario || '',
+        system_prompt: [character.value.data?.system_prompt || '', story.value.systemAppend || ''].filter(Boolean).join('\n\n'),
+      },
+    }
+    const worldInfoText = await getMatchedWorldInfo(worldName, draftCharacter, [
+      { role: 'user', content: testModel.prompt },
+    ])
+    const payload = buildGeneratePayload(
+      profile,
+      draftCharacter,
+      [{ role: 'user', content: testModel.prompt }],
+      worldInfoText,
+      [],
+    )
+    const reply = await generateReply(payload)
+    testModel.result = reply || '(模型返回了空响应)'
+  } catch (e: any) {
+    testModel.error = e?.message || '生成失败'
+  } finally {
+    testModel.loading = false
+  }
+}
+
+function exportStoryJSON() {
+  if (!story.value) return
+  const blob = new Blob([JSON.stringify(story.value, null, 2)], { type: 'application/json' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = `${story.value.title || 'story'}.json`
+  document.body.appendChild(a)
+  a.click()
+  document.body.removeChild(a)
+  URL.revokeObjectURL(url)
+  ui.addToast('故事卡已导出', 'success')
+}
+
+async function importStoryJSON() {
+  const input = document.createElement('input')
+  input.type = 'file'
+  input.accept = '.json'
+  input.onchange = async () => {
+    const file = input.files?.[0]
+    if (!file) return
+    try {
+      const text = await file.text()
+      const data = JSON.parse(text) as Partial<StoryCard>
+      if (!data.title) {
+        ui.addToast('JSON 缺少 title 字段', 'warning')
+        return
+      }
+      const saved = await saveStory({
+        ...data,
+        id: undefined,
+      })
+      ui.addToast('故事卡已导入', 'success')
+      router.push(`/story/${encodeURIComponent(saved.id)}`)
+    } catch (e: any) {
+      ui.addToast(`导入失败：${e.message}`, 'error')
+    }
+  }
+  input.click()
+}
+
+async function duplicateStory() {
+  if (!story.value) return
+  const newTitle = window.prompt('副本标题', `${story.value.title} 副本`)
+  if (!newTitle?.trim()) return
+  try {
+    const saved = await saveStory({
+      ...story.value,
+      id: undefined,
+      title: newTitle.trim(),
+    })
+    ui.addToast('故事卡已复制', 'success')
+    router.push(`/story/${encodeURIComponent(saved.id)}`)
+  } catch (e: any) {
+    ui.addToast(`复制失败：${e.message}`, 'error')
+  }
+}
+
 async function removeStory() {
   if (!story.value) return
   if (!window.confirm(`删除故事卡「${story.value.title}」？已创建的聊天存档不会删除。`)) return
@@ -124,6 +253,7 @@ onMounted(loadData)
   <div class="min-h-screen bg-bg">
     <AppPageHeader title="故事卡详情" back-to="/browse?tab=stories">
       <template #actions>
+        <AppButton v-if="story" size="sm" variant="secondary" @click="router.push(`/story/${encodeURIComponent(story.id)}/edit`)">编辑</AppButton>
         <AppButton v-if="story" size="sm" variant="gradient" :disabled="starting" @click="startStory">
           {{ starting ? '创建中…' : '▶ 开始故事' }}
         </AppButton>
@@ -283,12 +413,65 @@ onMounted(loadData)
         />
       </AppCard>
 
+      <AppCard padding="md" class="space-y-4" tone="glow">
+        <div class="flex items-center justify-between">
+          <div>
+            <h3 class="flex items-center gap-2 text-sm font-semibold text-ink-primary">
+              <span class="w-1 h-4 rounded-full bg-brand-gradient" />
+              测试区
+            </h3>
+            <p class="text-xs text-ink-muted mt-1">使用当前故事设定和选定模型做一次单轮测试，不写入任何聊天记录。</p>
+          </div>
+          <AppButton size="sm" variant="gradient" :disabled="testModel.loading" @click="runStoryTest">
+            {{ testModel.loading ? '生成中…' : '▶ 运行测试' }}
+          </AppButton>
+        </div>
+        <div class="grid md:grid-cols-2 gap-3">
+          <AppFormField label="使用 Profile">
+            <AppSelect v-model="testModel.profileId">
+              <option v-for="p in models.profiles" :key="p.id" :value="p.id">
+                {{ p.name }} · {{ p.model }}
+              </option>
+            </AppSelect>
+          </AppFormField>
+          <AppFormField label="世界书">
+            <AppSelect v-model="testModel.world">
+              <option value="">不绑定</option>
+              <option v-for="w in worlds" :key="w.file_id" :value="w.file_id">
+                {{ w.name || w.file_id }}
+              </option>
+            </AppSelect>
+          </AppFormField>
+        </div>
+        <AppFormField label="测试输入">
+          <AppTextarea v-model="testModel.prompt" :rows="3" auto-grow placeholder="例如：你收到了一封匿名信…" />
+        </AppFormField>
+        <div v-if="testModel.result || testModel.error" class="space-y-2">
+          <h4 class="text-xs font-semibold text-ink-muted uppercase tracking-wider">输出</h4>
+          <div
+            v-if="testModel.error"
+            class="text-xs whitespace-pre-wrap bg-red-500/10 text-red-300 ring-1 ring-red-500/20 p-3 rounded-md"
+          >
+            {{ testModel.error }}
+          </div>
+          <div
+            v-else
+            class="text-sm whitespace-pre-wrap text-ink-primary bg-surface-sunken ring-1 ring-border-subtle p-3 rounded-md leading-relaxed max-h-72 overflow-y-auto"
+          >
+            {{ testModel.result }}
+          </div>
+        </div>
+      </AppCard>
+
       <AppCard padding="md">
         <h3 class="flex items-center gap-2 text-sm font-semibold text-ink-primary mb-3">
           <span class="w-1 h-4 rounded-full bg-brand-gradient" />
           管理
         </h3>
         <div class="flex flex-wrap gap-2">
+          <AppButton variant="secondary" @click="exportStoryJSON">导出 JSON</AppButton>
+          <AppButton variant="secondary" @click="importStoryJSON">导入 JSON</AppButton>
+          <AppButton variant="secondary" @click="duplicateStory">复制副本</AppButton>
           <AppButton variant="danger" @click="removeStory">删除故事卡</AppButton>
         </div>
         <p class="mt-3 text-xs text-ink-muted">

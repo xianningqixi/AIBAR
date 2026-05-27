@@ -7,6 +7,8 @@ import { buildGeneratePayload, getCharacterChatName } from '@/lib/buildPayload'
 import { getMatchedWorldInfo } from '@/lib/worldInfoMatch'
 import { useModelProfilesStore } from './modelProfiles'
 import { useModsStore } from './mods'
+import { usePresetsStore } from './presets'
+import { usePersonasStore } from './personas'
 
 type GenerationOptions = {
   extraMessages?: ChatMessage[]
@@ -20,6 +22,7 @@ export const useChatStore = defineStore('chat', () => {
   const character = ref<Character | null>(null)
   const currentChatFile = ref('')
   const selectedProfileId = ref('')
+  const selectedPresetId = ref('')
   const selectedWorld = ref('')
   const selectedModIds = ref<string[]>([])
   const loading = ref(false)
@@ -36,6 +39,11 @@ export const useChatStore = defineStore('chat', () => {
   const selectedProfile = computed<ModelProfile>(() => {
     const profiles = useModelProfilesStore()
     return profiles.getProfile(selectedProfileId.value) || profiles.activeProfile
+  })
+
+  const selectedPreset = computed(() => {
+    const presets = usePresetsStore()
+    return presets.getPreset(selectedPresetId.value) || presets.activePreset || null
   })
 
   function reset() {
@@ -173,6 +181,16 @@ export const useChatStore = defineStore('chat', () => {
     }
   }
 
+  async function setSelectedPresetId(presetId: string) {
+    selectedPresetId.value = presetId
+    writeMetadataProfileId(selectedProfileId.value)
+    try {
+      await persist()
+    } catch (e: any) {
+      error.value = 'Save failed: ' + e.message
+    }
+  }
+
   async function setSelectedProfileId(profileId: string) {
     const profiles = useModelProfilesStore()
     if (!profiles.getProfile(profileId)) return
@@ -252,7 +270,11 @@ export const useChatStore = defineStore('chat', () => {
       console.warn('World info scan failed', e)
     }
 
-    const payload = buildGeneratePayload(config, effectiveCharacter, sourceMessages, worldInfoText, allMods)
+    const personas = usePersonasStore()
+    const personaName = personas.activePersona?.name || 'User'
+    const personaDescription = personas.activePersona?.description || ''
+
+    const payload = buildGeneratePayload(config, effectiveCharacter, sourceMessages, worldInfoText, allMods, selectedPreset.value, personaName, personaDescription)
 
     const controller = new AbortController()
     streaming.value = {
@@ -261,16 +283,21 @@ export const useChatStore = defineStore('chat', () => {
       partial: { content: '' },
     }
 
+    let reasoningContent = ''
     try {
       for await (const evt of generateReplyStream(payload, controller.signal)) {
         if (evt.content) {
           streaming.value.partial.content += evt.content
         }
+        if (evt.reasoning) {
+          reasoningContent += evt.reasoning
+          streaming.value.partial.reasoning = reasoningContent
+        }
       }
 
       const content = streaming.value.partial.content.trim()
       if (content) {
-        commitAssistantContent(content, options)
+        commitAssistantContent(content, options, reasoningContent)
       }
     } catch (e: any) {
       if (e.name === 'AbortError') {
@@ -304,7 +331,7 @@ export const useChatStore = defineStore('chat', () => {
     }
   }
 
-  function commitAssistantContent(content: string, options: GenerationOptions) {
+  function commitAssistantContent(content: string, options: GenerationOptions, reasoning = '') {
     if (
       typeof options.appendToIndex === 'number' &&
       messages.value[options.appendToIndex]?.role === 'assistant'
@@ -317,28 +344,29 @@ export const useChatStore = defineStore('chat', () => {
       return
     }
 
+    const message: ChatMessage = {
+      role: 'assistant',
+      content,
+      date: new Date().toISOString(),
+    }
+
     if (options.swipes?.length) {
       const swipes = [...options.swipes]
       if (!swipes.includes(content)) {
         swipes.push(content)
       }
-      messages.value.push({
-        role: 'assistant',
-        content,
-        date: new Date().toISOString(),
-        swipes,
-        swipe_id: swipes.length - 1,
-      })
-      return
+      message.swipes = swipes
+      message.swipe_id = swipes.length - 1
+    } else {
+      message.swipes = [content]
+      message.swipe_id = 0
     }
 
-    messages.value.push({
-      role: 'assistant',
-      content,
-      date: new Date().toISOString(),
-      swipes: [content],
-      swipe_id: 0,
-    })
+    if (reasoning) {
+      message.reasoning = reasoning
+    }
+
+    messages.value.push(message)
   }
 
   function stopGeneration() {
@@ -476,6 +504,8 @@ export const useChatStore = defineStore('chat', () => {
     currentChatFile,
     selectedProfileId,
     selectedProfile,
+    selectedPresetId,
+    selectedPreset,
     selectedWorld,
     selectedModIds,
     loading,
@@ -494,6 +524,7 @@ export const useChatStore = defineStore('chat', () => {
     continueLastReply,
     applySwipe,
     setSelectedProfileId,
+    setSelectedPresetId,
     setSelectedWorld,
     setSelectedModIds,
     reset,
