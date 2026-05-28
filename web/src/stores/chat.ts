@@ -52,6 +52,7 @@ export const useChatStore = defineStore('chat', () => {
     character.value = null
     currentChatFile.value = ''
     selectedProfileId.value = ''
+    selectedPresetId.value = ''
     selectedWorld.value = ''
     selectedModIds.value = []
     streaming.value = { active: false, controller: null, partial: { content: '' } }
@@ -78,10 +79,13 @@ export const useChatStore = defineStore('chat', () => {
     }
 
     const profiles = useModelProfilesStore()
+    const presets = usePresetsStore()
     selectedProfileId.value = getMetadataProfileId() || profiles.activeProfileId
+    selectedPresetId.value = getMetadataPresetId() || presets.activePresetId
     selectedWorld.value = getMetadataWorld() || resolveCharacterWorld(char)
     selectedModIds.value = getMetadataModIds()
     writeMetadataProfileId(selectedProfileId.value)
+    writeMetadataPresetId(selectedPresetId.value)
     writeMetadataWorld(selectedWorld.value)
     writeMetadataModIds(selectedModIds.value)
   }
@@ -129,6 +133,15 @@ export const useChatStore = defineStore('chat', () => {
 
   function writeMetadataProfileId(profileId: string) {
     mergeMetadataAibar({ profileId })
+  }
+
+  function getMetadataPresetId(): string {
+    const v = getMetadataAibar().presetId
+    return typeof v === 'string' ? v : ''
+  }
+
+  function writeMetadataPresetId(presetId: string) {
+    mergeMetadataAibar({ presetId })
   }
 
   function getMetadataWorld(): string {
@@ -183,7 +196,7 @@ export const useChatStore = defineStore('chat', () => {
 
   async function setSelectedPresetId(presetId: string) {
     selectedPresetId.value = presetId
-    writeMetadataProfileId(selectedProfileId.value)
+    writeMetadataPresetId(presetId)
     try {
       await persist()
     } catch (e: any) {

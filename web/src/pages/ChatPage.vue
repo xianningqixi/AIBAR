@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useChatStore } from '@/stores/chat'
 import { useCharactersStore } from '@/stores/characters'
@@ -259,6 +259,13 @@ function handleModIdsUpdate(ids: string[]) {
   void chat.setSelectedModIds(ids.filter((id) => !global.has(id)))
 }
 
+function handleGlobalKeydown(e: KeyboardEvent) {
+  if (e.key !== 'Escape') return
+  if (!chat.isStreaming) return
+  e.preventDefault()
+  chat.stopGeneration()
+}
+
 onMounted(async () => {
   await Promise.all([
     models.loadSecrets(),
@@ -272,6 +279,11 @@ onMounted(async () => {
     /* noop */
   }
   await initChat()
+  window.addEventListener('keydown', handleGlobalKeydown)
+})
+
+onBeforeUnmount(() => {
+  window.removeEventListener('keydown', handleGlobalKeydown)
 })
 
 watch(() => route.fullPath, initChat)
