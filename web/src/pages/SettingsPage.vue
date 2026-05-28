@@ -18,7 +18,7 @@ import AppTabs from '@/components/ui/AppTabs.vue'
 import AppEmpty from '@/components/ui/AppEmpty.vue'
 import { providerConfigs } from '@/lib/providers'
 import { testConnection } from '@/api/generate'
-import type { ModelProfile, WorldInfoFile, WorldInfoSummary } from '@/api/types'
+import type { ModelProfile, WorldInfoEntry, WorldInfoFile, WorldInfoSummary } from '@/api/types'
 import {
   deleteWorldInfo,
   getWorldInfo,
@@ -72,11 +72,11 @@ const worldMode = ref<'entry' | 'json'>('entry')
 const worldJson = ref('')
 
 const tabs = [
-  { key: 'model', label: '模型配置' },
-  { key: 'mods', label: 'MOD' },
+  { key: 'model', label: '模型连接' },
+  { key: 'presets', label: '生成参数' },
+  { key: 'personas', label: '我的身份' },
   { key: 'world', label: '世界书' },
-  { key: 'presets', label: '预设' },
-  { key: 'personas', label: 'Persona' },
+  { key: 'mods', label: '提示词 MOD' },
   { key: 'about', label: '关于' },
 ]
 
@@ -90,6 +90,119 @@ const selectedProfile = computed<ModelProfile | null>(() => {
   return models.profiles.find((profile) => profile.id === selectedProfileId.value) || models.profiles[0] || null
 })
 
+const setupSources = [
+  {
+    value: 'custom',
+    title: '中转 / OpenAI 兼容',
+    description: '支持 /v1/chat/completions 的平台都选这个，Gemini 中转也选它。',
+  },
+  {
+    value: 'openai',
+    title: 'OpenAI 官方',
+    description: '官方 OpenAI Key，不需要填写自定义端点。',
+  },
+  {
+    value: 'deepseek',
+    title: 'DeepSeek 官方',
+    description: '官方 DeepSeek Key；如果是中转，请选 OpenAI 兼容。',
+  },
+]
+
+const setupDraft = reactive({
+  source: 'custom',
+  name: 'OpenAI 兼容',
+  endpoint: '',
+  model: '',
+  apiKey: '',
+  maxTokens: 4096,
+  testing: false,
+})
+const setupResult = ref<TestResult | null>(null)
+
+const setupNeedsEndpoint = computed(() => setupDraft.source === 'custom')
+
+const currentDefaultProfile = computed(() => models.getProfile(models.activeProfileId))
+
+function hydrateSetupFromProfile(profile: ModelProfile | null) {
+  const cfg = profile ? providerConfigs[profile.source] : providerConfigs.custom
+  setupDraft.source = profile?.source || 'custom'
+  setupDraft.name = profile?.name || cfg?.label || 'OpenAI 兼容'
+  setupDraft.endpoint = profile?.endpoint || cfg?.defaultEndpoint || ''
+  setupDraft.model = profile?.model || cfg?.defaultModel || ''
+  setupDraft.maxTokens = profile?.maxTokens || 4096
+  setupDraft.apiKey = ''
+  setupResult.value = profile ? testResults[profile.id] || null : null
+}
+
+function chooseSetupSource(source: string) {
+  const cfg = providerConfigs[source] || providerConfigs.custom
+  setupDraft.source = source
+  setupDraft.name = cfg.label
+  setupDraft.model = cfg.defaultModel || setupDraft.model
+  setupDraft.endpoint = cfg.defaultEndpoint || ''
+  setupResult.value = null
+}
+
+async function saveSetupProfile() {
+  const cfg = providerConfigs[setupDraft.source] || providerConfigs.custom
+  const model = setupDraft.model.trim()
+  const endpoint = setupDraft.endpoint.trim()
+  if (!model) {
+    ui.addToast('请填写模型名', 'warning')
+    return
+  }
+  if (setupNeedsEndpoint.value && !endpoint) {
+    ui.addToast('请填写兼容接口端点，通常以 /v1 结尾', 'warning')
+    return
+  }
+
+  setupDraft.testing = true
+  setupResult.value = null
+  let profile = selectedProfile.value
+  if (!profile) {
+    profile = models.createProfile(setupDraft.source)
+    selectedProfileId.value = profile.id
+  }
+
+  models.updateProfile(profile.id, {
+    name: setupDraft.name.trim() || cfg.label,
+    source: setupDraft.source,
+    model,
+    endpoint: setupNeedsEndpoint.value ? endpoint : '',
+    maxTokens: setupDraft.maxTokens || 4096,
+    temperature: profile.temperature ?? 0.7,
+    topP: profile.topP ?? 1,
+    presencePenalty: profile.presencePenalty ?? 0,
+    frequencyPenalty: profile.frequencyPenalty ?? 0,
+  })
+
+  try {
+    if (setupDraft.apiKey.trim()) {
+      await models.saveApiKey(profile.id, setupDraft.apiKey)
+      setupDraft.apiKey = ''
+    }
+    const updated = models.getProfile(profile.id)
+    if (!updated) throw new Error('Profile 保存后未找到')
+    selectedProfileId.value = updated.id
+    const result = await testConnection(updated)
+    testResults[updated.id] = result
+    setupResult.value = result
+    if (result.ok) {
+      models.setActive(updated.id)
+      ui.addToast(`连接正常，已设为默认 Profile${result.models ? ` · ${result.models} 个模型` : ''}`, 'success')
+    } else {
+      ui.addToast(`已保存，但连接测试失败：${result.message}`, 'error')
+    }
+  } catch (e: any) {
+    const result = { ok: false, message: e?.message || '连接失败' }
+    testResults[profile.id] = result
+    setupResult.value = result
+    ui.addToast(`连接测试失败：${result.message}`, 'error')
+  } finally {
+    setupDraft.testing = false
+  }
+}
+
 const selectedMod = computed<ModItem | null>(() => {
   return mods.mods.find((mod) => mod.id === selectedModId.value) || mods.mods[0] || null
 })
@@ -101,6 +214,33 @@ const worldJsonValid = computed(() => {
     return true
   } catch {
     return false
+  }
+})
+
+function worldEntries(file: WorldInfoFile | null): WorldInfoEntry[] {
+  if (!file) return []
+  if (Array.isArray(file.entries)) return file.entries
+  if (file.entries && typeof file.entries === 'object') {
+    return Object.values(file.entries) as WorldInfoEntry[]
+  }
+  return []
+}
+
+const selectedWorldStats = computed(() => {
+  const entries = worldEntries(worldFile.value)
+  const enabled = entries.filter((entry) => !entry.disable)
+  const constant = enabled.filter((entry) => entry.constant)
+  const keyword = enabled.filter((entry) => Array.isArray(entry.key) && entry.key.length > 0)
+  const sampleKeywords = keyword
+    .flatMap((entry) => Array.isArray(entry.key) ? entry.key : [])
+    .filter(Boolean)
+    .slice(0, 6)
+  return {
+    entries: entries.length,
+    enabled: enabled.length,
+    constant: constant.length,
+    keyword: keyword.length,
+    sampleKeywords,
   }
 })
 
@@ -421,6 +561,7 @@ onMounted(async () => {
     personas.load(),
   ])
   selectedProfileId.value = models.activeProfileId || models.profiles[0]?.id || ''
+  hydrateSetupFromProfile(selectedProfile.value)
   selectedModId.value = mods.mods[0]?.id || ''
   selectedPresetId.value = presets.activePresetId || presets.presets[0]?.id || ''
   selectedPersonaId.value = personas.activePersonaId || personas.personas[0]?.id || ''
@@ -444,6 +585,10 @@ watch(
   },
 )
 
+watch(selectedProfileId, () => {
+  hydrateSetupFromProfile(selectedProfile.value)
+})
+
 watch(
   () => mods.mods.map((mod) => mod.id).join('|'),
   () => {
@@ -466,24 +611,32 @@ watch(
           <div>
             <p class="text-[11px] uppercase tracking-[0.2em] text-brand-300/80 mb-2">配置中心</p>
             <h2 class="text-xl md:text-2xl font-semibold text-ink-primary">
-              管理 <span class="text-brand-300">模型 · MOD · 世界书</span>
+              管理 <span class="text-brand-300">模型 · 生成参数 · 资料库</span>
             </h2>
             <p class="mt-1.5 text-xs md:text-sm text-ink-secondary max-w-xl">
-              API Key 写入 ST secrets,不落本地。所有 MOD / 世界书写回 ST 原生目录,可与原版 UI 并存。
+              模型、生成参数、我的身份、世界书和 MOD 分开管理。世界书是设定资料库，MOD 是提示词插件。
             </p>
           </div>
-          <div class="grid grid-cols-3 gap-2.5 md:min-w-[300px]">
+          <div class="grid grid-cols-2 gap-2.5 md:min-w-[520px] md:grid-cols-5">
             <div class="rounded-xl bg-surface/70 backdrop-blur ring-1 ring-border-subtle p-3 text-center">
               <p class="text-[10px] uppercase tracking-wider text-ink-muted">模型</p>
               <p class="mt-1 text-xl font-semibold text-ink-primary tabular-nums">{{ models.profiles.length }}</p>
             </div>
             <div class="rounded-xl bg-surface/70 backdrop-blur ring-1 ring-border-subtle p-3 text-center">
-              <p class="text-[10px] uppercase tracking-wider text-ink-muted">MOD</p>
-              <p class="mt-1 text-xl font-semibold text-ink-primary tabular-nums">{{ mods.mods.length }}</p>
+              <p class="text-[10px] uppercase tracking-wider text-ink-muted">预设</p>
+              <p class="mt-1 text-xl font-semibold text-ink-primary tabular-nums">{{ presets.presets.length }}</p>
+            </div>
+            <div class="rounded-xl bg-surface/70 backdrop-blur ring-1 ring-border-subtle p-3 text-center">
+              <p class="text-[10px] uppercase tracking-wider text-ink-muted">身份</p>
+              <p class="mt-1 text-xl font-semibold text-ink-primary tabular-nums">{{ personas.personas.length }}</p>
             </div>
             <div class="rounded-xl bg-surface/70 backdrop-blur ring-1 ring-border-subtle p-3 text-center">
               <p class="text-[10px] uppercase tracking-wider text-ink-muted">世界书</p>
               <p class="mt-1 text-xl font-semibold text-ink-primary tabular-nums">{{ worlds.length }}</p>
+            </div>
+            <div class="rounded-xl bg-surface/70 backdrop-blur ring-1 ring-border-subtle p-3 text-center">
+              <p class="text-[10px] uppercase tracking-wider text-ink-muted">MOD</p>
+              <p class="mt-1 text-xl font-semibold text-ink-primary tabular-nums">{{ mods.mods.length }}</p>
             </div>
           </div>
         </div>
@@ -491,7 +644,97 @@ watch(
 
       <AppTabs v-model="activeTab" :tabs="tabs" class="mb-6" />
 
-      <div v-if="activeTab === 'model'" class="grid lg:grid-cols-[300px_1fr] gap-4">
+      <div v-if="activeTab === 'model'" class="space-y-4">
+        <AppCard padding="md" tone="glow" class="space-y-5">
+          <div class="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <p class="text-xs uppercase tracking-[0.18em] text-brand-300 font-semibold">模型连接向导</p>
+              <h2 class="mt-2 text-xl font-semibold text-ink-primary">先把一个模型连通，其他参数以后再调。</h2>
+              <p class="mt-1 text-sm text-ink-secondary max-w-2xl leading-relaxed">
+                中转、Gemini 兼容、OpenAI-compatible、本地 Ollama 这类 /v1 接口，都走“中转 / OpenAI 兼容”。
+              </p>
+            </div>
+            <div class="rounded-lg bg-surface-sunken px-3 py-2 ring-1 ring-border-subtle">
+              <p class="text-[11px] text-ink-muted">当前默认</p>
+              <p class="mt-0.5 max-w-[260px] truncate text-sm font-semibold text-ink-primary">
+                {{ currentDefaultProfile?.name || '未设置' }}
+              </p>
+            </div>
+          </div>
+
+          <div class="grid md:grid-cols-3 gap-3">
+            <button
+              v-for="source in setupSources"
+              :key="source.value"
+              type="button"
+              class="min-h-[104px] rounded-xl p-4 text-left ring-1 transition-all"
+              :class="setupDraft.source === source.value
+                ? 'bg-brand-500/15 text-brand-100 ring-brand-400/60'
+                : 'bg-surface-elevated text-ink-secondary ring-border-subtle hover:text-ink-primary hover:ring-brand-500/40'"
+              @click="chooseSetupSource(source.value)"
+            >
+              <p class="text-sm font-semibold">{{ source.title }}</p>
+              <p class="mt-1 text-xs leading-relaxed text-ink-muted">{{ source.description }}</p>
+            </button>
+          </div>
+
+          <div class="grid lg:grid-cols-[1fr_1fr] gap-3">
+            <AppFormField label="Profile 名称">
+              <AppInput v-model="setupDraft.name" placeholder="例如：DS 中转" />
+            </AppFormField>
+            <AppFormField label="模型名">
+              <AppInput v-model="setupDraft.model" placeholder="例如：deepseek-v4-pro / gpt-5.5" />
+            </AppFormField>
+            <AppFormField
+              v-if="setupNeedsEndpoint"
+              label="接口端点"
+              hint="一般填写到 /v1，例如 https://example.com/v1"
+            >
+              <AppInput v-model="setupDraft.endpoint" placeholder="https://你的中转地址/v1" />
+            </AppFormField>
+            <AppFormField label="API Key">
+              <AppInput v-model="setupDraft.apiKey" type="password" placeholder="保存到 ST secrets，留空则沿用已保存 Key" />
+            </AppFormField>
+            <AppFormField label="Max Tokens" hint="上下文长度不是这里；这里是单次最多输出长度。">
+              <AppInput
+                type="number"
+                min="256"
+                :model-value="setupDraft.maxTokens"
+                @update:model-value="(value) => setupDraft.maxTokens = parseInt(String(value)) || 4096"
+              />
+            </AppFormField>
+          </div>
+
+          <div class="flex flex-wrap items-center justify-between gap-3">
+            <div
+              v-if="setupResult"
+              :class="[
+                'rounded-lg px-3 py-2 text-xs ring-1',
+                setupResult.ok
+                  ? 'bg-emerald-500/10 text-emerald-300 ring-emerald-500/25'
+                  : 'bg-red-500/10 text-red-300 ring-red-500/25',
+              ]"
+            >
+              {{ setupResult.ok ? '连接正常，已设为默认 Profile' : `连接失败：${setupResult.message}` }}
+              <template v-if="setupResult.ok && setupResult.models"> · {{ setupResult.models }} 个模型</template>
+            </div>
+            <div v-else class="text-xs text-ink-muted">
+              保存并测试通过后，聊天页和 AI 起草会默认使用这个 Profile。
+            </div>
+            <AppButton variant="gradient" :disabled="setupDraft.testing" @click="saveSetupProfile">
+              {{ setupDraft.testing ? '测试中…' : '保存并测试' }}
+            </AppButton>
+          </div>
+        </AppCard>
+
+        <details class="overflow-hidden rounded-xl bg-surface ring-1 ring-border-subtle">
+          <summary class="cursor-pointer list-none px-4 py-3 hover:bg-surface-elevated transition-colors">
+            <div class="flex flex-wrap items-center justify-between gap-2">
+              <h3 class="text-sm font-semibold text-ink-primary">高级 Profile 管理</h3>
+              <span class="text-xs text-ink-muted">多 Profile、参数、删除和示例配置</span>
+            </div>
+          </summary>
+          <div class="grid lg:grid-cols-[300px_1fr] gap-4 border-t border-border-subtle p-4">
         <AppCard padding="md">
           <div class="flex flex-wrap gap-2 mb-4">
             <AppButton size="sm" @click="addProfile()">+ 新建</AppButton>
@@ -704,6 +947,8 @@ watch(
             </div>
           </div>
         </AppCard>
+          </div>
+        </details>
       </div>
 
       <div v-if="activeTab === 'mods'" class="grid lg:grid-cols-[300px_1fr] gap-4">
@@ -1016,7 +1261,57 @@ watch(
         </AppCard>
       </div>
 
-      <div v-if="activeTab === 'world'" class="grid lg:grid-cols-[280px_1fr] gap-4">
+      <div v-if="activeTab === 'world'" class="space-y-4">
+        <AppCard padding="md" tone="glow" class="space-y-4">
+          <div class="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <p class="text-xs uppercase tracking-[0.18em] text-brand-300 font-semibold">世界书使用向导</p>
+              <h2 class="mt-2 text-xl font-semibold text-ink-primary">把长期设定做成会自动命中的资料库。</h2>
+              <p class="mt-1 text-sm text-ink-secondary max-w-2xl leading-relaxed">
+                世界书适合放地点、组织、术语、规则、历史和暗线。绑定到角色、故事或当前聊天后，每次生成会扫描最近对话和角色设定，命中关键词才把对应条目注入提示词。
+              </p>
+            </div>
+            <div class="flex flex-wrap gap-2">
+              <AppButton size="sm" variant="secondary" @click="writeSampleWorld">写入示例</AppButton>
+              <AppButton size="sm" @click="createWorld">新建世界书</AppButton>
+            </div>
+          </div>
+
+          <div class="grid md:grid-cols-3 gap-3">
+            <div class="rounded-xl bg-surface-elevated p-4 ring-1 ring-border-subtle">
+              <p class="text-sm font-semibold text-ink-primary">1. 写资料</p>
+              <p class="mt-1 text-xs leading-relaxed text-ink-muted">每条只写一个知识点。比如“月港是什么”“银潮城有哪些禁忌”。</p>
+            </div>
+            <div class="rounded-xl bg-surface-elevated p-4 ring-1 ring-border-subtle">
+              <p class="text-sm font-semibold text-ink-primary">2. 填关键词</p>
+              <p class="mt-1 text-xs leading-relaxed text-ink-muted">玩家或角色提到关键词时才会注入。常驻条目适合放全局基调。</p>
+            </div>
+            <div class="rounded-xl bg-surface-elevated p-4 ring-1 ring-border-subtle">
+              <p class="text-sm font-semibold text-ink-primary">3. 绑定使用</p>
+              <p class="mt-1 text-xs leading-relaxed text-ink-muted">角色绑定适合长期世界观；故事绑定适合某段开局；聊天绑定适合临时切换。</p>
+            </div>
+          </div>
+
+          <div class="flex flex-wrap items-center justify-between gap-3 rounded-lg bg-surface-sunken p-3 ring-1 ring-border-subtle">
+            <div class="text-xs text-ink-secondary">
+              <template v-if="selectedWorld">
+                当前「{{ selectedWorld }}」：{{ selectedWorldStats.enabled }} 条启用，{{ selectedWorldStats.keyword }} 条关键词触发，{{ selectedWorldStats.constant }} 条常驻。
+                <span v-if="selectedWorldStats.sampleKeywords.length" class="text-ink-muted">
+                  关键词：{{ selectedWorldStats.sampleKeywords.join('、') }}
+                </span>
+              </template>
+              <template v-else>
+                先写入示例或新建一本世界书，再在下方编辑条目。
+              </template>
+            </div>
+            <div class="flex flex-wrap gap-2">
+              <AppButton size="sm" variant="secondary" @click="router.push('/character/new')">去角色绑定</AppButton>
+              <AppButton size="sm" variant="secondary" @click="router.push('/story/new')">去故事绑定</AppButton>
+            </div>
+          </div>
+        </AppCard>
+
+        <div class="grid lg:grid-cols-[280px_1fr] gap-4">
         <AppCard padding="md">
           <div class="flex flex-wrap gap-2 mb-4">
             <AppButton size="sm" @click="createWorld">+ 新建</AppButton>
@@ -1094,6 +1389,7 @@ watch(
             <p v-if="worldMode === 'json' && worldJson && !worldJsonValid" class="mt-2 text-xs text-red-400">JSON 格式无效</p>
           </template>
         </AppCard>
+        </div>
       </div>
 
       <AppCard v-if="activeTab === 'about'" padding="lg" tone="glow">

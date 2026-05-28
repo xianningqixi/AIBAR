@@ -15,12 +15,15 @@ import AppDrawer from '@/components/ui/AppDrawer.vue'
 import AppButton from '@/components/ui/AppButton.vue'
 import AppSelect from '@/components/ui/AppSelect.vue'
 import AppCard from '@/components/ui/AppCard.vue'
+import AppInput from '@/components/ui/AppInput.vue'
 import ModPicker from '@/components/mods/ModPicker.vue'
+import { testConnection } from '@/api/generate'
 import { deleteChat, exportChat, importChat, renameChat } from '@/api/chats'
 import { fetchCharacterChats, setCharacterChat } from '@/api/characters'
 import { listWorldInfo } from '@/api/worldinfo'
 import { saveStory } from '@/api/stories'
-import type { ChatEntry, Character, WorldInfoSummary } from '@/api/types'
+import { getProviderLabel } from '@/lib/providers'
+import type { ChatEntry, Character, ModelProfile, WorldInfoSummary } from '@/api/types'
 
 const route = useRoute()
 const router = useRouter()
@@ -38,6 +41,16 @@ const loadingChats = ref(false)
 const importing = ref(false)
 const importInput = ref<HTMLInputElement>()
 const worlds = ref<WorldInfoSummary[]>([])
+const modelPickerOpen = ref(false)
+const modelSearch = ref('')
+
+interface ModelTestResult {
+  ok: boolean
+  message: string
+  models?: number
+}
+const modelTesting = ref<Record<string, boolean>>({})
+const modelTestResults = ref<Record<string, ModelTestResult>>({})
 
 const routeAvatar = computed(() => decodeURIComponent((route.params.avatar as string) || ''))
 const routeChatFile = computed(() => (route.query.chat as string) || '')
@@ -259,8 +272,59 @@ function handleModIdsUpdate(ids: string[]) {
   void chat.setSelectedModIds(ids.filter((id) => !global.has(id)))
 }
 
+const filteredProfiles = computed(() => {
+  const q = modelSearch.value.trim().toLowerCase()
+  if (!q) return models.profiles
+  return models.profiles.filter((profile) => {
+    return [
+      profile.name,
+      profile.model,
+      profile.source,
+      getProviderLabel(profile.source),
+    ].some((item) => item.toLowerCase().includes(q))
+  })
+})
+
+function profileStatusLabel(profile: ModelProfile): string {
+  if (modelTesting.value[profile.id]) return '测试中'
+  const result = modelTestResults.value[profile.id]
+  if (result) return result.ok ? '通畅' : '异常'
+  if (profile.source === 'custom') return profile.endpoint ? '可测' : '待配置'
+  return models.hasSavedApiKey(profile) ? '可测' : '待配置'
+}
+
+function profileStatusClass(profile: ModelProfile): string {
+  const label = profileStatusLabel(profile)
+  if (label === '通畅') return 'bg-lime-500/15 text-lime-300'
+  if (label === '测试中') return 'bg-brand-500/15 text-brand-300'
+  if (label === '异常') return 'bg-red-500/15 text-red-300'
+  if (label === '可测') return 'bg-emerald-500/15 text-emerald-300'
+  return 'bg-amber-500/15 text-amber-300'
+}
+
+async function selectModelProfile(profile: ModelProfile) {
+  await handleProfileSelect(profile.id)
+  modelPickerOpen.value = false
+}
+
+async function testModelProfile(profile: ModelProfile) {
+  modelTesting.value = { ...modelTesting.value, [profile.id]: true }
+  try {
+    const result = await testConnection(profile)
+    modelTestResults.value = { ...modelTestResults.value, [profile.id]: result }
+    ui.addToast(result.ok ? '模型连接正常' : `模型连接失败：${result.message}`, result.ok ? 'success' : 'error')
+  } finally {
+    modelTesting.value = { ...modelTesting.value, [profile.id]: false }
+  }
+}
+
 function handleGlobalKeydown(e: KeyboardEvent) {
   if (e.key !== 'Escape') return
+  if (modelPickerOpen.value) {
+    modelPickerOpen.value = false
+    e.preventDefault()
+    return
+  }
   if (!chat.isStreaming) return
   e.preventDefault()
   chat.stopGeneration()
@@ -294,10 +358,112 @@ watch(() => route.fullPath, initChat)
     <ChatTopBar
       :character="chat.character"
       :profile="chat.selectedProfile"
+      :model-open="modelPickerOpen"
       @back="router.push('/browse')"
       @toggle-sidebar="ui.toggleSidePanel()"
-      @toggle-model-drawer="ui.toggleModelDrawer()"
+      @toggle-model-picker="modelPickerOpen = !modelPickerOpen"
+      @open-settings="ui.toggleModelDrawer()"
     />
+
+    <div
+      v-if="modelPickerOpen"
+      class="fixed inset-0 z-40 flex items-start justify-center bg-black/35 px-4 py-20 backdrop-blur-sm"
+      @click.self="modelPickerOpen = false"
+    >
+      <div class="w-full max-w-2xl overflow-hidden rounded-2xl bg-surface shadow-2xl ring-1 ring-border">
+        <div class="flex items-center justify-between gap-3 border-b border-border-subtle px-5 py-4">
+          <div>
+            <h3 class="text-base font-semibold text-ink-primary">选择模型</h3>
+            <p class="mt-0.5 text-xs text-ink-muted">切换只影响当前聊天，不会改其他存档。</p>
+          </div>
+          <button
+            class="rounded-lg p-2 text-ink-muted hover:bg-white/5 hover:text-ink-primary"
+            @click="modelPickerOpen = false"
+          >
+            <svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+
+        <div class="border-b border-border-subtle bg-surface-sunken/55 px-5 py-3">
+          <div class="flex flex-wrap items-center gap-3 text-xs">
+            <span class="font-medium text-ink-secondary">模型状态</span>
+            <span class="rounded-full bg-lime-500/15 px-2.5 py-1 text-lime-300">通畅</span>
+            <span class="inline-flex items-center gap-1 text-ink-muted"><span class="h-1.5 w-1.5 rounded-full bg-emerald-400" />可测</span>
+            <span class="inline-flex items-center gap-1 text-ink-muted"><span class="h-1.5 w-1.5 rounded-full bg-amber-400" />待配置</span>
+            <span class="inline-flex items-center gap-1 text-ink-muted"><span class="h-1.5 w-1.5 rounded-full bg-red-400" />异常</span>
+          </div>
+        </div>
+
+        <div class="space-y-3 p-5">
+          <AppInput v-model="modelSearch" placeholder="搜索模型或 Profile" />
+
+          <div class="max-h-[52vh] overflow-y-auto pr-1">
+            <button
+              v-for="profile in filteredProfiles"
+              :key="profile.id"
+              class="group w-full border-l-2 px-3 py-4 text-left transition-colors hover:bg-white/5"
+              :class="chat.selectedProfileId === profile.id ? 'border-brand-400 bg-brand-500/5' : 'border-border-subtle'"
+              @click="selectModelProfile(profile)"
+            >
+              <div class="flex items-start justify-between gap-3">
+                <div class="min-w-0">
+                  <div class="flex flex-wrap items-center gap-2">
+                    <h4 class="truncate text-sm font-semibold text-ink-primary">{{ profile.name }}</h4>
+                    <span v-if="chat.selectedProfileId === profile.id" class="rounded bg-brand-500/15 px-1.5 py-0.5 text-[10px] text-brand-300">当前模型</span>
+                    <span
+                      v-if="models.activeProfileId === profile.id"
+                      class="rounded bg-emerald-500/15 px-1.5 py-0.5 text-[10px] text-emerald-300"
+                    >
+                      默认
+                    </span>
+                  </div>
+                  <p class="mt-2 text-sm text-ink-secondary">
+                    <span class="inline-flex h-2 w-2 rounded-full bg-lime-500" />
+                    <span class="ml-2 font-medium">{{ profile.model || '未填写模型名' }}</span>
+                    <span class="ml-2 text-xs text-ink-muted">{{ getProviderLabel(profile.source) }}</span>
+                  </p>
+                  <div class="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-ink-muted">
+                    <span>输出上限：{{ profile.maxTokens }}</span>
+                    <span>T：{{ profile.temperature }}</span>
+                    <span v-if="profile.endpoint" class="max-w-[260px] truncate">端点：{{ profile.endpoint }}</span>
+                  </div>
+                  <p
+                    v-if="modelTestResults[profile.id] && !modelTestResults[profile.id].ok"
+                    class="mt-2 text-xs text-red-300"
+                  >
+                    {{ modelTestResults[profile.id].message }}
+                  </p>
+                </div>
+                <div class="flex shrink-0 flex-col items-end gap-3">
+                  <span class="rounded-full px-2.5 py-1 text-xs font-medium" :class="profileStatusClass(profile)">
+                    {{ profileStatusLabel(profile) }}
+                  </span>
+                  <button
+                    class="rounded-lg px-2.5 py-1 text-xs text-brand-300 ring-1 ring-brand-500/30 hover:bg-brand-500/10"
+                    @click.stop="testModelProfile(profile)"
+                  >
+                    {{ modelTesting[profile.id] ? '测试中…' : '测试' }}
+                  </button>
+                </div>
+              </div>
+            </button>
+
+            <div v-if="!filteredProfiles.length" class="py-8 text-center text-sm text-ink-muted">
+              没有匹配的模型 Profile。
+            </div>
+          </div>
+
+          <div class="flex flex-wrap items-center justify-between gap-3 border-t border-border-subtle pt-3">
+            <p class="text-xs text-ink-muted">需要新增或修改 Key 时，进入模型设置向导。</p>
+            <AppButton size="sm" variant="secondary" @click="router.push({ path: '/settings', query: { tab: 'model' } })">
+              管理模型
+            </AppButton>
+          </div>
+        </div>
+      </div>
+    </div>
 
     <MessageList
       :messages="chat.messages"
@@ -450,9 +616,17 @@ watch(() => route.fullPath, initChat)
         </AppCard>
 
         <div>
-          <label class="block text-[11px] font-semibold uppercase tracking-wider text-ink-muted mb-2">
-            世界书绑定 (本聊天)
-          </label>
+          <div class="mb-2 flex items-center justify-between gap-2">
+            <label class="block text-[11px] font-semibold uppercase tracking-wider text-ink-muted">
+              世界书绑定 (本聊天)
+            </label>
+            <button
+              class="text-[11px] text-brand-300 hover:text-brand-200"
+              @click="router.push({ path: '/settings', query: { tab: 'world' } })"
+            >
+              管理世界书
+            </button>
+          </div>
           <AppSelect
             :model-value="chat.selectedWorld"
             @update:model-value="handleWorldSelect"
@@ -462,7 +636,7 @@ watch(() => route.fullPath, initChat)
               {{ w.name || w.file_id }}
             </option>
           </AppSelect>
-          <p class="mt-1.5 text-[11px] text-ink-muted">每次生成会按关键词命中条目并注入到系统提示。</p>
+          <p class="mt-1.5 text-[11px] text-ink-muted">适合临时切换地点、组织或规则；每次生成只注入命中关键词的条目。</p>
         </div>
 
         <ModPicker
@@ -475,7 +649,7 @@ watch(() => route.fullPath, initChat)
           @update:model-value="handleModIdsUpdate"
         />
 
-        <AppButton variant="secondary" class="w-full" @click="router.push('/mods')">
+        <AppButton variant="secondary" class="w-full" @click="router.push({ path: '/settings', query: { tab: 'mods' } })">
           管理 MOD
         </AppButton>
       </div>

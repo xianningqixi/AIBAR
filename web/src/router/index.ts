@@ -13,6 +13,11 @@ const router = createRouter({
       component: () => import('@/pages/BrowsePage.vue'),
     },
     {
+      path: '/create',
+      name: 'create',
+      component: () => import('@/pages/CreatePage.vue'),
+    },
+    {
       path: '/chat/:avatar',
       name: 'chat',
       component: () => import('@/pages/ChatPage.vue'),

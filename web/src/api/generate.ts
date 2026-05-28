@@ -34,7 +34,13 @@ export async function testConnection(
     const r = await apiPost<any>('/api/backends/chat-completions/status', body)
     const models = Array.isArray(r?.data) ? r.data.length : undefined
     if (r?.error) {
-      return { ok: false, message: String(r.error) || '连接失败' }
+      const message =
+        typeof r.message === 'string'
+          ? r.message
+          : typeof r.error === 'string'
+            ? r.error
+            : '服务可达，但模型列表请求失败。请确认 API Key 已保存，且端点支持 /models。'
+      return { ok: false, message }
     }
     return { ok: true, message: '连接正常', models }
   } catch (e: any) {

@@ -22,13 +22,6 @@ export const providerConfigs: Record<string, ProviderConfig> = {
     modelKey: 'openrouter_model',
     defaultModel: 'openai/gpt-4o-mini',
   },
-  claude: {
-    label: 'Claude / Anthropic',
-    secretKey: 'api_key_claude',
-    modelKey: 'claude_model',
-    endpointKey: 'reverse_proxy',
-    defaultModel: 'claude-sonnet-4-5',
-  },
   makersuite: {
     label: 'Gemini / Google AI Studio',
     secretKey: 'api_key_makersuite',

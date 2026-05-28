@@ -8,6 +8,7 @@ import { loadAibarSettings, saveAibarSettings } from '@/api/settings'
 
 const LEGACY_PROFILES_KEY = 'aibar-model-profiles'
 const LEGACY_ACTIVE_KEY = 'aibar-active-profile'
+const REMOVED_PROFILE_SOURCES = new Set(['claude'])
 
 function createDefaultProfile(): ModelProfile {
   return {
@@ -46,6 +47,17 @@ function clearLegacy() {
     localStorage.removeItem(LEGACY_ACTIVE_KEY)
   } catch {
     /* noop */
+  }
+}
+
+function removeRetiredProfiles(sourceProfiles: ModelProfile[]): {
+  profiles: ModelProfile[]
+  changed: boolean
+} {
+  const profiles = sourceProfiles.filter((profile) => !REMOVED_PROFILE_SOURCES.has(profile.source))
+  return {
+    profiles,
+    changed: profiles.length !== sourceProfiles.length,
   }
 }
 
@@ -98,19 +110,27 @@ export const useModelProfilesStore = defineStore('modelProfiles', () => {
 
   async function load() {
     if (loaded.value) return
+    let shouldPersist = false
     try {
       const stored = await loadAibarSettings<{
         simple_ui_model_profiles?: ModelProfile[]
         simple_ui_active_profile?: string
       }>()
       if (Array.isArray(stored.simple_ui_model_profiles) && stored.simple_ui_model_profiles.length) {
-        profiles.value = stored.simple_ui_model_profiles
-        activeProfileId.value = stored.simple_ui_active_profile || profiles.value[0]?.id || 'default'
+        const normalized = removeRetiredProfiles(stored.simple_ui_model_profiles)
+        profiles.value = normalized.profiles.length ? normalized.profiles : [createDefaultProfile()]
+        activeProfileId.value = profiles.value.some((profile) => profile.id === stored.simple_ui_active_profile)
+          ? stored.simple_ui_active_profile!
+          : profiles.value[0]?.id || 'default'
+        shouldPersist = normalized.changed || activeProfileId.value !== stored.simple_ui_active_profile
       } else {
         const legacy = readLegacyProfiles()
         if (legacy) {
-          profiles.value = legacy.profiles
-          activeProfileId.value = legacy.activeId
+          const normalized = removeRetiredProfiles(legacy.profiles)
+          profiles.value = normalized.profiles.length ? normalized.profiles : [createDefaultProfile()]
+          activeProfileId.value = profiles.value.some((profile) => profile.id === legacy.activeId)
+            ? legacy.activeId
+            : profiles.value[0]?.id || 'default'
           loaded.value = true
           await persistNow()
           clearLegacy()
@@ -122,6 +142,7 @@ export const useModelProfilesStore = defineStore('modelProfiles', () => {
     } finally {
       loaded.value = true
     }
+    if (shouldPersist) await persistNow()
   }
 
   function createProfile(source = 'custom'): ModelProfile {

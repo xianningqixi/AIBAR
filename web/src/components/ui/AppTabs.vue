@@ -16,12 +16,12 @@ defineEmits<{
 </script>
 
 <template>
-  <div class="flex items-center gap-1 border-b border-border-subtle">
+  <div class="flex items-center gap-1 overflow-x-auto border-b border-border-subtle">
     <button
       v-for="tab in tabs"
       :key="tab.key"
       :class="[
-        'relative px-4 py-2.5 text-sm font-medium transition-colors',
+        'relative shrink-0 px-4 py-2.5 text-sm font-medium whitespace-nowrap transition-colors',
         modelValue === tab.key
           ? 'text-ink-primary'
           : 'text-ink-muted hover:text-ink-secondary',

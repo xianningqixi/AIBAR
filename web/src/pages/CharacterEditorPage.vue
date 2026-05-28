@@ -17,6 +17,13 @@ import AppTextarea from '@/components/ui/AppTextarea.vue'
 import AppCard from '@/components/ui/AppCard.vue'
 import AppFormField from '@/components/ui/AppFormField.vue'
 import AppPageHeader from '@/components/ui/AppPageHeader.vue'
+import {
+  buildCharacterDraftPayload,
+  buildCharacterDraftQuestionsPayload,
+  parseCharacterDraft,
+  parseDraftQuestions,
+  type DraftQuestion,
+} from '@/lib/aiDraft'
 
 const route = useRoute()
 const router = useRouter()
@@ -26,6 +33,13 @@ const models = useModelProfilesStore()
 
 const avatar = computed(() => decodeURIComponent((route.params.avatar as string) || ''))
 const isEdit = computed(() => Boolean(avatar.value))
+const createMode = computed(() => route.query.mode === 'advanced' ? 'advanced' : 'simple')
+const isAdvancedCreate = computed(() => !isEdit.value && createMode.value === 'advanced')
+const pageTitle = computed(() => {
+  if (isEdit.value) return '编辑角色'
+  return isAdvancedCreate.value ? '高级创建角色' : '简易创建角色'
+})
+const backTo = computed(() => isEdit.value ? '/characters' : '/create?kind=character')
 const loading = ref(false)
 const original = ref<Character | null>(null)
 const worlds = ref<WorldInfoSummary[]>([])
@@ -53,6 +67,16 @@ const test = reactive({
   prompt: '',
   loading: false,
   result: '',
+  error: '',
+})
+
+const draft = reactive({
+  profileId: '',
+  idea: '',
+  questions: [] as DraftQuestion[],
+  answers: {} as Record<string, string>,
+  asking: false,
+  loading: false,
   error: '',
 })
 
@@ -87,6 +111,113 @@ function payload() {
     json_data: original.value ? JSON.stringify(original.value) : undefined,
     chat: original.value?.chat,
     create_date: original.value?.create_date,
+  }
+}
+
+function getDraftProfile() {
+  return models.getProfile(draft.profileId) || models.activeProfile
+}
+
+function draftAnswersText(): string {
+  return draft.questions
+    .map((item, index) => {
+      const answer = (draft.answers[item.id] || '').trim()
+      return answer ? `Q${index + 1}: ${item.question}\nA${index + 1}: ${answer}` : ''
+    })
+    .filter(Boolean)
+    .join('\n\n')
+}
+
+function selectDraftOption(question: DraftQuestion, option: string) {
+  draft.answers[question.id] = option
+}
+
+function useCustomDraftAnswer(question: DraftQuestion) {
+  draft.answers[question.id] = ''
+}
+
+function isDraftOptionSelected(question: DraftQuestion, option: string): boolean {
+  return (draft.answers[question.id] || '').trim() === option
+}
+
+function isCustomDraftAnswer(question: DraftQuestion): boolean {
+  const answer = (draft.answers[question.id] || '').trim()
+  return Boolean(answer) && !question.options.includes(answer)
+}
+
+async function askDraftQuestions() {
+  if (!draft.idea.trim()) {
+    ui.addToast('先写一句你想要的角色方向', 'warning')
+    return
+  }
+  const profile = getDraftProfile()
+  if (!profile) {
+    ui.addToast('未配置可用模型', 'warning')
+    return
+  }
+
+  draft.asking = true
+  draft.error = ''
+  try {
+    const reply = await generateReply(
+      buildCharacterDraftQuestionsPayload(profile, draft.idea, { ...form }),
+    )
+    const questions = parseDraftQuestions(reply)
+    if (!questions.length) throw new Error('模型没有返回有效问题')
+    const nextAnswers: Record<string, string> = {}
+    for (const question of questions) {
+      nextAnswers[question.id] = draft.answers[question.id] || ''
+    }
+    draft.questions = questions
+    draft.answers = nextAnswers
+    ui.addToast('问题已生成，按你的偏好回答后再生成', 'success')
+  } catch (e: any) {
+    draft.error = e?.message || '追问生成失败'
+    ui.addToast(`追问生成失败：${draft.error}`, 'error')
+  } finally {
+    draft.asking = false
+  }
+}
+
+async function draftWithAi() {
+  if (!draft.idea.trim()) {
+    ui.addToast('先写一句你想要的角色方向', 'warning')
+    return
+  }
+  const profile = getDraftProfile()
+  if (!profile) {
+    ui.addToast('未配置可用模型', 'warning')
+    return
+  }
+
+  draft.loading = true
+  draft.error = ''
+  try {
+    const reply = await generateReply(
+      buildCharacterDraftPayload(profile, draft.idea, { ...form }, draftAnswersText()),
+    )
+    const result = parseCharacterDraft(reply)
+    if (result.ch_name) form.ch_name = result.ch_name
+    if (result.description) form.description = result.description
+    if (result.personality) form.personality = result.personality
+    if (result.scenario) form.scenario = result.scenario
+    if (result.first_mes) form.first_mes = result.first_mes
+    if (result.mes_example) form.mes_example = result.mes_example
+    if (result.creator_notes) form.creator_notes = result.creator_notes
+    if (result.tags.length) form.tags = result.tags.join(', ')
+    if (result.system_prompt) form.system_prompt = result.system_prompt
+    if (result.post_history_instructions) {
+      form.post_history_instructions = result.post_history_instructions
+    }
+    if (result.alternate_greetings.length) {
+      form.alternate_greetings = result.alternate_greetings.join('\n')
+    }
+    ui.addToast('AI 初稿已填入表单，可以继续手改', 'success')
+  } catch (e: any) {
+    draft.error = e?.message || '起草失败'
+    ui.addToast(`起草失败：${draft.error}`, 'error')
+  } finally {
+    draft.loading = false
   }
 }
 
@@ -184,6 +315,7 @@ async function runTest() {
 onMounted(async () => {
   worlds.value = await listWorldInfo().catch(() => [])
   await models.loadSecrets()
+  draft.profileId = models.activeProfileId
   test.profileId = models.activeProfileId
   if (isEdit.value) {
     loading.value = true
@@ -204,8 +336,8 @@ onMounted(async () => {
 <template>
   <div class="min-h-screen bg-bg">
     <AppPageHeader
-      :title="isEdit ? '编辑角色' : '新建角色'"
-      back-to="/characters"
+      :title="pageTitle"
+      :back-to="backTo"
     >
       <template #actions>
         <AppButton variant="gradient" :disabled="loading" @click="save">
@@ -215,6 +347,106 @@ onMounted(async () => {
     </AppPageHeader>
 
     <main class="max-w-5xl mx-auto px-5 py-6">
+      <AppCard v-if="!isAdvancedCreate" padding="md" tone="glow" class="mb-4 space-y-4">
+        <div class="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h3 class="flex items-center gap-2 text-sm font-semibold text-ink-primary">
+              <span class="w-1 h-4 rounded-full bg-brand-gradient" />
+              AI 快速起草
+            </h3>
+            <p class="mt-1 text-xs text-ink-muted">一句话描述想法，模型会把名称、设定、开场白和示例对话填成初稿。</p>
+          </div>
+          <div class="flex flex-wrap gap-2">
+            <AppButton
+              size="sm"
+              variant="secondary"
+              :disabled="draft.asking || draft.loading"
+              @click="askDraftQuestions"
+            >
+              {{ draft.asking ? '追问中…' : '让 AI 追问' }}
+            </AppButton>
+            <AppButton
+              size="sm"
+              variant="gradient"
+              :disabled="draft.asking || draft.loading"
+              @click="draftWithAi"
+            >
+              {{ draft.loading ? '起草中…' : '生成并填入' }}
+            </AppButton>
+          </div>
+        </div>
+
+        <div class="grid md:grid-cols-[1fr_260px] gap-3">
+          <AppFormField label="角色想法">
+            <AppTextarea
+              v-model="draft.idea"
+              :rows="3"
+              auto-grow
+              placeholder="例如：住在旧图书馆里的温柔占星师，知道玩家遗忘的秘密。"
+            />
+          </AppFormField>
+          <AppFormField label="使用 Profile">
+            <AppSelect v-model="draft.profileId">
+              <option v-for="p in models.profiles" :key="p.id" :value="p.id">
+                {{ p.name }} · {{ p.model }}
+              </option>
+            </AppSelect>
+          </AppFormField>
+        </div>
+
+        <div v-if="draft.questions.length" class="space-y-3 rounded-lg bg-surface-sunken p-3 ring-1 ring-border-subtle">
+          <h4 class="text-xs font-semibold uppercase tracking-wider text-ink-muted">关键问题</h4>
+          <div
+            v-for="(question, index) in draft.questions"
+            :key="question.id"
+            class="space-y-2"
+          >
+            <div>
+              <p class="text-sm font-medium text-ink-secondary">
+                {{ index + 1 }}. {{ question.question }}
+              </p>
+              <p v-if="question.hint" class="mt-1 text-xs text-ink-muted">
+                {{ question.hint }}
+              </p>
+            </div>
+            <div v-if="question.options.length" class="flex flex-wrap gap-2">
+              <button
+                v-for="option in question.options"
+                :key="option"
+                type="button"
+                class="max-w-full whitespace-normal break-words rounded-full px-3 py-1.5 text-left text-xs leading-relaxed ring-1 transition"
+                :class="isDraftOptionSelected(question, option)
+                  ? 'bg-brand-500/20 text-brand-100 ring-brand-400/70'
+                  : 'bg-surface-card text-ink-secondary ring-border-subtle hover:text-ink-primary hover:ring-brand-400/40'"
+                @click="selectDraftOption(question, option)"
+              >
+                {{ option }}
+              </button>
+              <button
+                type="button"
+                class="max-w-full whitespace-normal break-words rounded-full px-3 py-1.5 text-left text-xs leading-relaxed ring-1 transition"
+                :class="isCustomDraftAnswer(question)
+                  ? 'bg-accent-500/15 text-accent-100 ring-accent-300/60'
+                  : 'bg-surface-card text-ink-secondary ring-border-subtle hover:text-ink-primary hover:ring-accent-300/40'"
+                @click="useCustomDraftAnswer(question)"
+              >
+                其他
+              </button>
+            </div>
+            <AppTextarea
+              v-model="draft.answers[question.id]"
+              :rows="2"
+              auto-grow
+              placeholder="也可以自己写：偏好、禁忌、灵感碎片或选项之外的方向。"
+            />
+          </div>
+        </div>
+
+        <div v-if="draft.error" class="text-xs whitespace-pre-wrap bg-red-500/10 text-red-300 ring-1 ring-red-500/20 p-3 rounded-md">
+          {{ draft.error }}
+        </div>
+      </AppCard>
+
       <div class="grid lg:grid-cols-2 gap-4">
         <AppCard padding="md" class="space-y-4">
           <h3 class="flex items-center gap-2 text-sm font-semibold text-ink-primary">
@@ -251,16 +483,24 @@ onMounted(async () => {
           </AppFormField>
         </AppCard>
 
-        <AppCard padding="md" class="lg:col-span-2 space-y-4">
-          <h3 class="flex items-center gap-2 text-sm font-semibold text-ink-primary">
-            <span class="w-1 h-4 rounded-full bg-brand-gradient" />
-            元数据与扩展
-          </h3>
-          <div class="grid md:grid-cols-2 gap-4">
+        <details
+          :open="isEdit || isAdvancedCreate"
+          class="lg:col-span-2 overflow-hidden rounded-lg bg-surface ring-1 ring-border-subtle"
+        >
+          <summary class="cursor-pointer list-none px-4 py-3 hover:bg-surface-elevated transition-colors">
+            <div class="flex flex-wrap items-center justify-between gap-2">
+              <h3 class="flex items-center gap-2 text-sm font-semibold text-ink-primary">
+                <span class="w-1 h-4 rounded-full bg-brand-gradient" />
+                高级字段
+              </h3>
+              <span class="text-xs text-ink-muted">标签、世界书(长期设定资料库)、系统提示、作者信息</span>
+            </div>
+          </summary>
+          <div class="grid md:grid-cols-2 gap-4 border-t border-border-subtle p-4">
             <AppFormField label="标签" hint="逗号分隔。">
               <AppInput v-model="form.tags" placeholder="温柔, 学院" />
             </AppFormField>
-            <AppFormField label="世界书绑定">
+            <AppFormField label="世界书绑定" hint="当这个角色长期属于某个世界观时再选；生成时会按关键词命中条目，没命中就不会注入。">
               <AppSelect v-model="form.world">
                 <option value="">不绑定</option>
                 <option v-for="world in worlds" :key="world.file_id" :value="world.file_id">
@@ -284,57 +524,64 @@ onMounted(async () => {
               <AppTextarea v-model="form.creator_notes" :rows="4" auto-grow />
             </AppFormField>
           </div>
-        </AppCard>
+        </details>
 
-        <AppCard padding="md" class="lg:col-span-2 space-y-4" tone="glow">
-          <div class="flex items-center justify-between">
-            <div>
+        <details
+          class="lg:col-span-2 overflow-hidden rounded-lg bg-surface ring-1 ring-border-subtle"
+        >
+          <summary class="cursor-pointer list-none px-4 py-3 hover:bg-surface-elevated transition-colors">
+            <div class="flex flex-wrap items-center justify-between gap-2">
               <h3 class="flex items-center gap-2 text-sm font-semibold text-ink-primary">
                 <span class="w-1 h-4 rounded-full bg-brand-gradient" />
-                测试区
+                试聊检查
               </h3>
-              <p class="text-xs text-ink-muted mt-1">不写入任何聊天记录,只用当前表单 + 选定的 Profile + 世界书做一次单轮试跑。</p>
+              <span class="text-xs text-ink-muted">保存前可选，不会写入聊天记录</span>
             </div>
-            <AppButton size="sm" variant="gradient" :disabled="test.loading" @click="runTest">
-              {{ test.loading ? '生成中…' : '▶ 运行测试' }}
-            </AppButton>
-          </div>
-          <div class="grid md:grid-cols-2 gap-3">
-            <AppFormField label="使用 Profile">
-              <AppSelect v-model="test.profileId">
-                <option v-for="p in models.profiles" :key="p.id" :value="p.id">
-                  {{ p.name }} · {{ p.model }}
-                </option>
-              </AppSelect>
+          </summary>
+          <div class="space-y-4 border-t border-border-subtle p-4">
+            <div class="flex items-center justify-between">
+              <p class="text-xs text-ink-muted">用当前表单 + 选定 Profile 做一次单轮试跑。</p>
+              <AppButton size="sm" variant="gradient" :disabled="test.loading" @click="runTest">
+                {{ test.loading ? '生成中…' : '运行测试' }}
+              </AppButton>
+            </div>
+            <div class="grid md:grid-cols-2 gap-3">
+              <AppFormField label="使用 Profile">
+                <AppSelect v-model="test.profileId">
+                  <option v-for="p in models.profiles" :key="p.id" :value="p.id">
+                    {{ p.name }} · {{ p.model }}
+                  </option>
+                </AppSelect>
+              </AppFormField>
+              <AppFormField label="世界书 (留空=用上面绑定)">
+                <AppSelect v-model="test.world">
+                  <option value="">使用角色绑定</option>
+                  <option v-for="w in worlds" :key="w.file_id" :value="w.file_id">
+                    {{ w.name || w.file_id }}
+                  </option>
+                </AppSelect>
+              </AppFormField>
+            </div>
+            <AppFormField label="测试输入">
+              <AppTextarea v-model="test.prompt" :rows="3" auto-grow placeholder="例如:你今天怎么样?" />
             </AppFormField>
-            <AppFormField label="世界书 (留空=用上面绑定)">
-              <AppSelect v-model="test.world">
-                <option value="">使用角色绑定</option>
-                <option v-for="w in worlds" :key="w.file_id" :value="w.file_id">
-                  {{ w.name || w.file_id }}
-                </option>
-              </AppSelect>
-            </AppFormField>
-          </div>
-          <AppFormField label="测试输入">
-            <AppTextarea v-model="test.prompt" :rows="3" auto-grow placeholder="例如:你今天怎么样?" />
-          </AppFormField>
-          <div v-if="test.result || test.error" class="space-y-2">
-            <h4 class="text-xs font-semibold text-ink-muted uppercase tracking-wider">输出</h4>
-            <div
-              v-if="test.error"
-              class="text-xs whitespace-pre-wrap bg-red-500/10 text-red-300 ring-1 ring-red-500/20 p-3 rounded-md"
-            >
-              {{ test.error }}
-            </div>
-            <div
-              v-else
-              class="text-sm whitespace-pre-wrap text-ink-primary bg-surface-sunken ring-1 ring-border-subtle p-3 rounded-md leading-relaxed max-h-72 overflow-y-auto"
-            >
-              {{ test.result }}
+            <div v-if="test.result || test.error" class="space-y-2">
+              <h4 class="text-xs font-semibold text-ink-muted uppercase tracking-wider">输出</h4>
+              <div
+                v-if="test.error"
+                class="text-xs whitespace-pre-wrap bg-red-500/10 text-red-300 ring-1 ring-red-500/20 p-3 rounded-md"
+              >
+                {{ test.error }}
+              </div>
+              <div
+                v-else
+                class="text-sm whitespace-pre-wrap text-ink-primary bg-surface-sunken ring-1 ring-border-subtle p-3 rounded-md leading-relaxed max-h-72 overflow-y-auto"
+              >
+                {{ test.result }}
+              </div>
             </div>
           </div>
-        </AppCard>
+        </details>
       </div>
     </main>
   </div>

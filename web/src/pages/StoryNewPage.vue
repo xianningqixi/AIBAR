@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useCharactersStore } from '@/stores/characters'
 import { useUiStore } from '@/stores/ui'
@@ -7,6 +7,7 @@ import { useModsStore } from '@/stores/mods'
 import { useModelProfilesStore } from '@/stores/modelProfiles'
 import { getStory, saveStory } from '@/api/stories'
 import { listWorldInfo } from '@/api/worldinfo'
+import { generateReply } from '@/api/generate'
 import type { Character, StoryCard, WorldInfoSummary } from '@/api/types'
 import AppButton from '@/components/ui/AppButton.vue'
 import AppInput from '@/components/ui/AppInput.vue'
@@ -17,6 +18,13 @@ import AppFormField from '@/components/ui/AppFormField.vue'
 import AppPageHeader from '@/components/ui/AppPageHeader.vue'
 import AppSpinner from '@/components/ui/AppSpinner.vue'
 import ModPicker from '@/components/mods/ModPicker.vue'
+import {
+  buildStoryDraftPayload,
+  buildStoryDraftQuestionsPayload,
+  parseDraftQuestions,
+  parseStoryDraft,
+  type DraftQuestion,
+} from '@/lib/aiDraft'
 
 const route = useRoute()
 const router = useRouter()
@@ -27,6 +35,8 @@ const models = useModelProfilesStore()
 
 const isEdit = computed(() => route.name === 'storyEdit')
 const editId = computed(() => isEdit.value ? decodeURIComponent((route.params.id as string) || '') : '')
+const createMode = computed(() => route.query.mode === 'advanced' ? 'advanced' : 'simple')
+const isAdvancedCreate = computed(() => !isEdit.value && createMode.value === 'advanced')
 const loadingStory = ref(false)
 
 const characterAvatar = ref<string>((route.query.avatar as string) || '')
@@ -43,6 +53,15 @@ const modelProfileId = ref('')
 const modIds = ref<string[]>([])
 const worlds = ref<WorldInfoSummary[]>([])
 const submitting = ref(false)
+const draft = reactive({
+  profileId: '',
+  idea: '',
+  questions: [] as DraftQuestion[],
+  answers: {} as Record<string, string>,
+  asking: false,
+  loading: false,
+  error: '',
+})
 
 const selectedCharacter = computed<Character | null>(() => {
   return chars.findCharacter(characterAvatar.value) || null
@@ -58,8 +77,11 @@ const defaultTitle = computed(() => {
   return selectedCharacter.value ? `${selectedCharacter.value.name} 的新故事` : ''
 })
 
-const pageTitle = computed(() => isEdit.value ? '编辑故事卡' : '新建故事卡')
-const backTo = computed(() => isEdit.value ? `/story/${editId.value}` : '/browse?tab=stories')
+const pageTitle = computed(() => {
+  if (isEdit.value) return '编辑故事卡'
+  return isAdvancedCreate.value ? '高级创建故事' : '简易创建故事'
+})
+const backTo = computed(() => isEdit.value ? `/story/${editId.value}` : '/create?kind=story')
 
 function parseTags(value: string): string[] {
   return value
@@ -89,6 +111,140 @@ function fillFromStory(story: StoryCard) {
       useCharGreeting.value = false
       customAssistantOpening.value = story.openingAssistantMessage
     }
+  }
+}
+
+function getDraftProfile() {
+  return models.getProfile(draft.profileId) || models.activeProfile
+}
+
+function currentStoryDraftForm() {
+  return {
+    title: title.value,
+    summary: summary.value,
+    scenario: scenario.value,
+    openingUserMessage: openingUserMessage.value,
+    openingAssistantMessage: assistantOpening.value,
+    systemAppend: systemAppend.value,
+    tags: tags.value,
+  }
+}
+
+function draftAnswersText(): string {
+  return draft.questions
+    .map((item, index) => {
+      const answer = (draft.answers[item.id] || '').trim()
+      return answer ? `Q${index + 1}: ${item.question}\nA${index + 1}: ${answer}` : ''
+    })
+    .filter(Boolean)
+    .join('\n\n')
+}
+
+function selectDraftOption(question: DraftQuestion, option: string) {
+  draft.answers[question.id] = option
+}
+
+function useCustomDraftAnswer(question: DraftQuestion) {
+  draft.answers[question.id] = ''
+}
+
+function isDraftOptionSelected(question: DraftQuestion, option: string): boolean {
+  return (draft.answers[question.id] || '').trim() === option
+}
+
+function isCustomDraftAnswer(question: DraftQuestion): boolean {
+  const answer = (draft.answers[question.id] || '').trim()
+  return Boolean(answer) && !question.options.includes(answer)
+}
+
+async function askDraftQuestions() {
+  if (!selectedCharacter.value) {
+    ui.addToast('请先选择角色', 'warning')
+    return
+  }
+  if (!draft.idea.trim()) {
+    ui.addToast('先写一句你想要的故事方向', 'warning')
+    return
+  }
+  const profile = getDraftProfile()
+  if (!profile) {
+    ui.addToast('未配置可用模型', 'warning')
+    return
+  }
+
+  draft.asking = true
+  draft.error = ''
+  try {
+    const reply = await generateReply(
+      buildStoryDraftQuestionsPayload(
+        profile,
+        draft.idea,
+        selectedCharacter.value,
+        currentStoryDraftForm(),
+      ),
+    )
+    const questions = parseDraftQuestions(reply)
+    if (!questions.length) throw new Error('模型没有返回有效问题')
+    const nextAnswers: Record<string, string> = {}
+    for (const question of questions) {
+      nextAnswers[question.id] = draft.answers[question.id] || ''
+    }
+    draft.questions = questions
+    draft.answers = nextAnswers
+    ui.addToast('问题已生成，按你的偏好回答后再生成', 'success')
+  } catch (e: any) {
+    draft.error = e?.message || '追问生成失败'
+    ui.addToast(`追问生成失败：${draft.error}`, 'error')
+  } finally {
+    draft.asking = false
+  }
+}
+
+async function draftWithAi() {
+  if (!selectedCharacter.value) {
+    ui.addToast('请先选择角色', 'warning')
+    return
+  }
+  if (!draft.idea.trim()) {
+    ui.addToast('先写一句你想要的故事方向', 'warning')
+    return
+  }
+  const profile = getDraftProfile()
+  if (!profile) {
+    ui.addToast('未配置可用模型', 'warning')
+    return
+  }
+
+  draft.loading = true
+  draft.error = ''
+  try {
+    const reply = await generateReply(
+      buildStoryDraftPayload(
+        profile,
+        draft.idea,
+        selectedCharacter.value,
+        currentStoryDraftForm(),
+        draftAnswersText(),
+      ),
+    )
+    const result = parseStoryDraft(reply)
+    if (result.title) title.value = result.title
+    if (result.summary) summary.value = result.summary
+    if (result.scenario) scenario.value = result.scenario
+    if (result.openingUserMessage) openingUserMessage.value = result.openingUserMessage
+    if (result.openingAssistantMessage) {
+      useCharGreeting.value = false
+      customAssistantOpening.value = result.openingAssistantMessage
+    }
+    if (result.systemAppend) systemAppend.value = result.systemAppend
+    if (result.tags.length) tags.value = result.tags.join(', ')
+    if (!modelProfileId.value) modelProfileId.value = profile.id
+    ui.addToast('AI 故事初稿已填入表单，可以继续手改', 'success')
+  } catch (e: any) {
+    draft.error = e?.message || '起草失败'
+    ui.addToast(`起草失败：${draft.error}`, 'error')
+  } finally {
+    draft.loading = false
   }
 }
 
@@ -138,6 +294,7 @@ onMounted(async () => {
     models.loadSecrets(),
   ])
   worlds.value = await listWorldInfo().catch(() => [])
+  draft.profileId = models.activeProfileId
   if (isEdit.value) {
     loadingStory.value = true
     try {
@@ -184,6 +341,108 @@ onMounted(async () => {
           </p>
         </div>
       </section>
+
+      <AppCard v-if="!isAdvancedCreate" padding="md" tone="glow" class="space-y-4">
+        <div class="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h3 class="flex items-center gap-2 text-sm font-semibold text-ink-primary">
+              <span class="w-1 h-4 rounded-full bg-brand-gradient" />
+              AI 快速起草
+            </h3>
+            <p class="mt-1 text-xs text-ink-muted">
+              基于{{ selectedCharacter ? `「${selectedCharacter.name}」` : '所选角色' }}生成标题、场景、玩家开场和 AI 开场。
+            </p>
+          </div>
+          <div class="flex flex-wrap gap-2">
+            <AppButton
+              size="sm"
+              variant="secondary"
+              :disabled="draft.asking || draft.loading || !selectedCharacter"
+              @click="askDraftQuestions"
+            >
+              {{ draft.asking ? '追问中…' : '让 AI 追问' }}
+            </AppButton>
+            <AppButton
+              size="sm"
+              variant="gradient"
+              :disabled="draft.asking || draft.loading || !selectedCharacter"
+              @click="draftWithAi"
+            >
+              {{ draft.loading ? '起草中…' : '生成并填入' }}
+            </AppButton>
+          </div>
+        </div>
+
+        <div class="grid md:grid-cols-[1fr_260px] gap-3">
+          <AppFormField label="故事想法">
+            <AppTextarea
+              v-model="draft.idea"
+              :rows="3"
+              auto-grow
+              placeholder="例如：雨夜调查旧剧院失踪案，角色知道舞台背后的真相但不愿直说。"
+            />
+          </AppFormField>
+          <AppFormField label="使用 Profile">
+            <AppSelect v-model="draft.profileId">
+              <option v-for="p in models.profiles" :key="p.id" :value="p.id">
+                {{ p.name }} · {{ p.model }}
+              </option>
+            </AppSelect>
+          </AppFormField>
+        </div>
+
+        <div v-if="draft.questions.length" class="space-y-3 rounded-lg bg-surface-sunken p-3 ring-1 ring-border-subtle">
+          <h4 class="text-xs font-semibold uppercase tracking-wider text-ink-muted">关键问题</h4>
+          <div
+            v-for="(question, index) in draft.questions"
+            :key="question.id"
+            class="space-y-2"
+          >
+            <div>
+              <p class="text-sm font-medium text-ink-secondary">
+                {{ index + 1 }}. {{ question.question }}
+              </p>
+              <p v-if="question.hint" class="mt-1 text-xs text-ink-muted">
+                {{ question.hint }}
+              </p>
+            </div>
+            <div v-if="question.options.length" class="flex flex-wrap gap-2">
+              <button
+                v-for="option in question.options"
+                :key="option"
+                type="button"
+                class="max-w-full whitespace-normal break-words rounded-full px-3 py-1.5 text-left text-xs leading-relaxed ring-1 transition"
+                :class="isDraftOptionSelected(question, option)
+                  ? 'bg-brand-500/20 text-brand-100 ring-brand-400/70'
+                  : 'bg-surface-card text-ink-secondary ring-border-subtle hover:text-ink-primary hover:ring-brand-400/40'"
+                @click="selectDraftOption(question, option)"
+              >
+                {{ option }}
+              </button>
+              <button
+                type="button"
+                class="max-w-full whitespace-normal break-words rounded-full px-3 py-1.5 text-left text-xs leading-relaxed ring-1 transition"
+                :class="isCustomDraftAnswer(question)
+                  ? 'bg-accent-500/15 text-accent-100 ring-accent-300/60'
+                  : 'bg-surface-card text-ink-secondary ring-border-subtle hover:text-ink-primary hover:ring-accent-300/40'"
+                @click="useCustomDraftAnswer(question)"
+              >
+                其他
+              </button>
+            </div>
+            <AppTextarea
+              v-model="draft.answers[question.id]"
+              :rows="2"
+              auto-grow
+              placeholder="也可以自己写：偏好、禁忌、灵感碎片或选项之外的方向。"
+            />
+          </div>
+        </div>
+
+        <div v-if="draft.error" class="text-xs whitespace-pre-wrap bg-red-500/10 text-red-300 ring-1 ring-red-500/20 p-3 rounded-md">
+          {{ draft.error }}
+        </div>
+      </AppCard>
 
       <AppCard padding="md" class="space-y-4">
         <h3 class="flex items-center gap-2 text-sm font-semibold text-ink-primary">
@@ -263,36 +522,46 @@ onMounted(async () => {
         </AppFormField>
       </AppCard>
 
-      <AppCard padding="md" class="space-y-4">
-        <h3 class="flex items-center gap-2 text-sm font-semibold text-ink-primary">
-          <span class="w-1 h-4 rounded-full bg-brand-gradient" />
-          默认配置
-        </h3>
-        <AppFormField label="世界书">
-          <AppSelect v-model="world">
-            <option value="">不绑定</option>
-            <option v-for="w in worlds" :key="w.file_id" :value="w.file_id">
-              {{ w.name || w.file_id }}
-            </option>
-          </AppSelect>
-        </AppFormField>
+      <details
+        :open="isEdit || isAdvancedCreate"
+        class="overflow-hidden rounded-lg bg-surface ring-1 ring-border-subtle"
+      >
+        <summary class="cursor-pointer list-none px-4 py-3 hover:bg-surface-elevated transition-colors">
+          <div class="flex flex-wrap items-center justify-between gap-2">
+            <h3 class="flex items-center gap-2 text-sm font-semibold text-ink-primary">
+              <span class="w-1 h-4 rounded-full bg-brand-gradient" />
+              高级配置
+            </h3>
+            <span class="text-xs text-ink-muted">世界书(地点/组织/规则)、模型 Profile、默认 MOD</span>
+          </div>
+        </summary>
+        <div class="space-y-4 border-t border-border-subtle p-4">
+          <AppFormField label="世界书" hint="故事发生在固定地点、组织或规则下时再选；只会注入命中关键词的条目。">
+            <AppSelect v-model="world">
+              <option value="">不绑定</option>
+              <option v-for="w in worlds" :key="w.file_id" :value="w.file_id">
+                {{ w.name || w.file_id }}
+              </option>
+            </AppSelect>
+          </AppFormField>
 
-        <AppFormField label="模型配置">
-          <AppSelect v-model="modelProfileId">
-            <option value="">使用默认模型</option>
-            <option v-for="profile in models.profiles" :key="profile.id" :value="profile.id">
-              {{ profile.name }} · {{ profile.model }}
-            </option>
-          </AppSelect>
-        </AppFormField>
+          <AppFormField label="模型配置">
+            <AppSelect v-model="modelProfileId">
+              <option value="">使用默认模型</option>
+              <option v-for="profile in models.profiles" :key="profile.id" :value="profile.id">
+                {{ profile.name }} · {{ profile.model }}
+              </option>
+            </AppSelect>
+          </AppFormField>
 
-        <ModPicker
-          v-model="modIds"
-          :mods="mods.mods"
-          title="默认加载 MOD"
-          description="保存到故事卡模板里。每次开始故事时会默认勾选这些 MOD,也可以临时调整。"
-        />
-      </AppCard>
+          <ModPicker
+            v-model="modIds"
+            :mods="mods.mods"
+            title="默认加载 MOD"
+            description="保存到故事卡模板里。每次开始故事时会默认勾选这些 MOD,也可以临时调整。"
+          />
+        </div>
+      </details>
 
       <p class="text-xs text-ink-muted">
         {{ isEdit ? '保存后修改立即生效，已从该模板创建的聊天记录不受影响。' : '故事卡是可复用模板。点击开始故事时才会创建新的 ST 聊天记录,同一个故事可以开多条不同存档。' }}
