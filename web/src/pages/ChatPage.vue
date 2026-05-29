@@ -829,6 +829,7 @@ watch(() => route.fullPath, initChat)
           :prompt="imagePrompt"
           context-type="chat"
           :context-id="`${chat.character?.avatar || 'chat'}:${chat.currentChatFile}:${imageMessageIndex}`"
+          :draft-profile="chat.selectedProfile"
           action-label="生成并写入消息"
           @generated="attachGeneratedImage"
         />

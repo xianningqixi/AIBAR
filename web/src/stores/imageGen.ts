@@ -72,10 +72,16 @@ export const useImageGenStore = defineStore('imageGen', () => {
     }
   }
 
-  async function generateAndSave(request: ImageGenerateRequest): Promise<ImageAsset> {
+  async function generateAndSave(
+    request: ImageGenerateRequest,
+    overrides?: Partial<ImageGenSettings>,
+  ): Promise<ImageAsset> {
     generating.value = true
     try {
-      const result = await generateImage(settings.value, request)
+      const runSettings = overrides
+        ? normalizeImageSettings({ ...settings.value, ...overrides })
+        : settings.value
+      const result = await generateImage(runSettings, request)
       const asset = await saveGeneratedImage(result, request)
       lastAsset.value = asset
       return asset
