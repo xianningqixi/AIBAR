@@ -12,7 +12,7 @@ defineProps<{
     :type="type || 'button'"
     :disabled="disabled"
     :class="[
-      'inline-flex items-center justify-center gap-1.5 font-medium transition-all duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-2 focus-visible:ring-offset-bg disabled:opacity-40 disabled:cursor-not-allowed select-none',
+      'inline-flex items-center justify-center gap-1.5 font-medium whitespace-nowrap transition-all duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-2 focus-visible:ring-offset-bg disabled:opacity-40 disabled:cursor-not-allowed select-none',
       variant === 'icon'
         ? 'rounded-full p-1.5 text-ink-secondary hover:text-ink-primary hover:bg-white/5'
         : 'rounded-lg',

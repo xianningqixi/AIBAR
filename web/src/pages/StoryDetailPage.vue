@@ -47,6 +47,13 @@ const testModel = reactive({
 })
 
 const tags = computed(() => story.value?.tags || [])
+const storyHeroImage = computed(() => {
+  if (story.value?.coverImage) return story.value.coverImage
+  if (character.value?.avatar && character.value.avatar !== 'none') {
+    return `/thumbnail?type=avatar&file=${encodeURIComponent(character.value.avatar)}`
+  }
+  return ''
+})
 const modCount = computed(() => startModIds.value.length)
 const selectedModNames = computed(() =>
   startModIds.value
@@ -267,17 +274,17 @@ onMounted(loadData)
     <main v-else-if="story" class="max-w-4xl mx-auto px-5 py-6 space-y-4">
       <section class="relative overflow-hidden rounded-2xl ring-1 ring-border-subtle bg-hero-radial">
         <div
-          v-if="character?.avatar && character.avatar !== 'none'"
+          v-if="storyHeroImage"
           class="absolute inset-0 bg-cover bg-center opacity-15 blur-2xl pointer-events-none"
-          :style="{ backgroundImage: `url(/thumbnail?type=avatar&file=${encodeURIComponent(character.avatar)})` }"
+          :style="{ backgroundImage: `url(${storyHeroImage})` }"
         />
         <div class="absolute -top-16 -right-12 w-72 h-72 rounded-full bg-accent-500/25 blur-3xl pointer-events-none" />
         <div class="absolute -bottom-20 -left-8 w-72 h-72 rounded-full bg-brand-500/20 blur-3xl pointer-events-none" />
         <div class="relative p-5 md:p-7 flex flex-wrap items-start gap-5">
           <div class="relative shrink-0">
             <img
-              v-if="character?.avatar && character.avatar !== 'none'"
-              :src="`/thumbnail?type=avatar&file=${encodeURIComponent(character.avatar)}`"
+              v-if="storyHeroImage"
+              :src="storyHeroImage"
               class="w-24 h-32 sm:w-28 sm:h-36 rounded-2xl object-cover ring-2 ring-accent-500/40 shadow-glow-accent"
             />
             <div

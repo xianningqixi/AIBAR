@@ -1,15 +1,16 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { createCharacter, editCharacter, fetchCharacter } from '@/api/characters'
+import { createCharacter, editCharacter, editCharacterAvatar, fetchCharacter } from '@/api/characters'
 import { listWorldInfo } from '@/api/worldinfo'
 import { useCharactersStore } from '@/stores/characters'
 import { useUiStore } from '@/stores/ui'
 import { useModelProfilesStore } from '@/stores/modelProfiles'
+import { useImageGenStore } from '@/stores/imageGen'
 import { generateReply } from '@/api/generate'
 import { buildGeneratePayload } from '@/lib/buildPayload'
 import { getMatchedWorldInfo } from '@/lib/worldInfoMatch'
-import type { Character, WorldInfoSummary } from '@/api/types'
+import type { Character, ImageAsset, WorldInfoSummary } from '@/api/types'
 import AppButton from '@/components/ui/AppButton.vue'
 import AppInput from '@/components/ui/AppInput.vue'
 import AppSelect from '@/components/ui/AppSelect.vue'
@@ -17,6 +18,7 @@ import AppTextarea from '@/components/ui/AppTextarea.vue'
 import AppCard from '@/components/ui/AppCard.vue'
 import AppFormField from '@/components/ui/AppFormField.vue'
 import AppPageHeader from '@/components/ui/AppPageHeader.vue'
+import ImageGenerateBox from '@/components/image/ImageGenerateBox.vue'
 import {
   buildCharacterDraftPayload,
   buildCharacterDraftQuestionsPayload,
@@ -24,12 +26,14 @@ import {
   parseDraftQuestions,
   type DraftQuestion,
 } from '@/lib/aiDraft'
+import { buildCharacterImagePrompt } from '@/lib/imagePrompts'
 
 const route = useRoute()
 const router = useRouter()
 const chars = useCharactersStore()
 const ui = useUiStore()
 const models = useModelProfilesStore()
+const imageGen = useImageGenStore()
 
 const avatar = computed(() => decodeURIComponent((route.params.avatar as string) || ''))
 const isEdit = computed(() => Boolean(avatar.value))
@@ -43,6 +47,8 @@ const backTo = computed(() => isEdit.value ? '/characters' : '/create?kind=chara
 const loading = ref(false)
 const original = ref<Character | null>(null)
 const worlds = ref<WorldInfoSummary[]>([])
+const generatedAvatar = ref<ImageAsset | null>(null)
+const applyingAvatar = ref(false)
 
 const form = reactive({
   ch_name: '',
@@ -235,6 +241,9 @@ async function save() {
       const result = await createCharacter(payload())
       ui.addToast('角色已创建', 'success')
       if (typeof result === 'string') {
+        if (generatedAvatar.value) {
+          await editCharacterAvatar(result, await blobFromAsset(generatedAvatar.value), generatedAvatar.value.fileName)
+        }
         router.push(`/character/${encodeURIComponent(result)}/edit`)
       }
     }
@@ -278,6 +287,40 @@ const draftCharacter = computed<Character>(() => ({
   },
 }))
 
+const characterImagePrompt = computed(() => buildCharacterImagePrompt(draftCharacter.value))
+const characterImageContextId = computed(() => avatar.value || form.ch_name.trim() || 'new-character')
+const avatarPreview = computed(() => {
+  if (generatedAvatar.value?.url) return generatedAvatar.value.url
+  if (original.value?.avatar && original.value.avatar !== 'none') {
+    return `/thumbnail?type=avatar&file=${encodeURIComponent(original.value.avatar)}`
+  }
+  return ''
+})
+
+async function blobFromAsset(asset: ImageAsset): Promise<Blob> {
+  const response = await fetch(asset.url, { credentials: 'same-origin' })
+  if (!response.ok) throw new Error('读取生成图片失败')
+  return response.blob()
+}
+
+async function applyGeneratedAvatar(asset: ImageAsset) {
+  generatedAvatar.value = asset
+  if (!isEdit.value) {
+    ui.addToast('头像已暂存，保存角色后会写入角色卡', 'success')
+    return
+  }
+  applyingAvatar.value = true
+  try {
+    await editCharacterAvatar(avatar.value, await blobFromAsset(asset), asset.fileName)
+    ui.addToast('头像已写入角色卡', 'success')
+    await chars.load()
+  } catch (e: any) {
+    ui.addToast(`头像写入失败：${e.message}`, 'error')
+  } finally {
+    applyingAvatar.value = false
+  }
+}
+
 async function runTest() {
   if (!test.prompt.trim()) {
     ui.addToast('请输入测试输入', 'warning')
@@ -315,6 +358,7 @@ async function runTest() {
 onMounted(async () => {
   worlds.value = await listWorldInfo().catch(() => [])
   await models.loadSecrets()
+  await imageGen.load()
   draft.profileId = models.activeProfileId
   test.profileId = models.activeProfileId
   if (isEdit.value) {
@@ -444,6 +488,38 @@ onMounted(async () => {
 
         <div v-if="draft.error" class="text-xs whitespace-pre-wrap bg-red-500/10 text-red-300 ring-1 ring-red-500/20 p-3 rounded-md">
           {{ draft.error }}
+        </div>
+      </AppCard>
+
+      <AppCard padding="md" class="mb-4 space-y-4">
+        <div class="flex flex-wrap items-center justify-between gap-3">
+          <h3 class="flex items-center gap-2 text-sm font-semibold text-ink-primary">
+            <span class="w-1 h-4 rounded-full bg-brand-gradient" />
+            角色图片
+          </h3>
+          <span v-if="applyingAvatar" class="text-xs text-ink-muted">写入头像中…</span>
+        </div>
+        <div class="grid gap-3 md:grid-cols-[180px_minmax(0,1fr)]">
+          <div class="aspect-[3/4] overflow-hidden rounded-xl bg-surface-sunken ring-1 ring-border-subtle">
+            <img
+              v-if="avatarPreview"
+              :src="avatarPreview"
+              class="h-full w-full object-cover"
+              alt=""
+            />
+            <div v-else class="flex h-full items-center justify-center px-4 text-center text-xs text-ink-muted">
+              角色头像
+            </div>
+          </div>
+          <ImageGenerateBox
+            title="生成人物图"
+            description="根据当前表单里的外貌、性格、场景生成角色图。新角色会在保存时写入头像；编辑已有角色会生成后立即写入。"
+            :prompt="characterImagePrompt"
+            context-type="character"
+            :context-id="characterImageContextId"
+            action-label="生成并作为头像"
+            @generated="applyGeneratedAvatar"
+          />
         </div>
       </AppCard>
 

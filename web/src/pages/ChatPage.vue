@@ -8,6 +8,8 @@ import { useModelProfilesStore } from '@/stores/modelProfiles'
 import { useModsStore } from '@/stores/mods'
 import { usePresetsStore } from '@/stores/presets'
 import { usePersonasStore } from '@/stores/personas'
+import { useTtsStore } from '@/stores/tts'
+import { useImageGenStore } from '@/stores/imageGen'
 import ChatTopBar from '@/components/chat/ChatTopBar.vue'
 import MessageList from '@/components/chat/MessageList.vue'
 import ChatInput from '@/components/chat/ChatInput.vue'
@@ -17,13 +19,16 @@ import AppSelect from '@/components/ui/AppSelect.vue'
 import AppCard from '@/components/ui/AppCard.vue'
 import AppInput from '@/components/ui/AppInput.vue'
 import ModPicker from '@/components/mods/ModPicker.vue'
+import ImageGenerateBox from '@/components/image/ImageGenerateBox.vue'
 import { testConnection } from '@/api/generate'
+import { PROVIDER_VOICES, TTS_PROVIDERS } from '@/api/tts'
 import { deleteChat, exportChat, importChat, renameChat } from '@/api/chats'
 import { fetchCharacterChats, setCharacterChat } from '@/api/characters'
 import { listWorldInfo } from '@/api/worldinfo'
 import { saveStory } from '@/api/stories'
 import { getProviderLabel } from '@/lib/providers'
-import type { ChatEntry, Character, ModelProfile, WorldInfoSummary } from '@/api/types'
+import { buildChatMessageImagePrompt } from '@/lib/imagePrompts'
+import type { ChatEntry, Character, ImageAsset, ModelProfile, TtsProvider, WorldInfoSummary } from '@/api/types'
 
 const route = useRoute()
 const router = useRouter()
@@ -34,6 +39,8 @@ const models = useModelProfilesStore()
 const modsStore = useModsStore()
 const presets = usePresetsStore()
 const personas = usePersonasStore()
+const tts = useTtsStore()
+const imageGen = useImageGenStore()
 
 const character = ref<Character | null>(null)
 const chatList = ref<ChatEntry[]>([])
@@ -43,6 +50,9 @@ const importInput = ref<HTMLInputElement>()
 const worlds = ref<WorldInfoSummary[]>([])
 const modelPickerOpen = ref(false)
 const modelSearch = ref('')
+const imageDrawerOpen = ref(false)
+const imageMessageIndex = ref(-1)
+const imagePrompt = ref('')
 
 interface ModelTestResult {
   ok: boolean
@@ -248,6 +258,22 @@ function handleEdit(index: number, content: string) { chat.editMessage(index, co
 function handleDelete(index: number) { chat.deleteMessage(index) }
 function handleSwipe(index: number, direction: -1 | 1) { chat.applySwipe(index, direction) }
 
+function openMessageImagePanel(index: number) {
+  const message = chat.messages[index]
+  if (!message) return
+  imageMessageIndex.value = index
+  const start = Math.max(0, index - 3)
+  const nearby = chat.messages.slice(start, index + 1)
+  imagePrompt.value = buildChatMessageImagePrompt(message, nearby, chat.character)
+  imageDrawerOpen.value = true
+}
+
+async function attachGeneratedImage(asset: ImageAsset) {
+  if (imageMessageIndex.value < 0) return
+  await chat.attachImageToMessage(imageMessageIndex.value, asset)
+  ui.addToast('配图已写入当前聊天记录', 'success')
+}
+
 async function handleProfileSelect(profileId: string) {
   await chat.setSelectedProfileId(profileId)
   ui.addToast('本聊天的模型配置已更新', 'success')
@@ -267,9 +293,65 @@ const globalModIds = computed(() =>
   modsStore.mods.filter((m) => m.enabled).map((m) => m.id),
 )
 
+const playableTtsProviders = computed(() => TTS_PROVIDERS.filter((provider) => provider.playable))
+const currentCharacterAvatar = computed(() => chat.character?.avatar || character.value?.avatar || '')
+const currentCharacterVoice = computed(() => {
+  const avatar = currentCharacterAvatar.value
+  return avatar ? tts.settings.characterVoices[avatar] : undefined
+})
+const chatTtsProvider = computed<TtsProvider>(() => currentCharacterVoice.value?.provider || tts.settings.defaultProvider)
+const chatTtsVoice = computed(() => currentCharacterVoice.value?.voice || tts.settings[chatTtsProvider.value].voice || '')
+const chatTtsVoiceOptions = computed(() => {
+  const provider = chatTtsProvider.value
+  const seen = new Set<string>()
+  const custom = (tts.settings.customVoices[provider] || []).map((voice) => {
+    seen.add(voice.voice)
+    return { value: voice.voice, label: `${voice.name} · 自定义` }
+  })
+  const builtin = (PROVIDER_VOICES[provider] || [])
+    .filter((voice) => !seen.has(voice))
+    .map((voice) => ({ value: voice, label: voice }))
+  return [...custom, ...builtin]
+})
+const chatTtsProviderEnabled = computed(() => !!tts.settings[chatTtsProvider.value]?.enabled)
+const chatTtsFollowingDefault = computed(() => !currentCharacterVoice.value)
+
 function handleModIdsUpdate(ids: string[]) {
   const global = new Set(globalModIds.value)
   void chat.setSelectedModIds(ids.filter((id) => !global.has(id)))
+}
+
+function setChatTtsProvider(provider: string) {
+  const avatar = currentCharacterAvatar.value
+  if (!avatar) return
+  const nextProvider = provider as TtsProvider
+  const nextVoice = tts.settings[nextProvider].voice || PROVIDER_VOICES[nextProvider]?.[0] || ''
+  if (!nextVoice) {
+    ui.addToast('该渠道没有可用音色，请先到设置里创建音色', 'warning')
+    return
+  }
+  if (!tts.settings[nextProvider].enabled) {
+    tts.updateProvider(nextProvider, { enabled: true })
+  }
+  tts.setCharacterVoice(avatar, { provider: nextProvider, voice: nextVoice })
+  ui.addToast('当前角色音色渠道已更新', 'success')
+}
+
+function setChatTtsVoice(voice: string) {
+  const avatar = currentCharacterAvatar.value
+  if (!avatar || !voice.trim()) return
+  if (!tts.settings[chatTtsProvider.value].enabled) {
+    tts.updateProvider(chatTtsProvider.value, { enabled: true })
+  }
+  tts.setCharacterVoice(avatar, { provider: chatTtsProvider.value, voice: voice.trim() })
+  ui.addToast('当前角色音色已更新', 'success')
+}
+
+function followDefaultTtsVoice() {
+  const avatar = currentCharacterAvatar.value
+  if (!avatar) return
+  tts.setCharacterVoice(avatar, null)
+  ui.addToast('当前角色已改为跟随默认音色', 'success')
 }
 
 const filteredProfiles = computed(() => {
@@ -336,6 +418,8 @@ onMounted(async () => {
     modsStore.load(),
     presets.load(),
     personas.load(),
+    tts.load(),
+    imageGen.load(),
   ])
   try {
     worlds.value = await listWorldInfo()
@@ -470,11 +554,13 @@ watch(() => route.fullPath, initChat)
       :loading="chat.loading"
       :streaming="chat.streamingContent"
       :is-streaming="chat.isStreaming"
+      :character-avatar="chat.character?.avatar"
       @edit="handleEdit"
       @delete="handleDelete"
       @regenerate="handleRegenerate"
       @continue="handleContinue"
       @swipe="handleSwipe"
+      @generate-image="openMessageImagePanel"
     />
 
     <div class="border-t border-border-subtle bg-bg/85 backdrop-blur">
@@ -482,8 +568,6 @@ watch(() => route.fullPath, initChat)
         <span>Enter 发送</span><span class="text-ink-muted/30">|</span>
         <span>Shift+Enter 换行</span><span class="text-ink-muted/30">|</span>
         <span>Esc 停止</span>
-        <span class="flex-1" />
-        <span class="hidden sm:inline">⌨ 快捷键</span>
       </div>
       <ChatInput
         :disabled="chat.loading"
@@ -559,7 +643,7 @@ watch(() => route.fullPath, initChat)
     <AppDrawer
       :model-value="ui.modelDrawerOpen"
       side="right"
-      title="模型 / 世界 / MOD"
+      title="模型 / 世界 / MOD / 语音"
       width="22rem"
       @update:model-value="ui.modelDrawerOpen = $event"
     >
@@ -618,6 +702,83 @@ watch(() => route.fullPath, initChat)
         <div>
           <div class="mb-2 flex items-center justify-between gap-2">
             <label class="block text-[11px] font-semibold uppercase tracking-wider text-ink-muted">
+              角色语音
+            </label>
+            <button
+              class="text-[11px] text-brand-300 hover:text-brand-200"
+              @click="router.push({ path: '/settings', query: { tab: 'tts' } })"
+            >
+              管理音色库
+            </button>
+          </div>
+
+          <div class="space-y-3 rounded-xl border border-border-subtle bg-surface/35 p-3">
+            <div class="space-y-1.5">
+              <label class="block text-[11px] font-medium text-ink-muted">TTS 渠道</label>
+              <AppSelect
+                :model-value="chatTtsProvider"
+                @update:model-value="setChatTtsProvider"
+              >
+                <option v-for="provider in playableTtsProviders" :key="provider.id" :value="provider.id">
+                  {{ provider.label }}
+                </option>
+              </AppSelect>
+            </div>
+
+            <div class="space-y-1.5">
+              <label class="block text-[11px] font-medium text-ink-muted">当前角色音色</label>
+              <AppSelect
+                v-if="chatTtsVoiceOptions.length"
+                :model-value="chatTtsVoice"
+                @update:model-value="setChatTtsVoice"
+              >
+                <option v-for="voice in chatTtsVoiceOptions" :key="voice.value" :value="voice.value">
+                  {{ voice.label }}
+                </option>
+              </AppSelect>
+              <AppInput
+                v-else
+                :model-value="chatTtsVoice"
+                placeholder="输入 voice_id"
+                @update:model-value="setChatTtsVoice"
+              />
+            </div>
+
+            <div class="flex flex-wrap items-center justify-between gap-2">
+              <span
+                :class="[
+                  'text-[11px]',
+                  !chatTtsProviderEnabled ? 'text-amber-300' : 'text-ink-muted',
+                ]"
+              >
+                <template v-if="!chatTtsProviderEnabled">当前渠道未启用</template>
+                <template v-else-if="chatTtsFollowingDefault">跟随默认音色</template>
+                <template v-else>已为当前角色覆盖</template>
+              </span>
+              <AppButton
+                v-if="!chatTtsProviderEnabled"
+                size="sm"
+                variant="secondary"
+                @click="tts.updateProvider(chatTtsProvider, { enabled: true })"
+              >
+                启用渠道
+              </AppButton>
+              <AppButton
+                v-else
+                size="sm"
+                variant="secondary"
+                :disabled="chatTtsFollowingDefault"
+                @click="followDefaultTtsVoice"
+              >
+                跟随默认
+              </AppButton>
+            </div>
+          </div>
+        </div>
+
+        <div>
+          <div class="mb-2 flex items-center justify-between gap-2">
+            <label class="block text-[11px] font-semibold uppercase tracking-wider text-ink-muted">
               世界书绑定 (本聊天)
             </label>
             <button
@@ -652,6 +813,32 @@ watch(() => route.fullPath, initChat)
         <AppButton variant="secondary" class="w-full" @click="router.push({ path: '/settings', query: { tab: 'mods' } })">
           管理 MOD
         </AppButton>
+      </div>
+    </AppDrawer>
+
+    <AppDrawer
+      v-model="imageDrawerOpen"
+      side="right"
+      title="消息配图"
+      width="28rem"
+    >
+      <div class="p-4 space-y-4">
+        <div class="rounded-lg bg-surface-sunken p-3 ring-1 ring-border-subtle">
+          <p class="text-[11px] font-semibold uppercase tracking-wider text-ink-muted">选中消息</p>
+          <p class="mt-2 max-h-32 overflow-y-auto whitespace-pre-wrap text-sm leading-relaxed text-ink-secondary">
+            {{ chat.messages[imageMessageIndex]?.content || '未选择消息' }}
+          </p>
+        </div>
+
+        <ImageGenerateBox
+          title="根据消息生成配图"
+          description="默认会带入当前消息、最近上下文和角色设定；你可以先手改 Prompt 再生成。"
+          :prompt="imagePrompt"
+          context-type="chat"
+          :context-id="`${chat.character?.avatar || 'chat'}:${chat.currentChatFile}:${imageMessageIndex}`"
+          action-label="生成并写入消息"
+          @generated="attachGeneratedImage"
+        />
       </div>
     </AppDrawer>
   </div>

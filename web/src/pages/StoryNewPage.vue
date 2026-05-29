@@ -5,10 +5,11 @@ import { useCharactersStore } from '@/stores/characters'
 import { useUiStore } from '@/stores/ui'
 import { useModsStore } from '@/stores/mods'
 import { useModelProfilesStore } from '@/stores/modelProfiles'
+import { useImageGenStore } from '@/stores/imageGen'
 import { getStory, saveStory } from '@/api/stories'
 import { listWorldInfo } from '@/api/worldinfo'
 import { generateReply } from '@/api/generate'
-import type { Character, StoryCard, WorldInfoSummary } from '@/api/types'
+import type { Character, ImageAsset, StoryCard, WorldInfoSummary } from '@/api/types'
 import AppButton from '@/components/ui/AppButton.vue'
 import AppInput from '@/components/ui/AppInput.vue'
 import AppSelect from '@/components/ui/AppSelect.vue'
@@ -18,6 +19,8 @@ import AppFormField from '@/components/ui/AppFormField.vue'
 import AppPageHeader from '@/components/ui/AppPageHeader.vue'
 import AppSpinner from '@/components/ui/AppSpinner.vue'
 import ModPicker from '@/components/mods/ModPicker.vue'
+import ImageGenerateBox from '@/components/image/ImageGenerateBox.vue'
+import { buildStoryImagePrompt } from '@/lib/imagePrompts'
 import {
   buildStoryDraftPayload,
   buildStoryDraftQuestionsPayload,
@@ -32,6 +35,7 @@ const chars = useCharactersStore()
 const ui = useUiStore()
 const mods = useModsStore()
 const models = useModelProfilesStore()
+const imageGen = useImageGenStore()
 
 const isEdit = computed(() => route.name === 'storyEdit')
 const editId = computed(() => isEdit.value ? decodeURIComponent((route.params.id as string) || '') : '')
@@ -49,6 +53,8 @@ const customAssistantOpening = ref('')
 const tags = ref('')
 const world = ref('')
 const systemAppend = ref('')
+const coverImage = ref('')
+const coverAssetId = ref('')
 const modelProfileId = ref('')
 const modIds = ref<string[]>([])
 const worlds = ref<WorldInfoSummary[]>([])
@@ -76,6 +82,13 @@ const assistantOpening = computed(() => {
 const defaultTitle = computed(() => {
   return selectedCharacter.value ? `${selectedCharacter.value.name} 的新故事` : ''
 })
+const storyImagePrompt = computed(() => buildStoryImagePrompt({
+  title: title.value || defaultTitle.value,
+  summary: summary.value,
+  scenario: scenario.value,
+  world: world.value,
+}, selectedCharacter.value))
+const storyImageContextId = computed(() => editId.value || title.value.trim() || 'new-story')
 
 const pageTitle = computed(() => {
   if (isEdit.value) return '编辑故事卡'
@@ -96,6 +109,8 @@ function fillFromStory(story: StoryCard) {
   scenario.value = story.scenario || ''
   openingUserMessage.value = story.openingUserMessage || ''
   systemAppend.value = story.systemAppend || ''
+  coverImage.value = story.coverImage || ''
+  coverAssetId.value = story.coverAssetId || ''
   tags.value = (story.tags || []).join(', ')
   world.value = story.world || ''
   modelProfileId.value = story.modelProfileId || ''
@@ -271,6 +286,8 @@ async function saveHandler() {
       openingUserMessage: openingUserMessage.value.trim(),
       openingAssistantMessage: assistantOpening.value,
       systemAppend: systemAppend.value.trim(),
+      coverImage: coverImage.value,
+      coverAssetId: coverAssetId.value,
       modelProfileId: modelProfileId.value,
       modIds: modIds.value,
     }
@@ -292,6 +309,7 @@ onMounted(async () => {
     chars.characters.length ? Promise.resolve() : chars.load(),
     mods.load(),
     models.loadSecrets(),
+    imageGen.load(),
   ])
   worlds.value = await listWorldInfo().catch(() => [])
   draft.profileId = models.activeProfileId
@@ -310,6 +328,11 @@ onMounted(async () => {
     characterAvatar.value = chars.characters[0].avatar
   }
 })
+
+function applyStoryCover(asset: ImageAsset) {
+  coverImage.value = asset.url
+  coverAssetId.value = asset.id
+}
 </script>
 
 <template>
@@ -484,6 +507,29 @@ onMounted(async () => {
         <AppFormField label="标签" hint="逗号或换行分隔。">
           <AppInput v-model="tags" placeholder="悬疑, 学院, 长线" />
         </AppFormField>
+
+        <div class="grid gap-3 md:grid-cols-[160px_minmax(0,1fr)]">
+          <div class="aspect-[3/4] overflow-hidden rounded-xl bg-surface-sunken ring-1 ring-border-subtle">
+            <img
+              v-if="coverImage"
+              :src="coverImage"
+              class="h-full w-full object-cover"
+              alt=""
+            />
+            <div v-else class="flex h-full items-center justify-center px-4 text-center text-xs text-ink-muted">
+              故事封面
+            </div>
+          </div>
+          <ImageGenerateBox
+            title="生成故事封面"
+            description="使用标题、简介、场景和绑定角色生成封面。生成后会随故事卡保存到本地。"
+            :prompt="storyImagePrompt"
+            context-type="story"
+            :context-id="storyImageContextId"
+            action-label="生成并设为封面"
+            @generated="applyStoryCover"
+          />
+        </div>
       </AppCard>
 
       <AppCard padding="md" class="space-y-4">

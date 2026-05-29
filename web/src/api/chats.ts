@@ -128,6 +128,7 @@ export async function importChat(
 
 function mapServerMessage(m: any): ChatMessage {
   const isUser = m.is_user === true || m.role === 'user'
+  const images = Array.isArray(m.extra?.aibar?.images) ? m.extra.aibar.images : []
   return {
     role: isUser ? 'user' : 'assistant',
     content: m.mes || '',
@@ -135,6 +136,7 @@ function mapServerMessage(m: any): ChatMessage {
     swipes: m.swipes || [],
     swipe_id: m.swipe_id,
     name: m.name,
+    images,
   }
 }
 
@@ -145,7 +147,11 @@ function mapClientMessage(m: ChatMessage, chName: string): Record<string, unknow
     is_user: isUser,
     send_date: m.date || new Date().toISOString(),
     mes: m.content,
-    extra: {},
+    extra: {
+      aibar: {
+        images: m.images || [],
+      },
+    },
     swipes: m.swipes || [],
     swipe_id: m.swipe_id,
   }

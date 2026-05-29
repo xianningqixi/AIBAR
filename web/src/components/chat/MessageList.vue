@@ -11,6 +11,7 @@ const props = defineProps<{
   loading?: boolean
   streaming?: string
   isStreaming?: boolean
+  characterAvatar?: string
 }>()
 
 const { render } = useMarkdown()
@@ -28,6 +29,7 @@ defineEmits<{
   regenerate: []
   continue: []
   swipe: [index: number, direction: -1 | 1]
+  generateImage: [index: number]
 }>()
 
 const container = ref<HTMLElement>()
@@ -88,11 +90,13 @@ function scrollToBottom() {
           :index="idx"
           :show-actions="true"
           :is-last-assistant="idx === lastAssistantIndex"
+          :character-avatar="characterAvatar"
           @edit="(msgIdx: number, content: string) => $emit('edit', msgIdx, content)"
           @delete="$emit('delete', idx)"
           @regenerate="$emit('regenerate')"
           @continue="$emit('continue')"
           @swipe="(msgIdx: number, dir: -1 | 1) => $emit('swipe', msgIdx, dir)"
+          @generate-image="$emit('generateImage', idx)"
         />
 
         <div

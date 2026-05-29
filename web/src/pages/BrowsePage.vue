@@ -271,6 +271,7 @@ function getStoryCharacter(story: StoryCard): Character | undefined {
 }
 
 function storyThumbnail(story: StoryCard): string {
+  if (story.coverImage) return story.coverImage
   const character = getStoryCharacter(story)
   if (!character?.avatar || character.avatar === 'none') return ''
   return `/thumbnail?type=avatar&file=${encodeURIComponent(character.avatar)}`
@@ -409,6 +410,12 @@ onMounted(async () => {
           </button>
           <button class="w-full rounded-lg px-3 py-2 text-left text-sm text-ink-secondary hover:bg-white/5 hover:text-ink-primary" @click="router.push({ path: '/settings', query: { tab: 'presets' } })">
             生成参数
+          </button>
+          <button class="w-full rounded-lg px-3 py-2 text-left text-sm text-ink-secondary hover:bg-white/5 hover:text-ink-primary" @click="router.push({ path: '/settings', query: { tab: 'image' } })">
+            图像生成
+          </button>
+          <button class="w-full rounded-lg px-3 py-2 text-left text-sm text-ink-secondary hover:bg-white/5 hover:text-ink-primary" @click="router.push({ path: '/settings', query: { tab: 'tts' } })">
+            语音配置
           </button>
           <button class="w-full rounded-lg px-3 py-2 text-left text-sm text-ink-secondary hover:bg-white/5 hover:text-ink-primary" @click="router.push({ path: '/settings', query: { tab: 'personas' } })">
             我的身份

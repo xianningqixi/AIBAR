@@ -47,6 +47,7 @@ export interface ChatMessage {
   swipes?: string[]
   swipe_id?: number
   reasoning?: string
+  images?: ImageAsset[]
   mes?: string
   name?: string
   is_user?: boolean
@@ -73,6 +74,8 @@ export interface StoryCard {
   title: string
   summary?: string
   characterAvatar: string
+  coverImage?: string
+  coverAssetId?: string
   tags?: string[]
   world?: string
   scenario?: string
@@ -116,6 +119,107 @@ export interface Persona {
   name: string
   description: string
   avatar?: string
+}
+
+export type TtsProvider =
+  | 'alltalk'
+  | 'azure'
+  | 'chatterbox'
+  | 'chutes'
+  | 'coqui'
+  | 'cosyvoice'
+  | 'edge'
+  | 'elevenlabs'
+  | 'electronhub'
+  | 'google_translate'
+  | 'google_native'
+  | 'gsvi'
+  | 'gpt_sovits_adapter'
+  | 'gpt_sovits_v2'
+  | 'kokoro'
+  | 'minimax'
+  | 'novel'
+  | 'openai'
+  | 'custom'
+  | 'pollinations'
+  | 'sbvits2'
+  | 'silero'
+  | 'speecht5'
+  | 'system'
+  | 'tts_webui'
+  | 'vits'
+  | 'xttsv2'
+  | 'volcengine'
+  | 'mimo'
+
+export interface TtsProviderConfig {
+  enabled: boolean
+  model: string
+  voice: string
+  endpoint?: string
+  extra?: Record<string, string | number | boolean>
+  apiKeySaved?: boolean
+}
+
+export interface TtsCharacterVoice {
+  provider: TtsProvider
+  voice: string
+}
+
+export interface TtsVoiceProfile {
+  id: string
+  name: string
+  voice: string
+  model?: string
+  note?: string
+}
+
+export type TtsSettings = {
+  enabled: boolean
+  defaultProvider: TtsProvider
+  characterVoices: Record<string, TtsCharacterVoice>
+  customVoices: Record<TtsProvider, TtsVoiceProfile[]>
+} & Record<TtsProvider, TtsProviderConfig>
+
+export type ImageGenProvider =
+  | 'auto'
+  | 'openai'
+  | 'novel'
+  | 'horde'
+  | 'pollinations'
+
+export interface ImageGenSettings {
+  provider: ImageGenProvider
+  model: string
+  width: number
+  height: number
+  steps: number
+  scale: number
+  sampler: string
+  seed: number
+  promptPrefix: string
+  negativePrompt: string
+  autoUrl: string
+  autoAuth: string
+  openaiSize: string
+  enhance: boolean
+}
+
+export interface ImageAsset {
+  id: string
+  fileName: string
+  url: string
+  format: string
+  contextType?: string
+  contextId?: string
+  prompt?: string
+  negativePrompt?: string
+  provider?: string
+  model?: string
+  width?: number
+  height?: number
+  seed?: string
+  createdAt?: string
 }
 
 export interface StreamState {

@@ -2,12 +2,15 @@
 import { ref, computed } from 'vue'
 import type { ChatMessage } from '@/api/types'
 import { useMarkdown } from '@/composables/useMarkdown'
+import { useTtsStore } from '@/stores/tts'
+import { useUiStore } from '@/stores/ui'
 
 const props = defineProps<{
   message: ChatMessage
   index: number
   showActions?: boolean
   isLastAssistant?: boolean
+  characterAvatar?: string
 }>()
 
 defineEmits<{
@@ -16,15 +19,22 @@ defineEmits<{
   regenerate: []
   continue: []
   swipe: [index: number, direction: -1 | 1]
+  generateImage: [index: number]
 }>()
 
 const { render } = useMarkdown()
+const tts = useTtsStore()
+const ui = useUiStore()
 const editing = ref(false)
 const editContent = ref(props.message.content)
 const thinkingOpen = ref(false)
 
 const isUser = computed(() => props.message.role === 'user')
 const hasReasoning = computed(() => !isUser.value && Boolean(props.message.reasoning))
+const messageKey = computed(() => `${props.characterAvatar || ''}#${props.index}`)
+const ttsActive = computed(() => tts.currentMessageKey === messageKey.value)
+const ttsBusy = computed(() => ttsActive.value && (tts.isLoadingAudio || tts.isPlaying))
+const canReadAloud = computed(() => props.message.role !== 'system' && Boolean(props.message.content.trim()))
 
 function startEditing() {
   editContent.value = props.message.content
@@ -33,6 +43,24 @@ function startEditing() {
 
 function copyToClipboard(text: string) {
   navigator.clipboard.writeText(text)
+}
+
+async function togglePlay() {
+  const avatar = isUser.value ? undefined : props.characterAvatar
+  const characterVoice = avatar ? tts.settings.characterVoices[avatar] : undefined
+  const provider = characterVoice?.provider || tts.settings.defaultProvider
+
+  if (!tts.enabled) {
+    tts.setEnabled(true)
+  }
+  if (!tts.settings[provider].enabled) {
+    tts.updateProvider(provider, { enabled: true })
+  }
+  try {
+    await tts.play(props.message.content, messageKey.value, avatar)
+  } catch (e: any) {
+    ui.addToast(`播放失败：${e.message || '请检查配置'}`, 'error')
+  }
 }
 </script>
 
@@ -93,9 +121,53 @@ function copyToClipboard(text: string) {
       </div>
       <div v-else class="prose prose-invert prose-sm max-w-none break-words" v-html="render(message.content)" />
 
+      <div v-if="message.images?.length" class="mt-3 grid grid-cols-2 gap-2">
+        <a
+          v-for="image in message.images"
+          :key="image.id"
+          :href="image.url"
+          target="_blank"
+          rel="noreferrer"
+          class="block overflow-hidden rounded-lg border border-white/10 bg-surface-sunken"
+          :title="image.prompt || '生成图片'"
+        >
+          <img :src="image.url" class="h-36 w-full object-cover" alt="" />
+        </a>
+      </div>
+
+      <div
+        v-if="showActions && !editing && canReadAloud"
+        class="mt-3 flex items-center gap-2"
+      >
+        <button
+          :class="[
+            'inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1 text-[11px] font-medium transition-colors',
+            ttsActive
+              ? 'border-brand-500/40 bg-brand-500/15 text-brand-200'
+              : 'border-white/10 bg-white/[0.03] text-ink-secondary hover:border-brand-500/30 hover:bg-brand-500/10 hover:text-brand-200',
+          ]"
+          :title="ttsActive && tts.isPlaying ? '停止播放' : '朗读此消息'"
+          @click="togglePlay"
+        >
+          <svg
+            v-if="ttsActive && tts.isLoadingAudio"
+            class="h-3 w-3 animate-spin" viewBox="0 0 24 24" fill="none"
+          ><circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="2" stroke-dasharray="48" stroke-dashoffset="36" /></svg>
+          <svg
+            v-else-if="ttsActive && tts.isPlaying"
+            class="h-3 w-3" viewBox="0 0 24 24" fill="currentColor"
+          ><rect x="6" y="5" width="4" height="14" rx="1" /><rect x="14" y="5" width="4" height="14" rx="1" /></svg>
+          <svg
+            v-else
+            class="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+          ><path stroke-linecap="round" stroke-linejoin="round" d="M11 5L6 9H2v6h4l5 4V5z" /><path stroke-linecap="round" stroke-linejoin="round" d="M15.54 8.46a5 5 0 010 7.07M19.07 4.93a10 10 0 010 14.14" /></svg>
+          <span>{{ ttsBusy ? '停止' : '朗读' }}</span>
+        </button>
+      </div>
+
       <div
         v-if="showActions && !editing"
-        class="flex items-center gap-0.5 mt-2 pt-1.5 border-t border-white/5 opacity-0 group-hover:opacity-100 transition-opacity"
+        class="flex items-center gap-0.5 mt-1 opacity-0 group-hover:opacity-100 transition-opacity"
       >
         <button
           class="px-2 py-0.5 text-[10px] rounded text-ink-muted hover:text-ink-primary hover:bg-white/5 transition-colors"
@@ -108,6 +180,12 @@ function copyToClipboard(text: string) {
           @click="$emit('delete', index)"
         >
           删除
+        </button>
+        <button
+          class="px-2 py-0.5 text-[10px] rounded text-ink-muted hover:text-ink-primary hover:bg-white/5 transition-colors"
+          @click="$emit('generateImage', index)"
+        >
+          配图
         </button>
         <template v-if="!isUser">
           <button

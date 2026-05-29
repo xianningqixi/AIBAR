@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
-import type { ChatMessage, StreamState, Character, ModelProfile } from '@/api/types'
+import type { ChatMessage, StreamState, Character, ImageAsset, ModelProfile } from '@/api/types'
 import { fetchChat, saveChat } from '@/api/chats'
 import { generateReplyStream } from '@/api/generate'
 import { buildGeneratePayload, getCharacterChatName } from '@/lib/buildPayload'
@@ -472,6 +472,21 @@ export const useChatStore = defineStore('chat', () => {
     }
   }
 
+  async function attachImageToMessage(index: number, asset: ImageAsset) {
+    if (index < 0 || index >= messages.value.length) return
+    const msg = messages.value[index]
+    const images = Array.isArray(msg.images) ? [...msg.images] : []
+    if (!images.some((image) => image.id === asset.id)) {
+      images.push(asset)
+    }
+    messages.value[index] = { ...msg, images }
+    try {
+      await persist()
+    } catch (e: any) {
+      error.value = 'Save failed: ' + e.message
+    }
+  }
+
   async function continueLastReply() {
     if (streaming.value.active) return
     const lastIndex = messages.value.length - 1
@@ -534,6 +549,7 @@ export const useChatStore = defineStore('chat', () => {
     persist,
     editMessage,
     deleteMessage,
+    attachImageToMessage,
     continueLastReply,
     applySwipe,
     setSelectedProfileId,

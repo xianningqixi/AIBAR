@@ -18,6 +18,13 @@ export async function editCharacter(avatar: string, data: Record<string, unknown
   return apiPost('/api/characters/edit', { avatar_url: avatar, ...data })
 }
 
+export async function editCharacterAvatar(avatar: string, file: Blob, fileName = 'avatar.png'): Promise<unknown> {
+  const fd = new FormData()
+  fd.append('avatar', file, fileName)
+  fd.append('avatar_url', avatar)
+  return apiPostForm('/api/characters/edit-avatar', fd)
+}
+
 export async function deleteCharacter(avatar: string): Promise<unknown> {
   return apiPost('/api/characters/delete', { avatar_url: avatar, delete_chats: true })
 }

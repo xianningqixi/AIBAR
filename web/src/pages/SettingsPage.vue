@@ -6,7 +6,12 @@ import { useUiStore } from '@/stores/ui'
 import { useModsStore, type ModItem } from '@/stores/mods'
 import { usePresetsStore } from '@/stores/presets'
 import { usePersonasStore } from '@/stores/personas'
-import type { Preset, Persona } from '@/api/types'
+import { useTtsStore } from '@/stores/tts'
+import { useImageGenStore } from '@/stores/imageGen'
+import { writeSecret } from '@/api/secrets'
+import { TTS_PROVIDERS, PROVIDER_MODELS, PROVIDER_VOICES, synthesizeSpeech, type ProviderSecret } from '@/api/tts'
+import { IMAGE_PROVIDERS, listImageAssets } from '@/api/imageGen'
+import type { ImageAsset, ImageGenProvider, Preset, Persona, TtsProvider, TtsVoiceProfile } from '@/api/types'
 import AppButton from '@/components/ui/AppButton.vue'
 import AppInput from '@/components/ui/AppInput.vue'
 import AppSelect from '@/components/ui/AppSelect.vue'
@@ -33,12 +38,14 @@ const ui = useUiStore()
 const mods = useModsStore()
 const presets = usePresetsStore()
 const personas = usePersonasStore()
+const tts = useTtsStore()
+const imageGen = useImageGenStore()
 const route = useRoute()
 const router = useRouter()
 
 function initialTab(): string {
   const raw = String(route.query.tab || '')
-  if (['model', 'mods', 'world', 'presets', 'personas', 'about'].includes(raw)) return raw
+  if (['model', 'mods', 'world', 'presets', 'personas', 'image', 'tts', 'about'].includes(raw)) return raw
   return route.path === '/mods' ? 'mods' : 'model'
 }
 
@@ -77,8 +84,323 @@ const tabs = [
   { key: 'personas', label: '我的身份' },
   { key: 'world', label: '世界书' },
   { key: 'mods', label: '提示词 MOD' },
+  { key: 'image', label: '图像生成' },
+  { key: 'tts', label: '语音 (TTS)' },
   { key: 'about', label: '关于' },
 ]
+
+const ttsKeyDrafts = reactive<Record<string, string>>({})
+const savingTtsKey = ref('')
+
+interface TtsTestResult { ok: boolean; message: string }
+const ttsTestResults = reactive<Record<string, TtsTestResult | undefined>>({})
+const ttsTesting = reactive<Record<string, boolean>>({})
+const TTS_SAMPLE_TEXT = '你好，我是 AIBAR 的语音测试。'
+let testAudio: HTMLAudioElement | null = null
+
+const ttsProviderOrder = new Map(TTS_PROVIDERS.map((provider, index) => [provider.id, index]))
+const playableTtsProviders = computed(() => TTS_PROVIDERS
+  .filter((provider) => provider.playable)
+  .sort((a, b) => {
+    const rank = (provider: TtsProvider) => {
+      if (tts.settings.defaultProvider === provider) return 0
+      return tts.settings[provider].enabled ? 1 : 2
+    }
+    return rank(a.id) - rank(b.id) || (ttsProviderOrder.get(a.id) ?? 0) - (ttsProviderOrder.get(b.id) ?? 0)
+  }))
+const selectedTtsProvider = ref<TtsProvider>('mimo')
+const selectedTtsProviderMeta = computed(() => (
+  playableTtsProviders.value.find((provider) => provider.id === selectedTtsProvider.value) || playableTtsProviders.value[0]
+))
+const ttsVoiceSearch = ref('')
+const ttsVoiceDraft = reactive({ name: '', voice: '', note: '' })
+
+const imageKeyDrafts = reactive<Record<string, string>>({})
+const savingImageKey = ref('')
+const imageTestPrompt = ref('A cinematic story cover, a mysterious tavern at night, warm light, detailed atmosphere, no text')
+const imageTestAsset = ref<ImageAsset | null>(null)
+const imageHistory = ref<ImageAsset[]>([])
+const imageTesting = ref(false)
+const selectedImageProviderMeta = computed(() => (
+  IMAGE_PROVIDERS.find((provider) => provider.id === imageGen.settings.provider) || IMAGE_PROVIDERS[0]
+))
+
+function setImageProvider(provider: string) {
+  imageGen.setProvider(provider as ImageGenProvider)
+  const meta = IMAGE_PROVIDERS.find((item) => item.id === provider)
+  if (meta && !imageGen.settings.model) {
+    imageGen.updateSettings({ model: meta.defaultModel })
+  }
+}
+
+function imageSecretDraftKey(provider: ImageGenProvider, key: string): string {
+  return `${provider}:${key}`
+}
+
+function setImageSecretDraft(value: string) {
+  const meta = selectedImageProviderMeta.value
+  if (!meta.secretKey) return
+  imageKeyDrafts[imageSecretDraftKey(meta.id, meta.secretKey)] = value
+}
+
+async function saveImageSecret() {
+  const meta = selectedImageProviderMeta.value
+  if (!meta.secretKey) return
+  const draftKey = imageSecretDraftKey(meta.id, meta.secretKey)
+  const value = imageKeyDrafts[draftKey]
+  if (!value?.trim()) {
+    ui.addToast(`请输入 ${meta.secretLabel || 'API Key'}`, 'warning')
+    return
+  }
+  savingImageKey.value = draftKey
+  try {
+    await writeSecret(meta.secretKey, value.trim(), meta.secretLabel || meta.label)
+    imageKeyDrafts[draftKey] = ''
+    ui.addToast(`${meta.secretLabel || 'API Key'} 已写入 ST secrets`, 'success')
+  } catch (e: any) {
+    ui.addToast(`保存失败：${e.message}`, 'error')
+  } finally {
+    savingImageKey.value = ''
+  }
+}
+
+async function loadImageHistory() {
+  imageHistory.value = await listImageAssets().catch(() => [])
+}
+
+async function runImageTest() {
+  imageTesting.value = true
+  imageTestAsset.value = null
+  try {
+    const asset = await imageGen.generateAndSave({
+      prompt: imageTestPrompt.value,
+      contextType: 'settings',
+      contextId: 'image-test',
+    })
+    imageTestAsset.value = asset
+    await loadImageHistory()
+    ui.addToast('测试图片已生成', 'success')
+  } catch (e: any) {
+    ui.addToast(`测试失败：${e.message || '请检查图像配置'}`, 'error')
+  } finally {
+    imageTesting.value = false
+  }
+}
+
+interface TtsVoiceItem extends TtsVoiceProfile {
+  provider: TtsProvider
+  source: '内置' | '自定义'
+}
+
+function selectTtsProvider(provider: TtsProvider) {
+  selectedTtsProvider.value = provider
+}
+
+function setDefaultTtsProvider(provider: TtsProvider) {
+  tts.setDefaultProvider(provider)
+  selectedTtsProvider.value = provider
+}
+
+function ttsProviderStatusLabel(provider: TtsProvider): string {
+  if (tts.settings.defaultProvider === provider) return '默认'
+  if (tts.settings[provider].enabled) return '已启用'
+  return '未启用'
+}
+
+function secretDraftKey(provider: TtsProvider, secretKey: string): string {
+  return `${provider}:${secretKey}`
+}
+
+function getTtsExtra(provider: TtsProvider, key: string) {
+  return tts.settings[provider].extra?.[key] ?? ''
+}
+
+function updateTtsExtra(provider: TtsProvider, key: string, value: string) {
+  tts.updateProvider(provider, {
+    extra: {
+      ...(tts.settings[provider].extra || {}),
+      [key]: value,
+    },
+  })
+}
+
+function ttsVoicePlaceholder(provider: TtsProvider): string {
+  const voices = PROVIDER_VOICES[provider] || []
+  return voices.length ? voices.slice(0, 3).join(' / ') : '输入 ST voice_id'
+}
+
+const selectedTtsVoices = computed<TtsVoiceItem[]>(() => {
+  const provider = selectedTtsProviderMeta.value.id
+  const builtIn = (PROVIDER_VOICES[provider] || []).map((voice) => ({
+    id: `${provider}:${voice}`,
+    name: voice,
+    voice,
+    note: undefined,
+    provider,
+    source: '内置' as const,
+  }))
+  const custom = (tts.settings.customVoices[provider] || []).map((voice) => ({
+    ...voice,
+    provider,
+    source: '自定义' as const,
+  }))
+  const keyword = ttsVoiceSearch.value.trim().toLowerCase()
+  const list = [...custom, ...builtIn]
+  if (!keyword) return list
+  return list.filter((item) => (
+    item.name.toLowerCase().includes(keyword)
+    || item.voice.toLowerCase().includes(keyword)
+    || item.note?.toLowerCase().includes(keyword)
+  ))
+})
+
+function isCurrentTtsVoice(voice: TtsVoiceItem): boolean {
+  return tts.settings[voice.provider].voice === voice.voice
+}
+
+function selectTtsVoice(voice: TtsVoiceItem) {
+  tts.updateProvider(voice.provider, {
+    voice: voice.voice,
+    model: voice.model || tts.settings[voice.provider].model,
+  })
+  ui.addToast(`已选择音色：${voice.name}`, 'success')
+}
+
+async function testTtsVoice(voice: TtsVoiceItem) {
+  ttsTesting[voice.provider] = true
+  delete ttsTestResults[voice.provider]
+  if (testAudio) {
+    testAudio.pause()
+    testAudio.src = ''
+    testAudio = null
+  }
+  try {
+    const cfg = tts.settings[voice.provider]
+    const blob = await synthesizeSpeech({
+      text: TTS_SAMPLE_TEXT,
+      provider: voice.provider,
+      model: voice.model || cfg.model,
+      voice: voice.voice,
+      endpoint: cfg.endpoint,
+      extra: cfg.extra,
+    })
+    const url = URL.createObjectURL(blob)
+    const audio = new Audio(url)
+    testAudio = audio
+    audio.addEventListener('ended', () => {
+      URL.revokeObjectURL(url)
+      if (testAudio === audio) testAudio = null
+    })
+    audio.addEventListener('error', () => {
+      URL.revokeObjectURL(url)
+      if (testAudio === audio) testAudio = null
+    })
+    await audio.play()
+    ttsTestResults[voice.provider] = { ok: true, message: `${voice.name} 播放成功` }
+  } catch (e: any) {
+    ttsTestResults[voice.provider] = { ok: false, message: e?.message || '测试失败' }
+  } finally {
+    ttsTesting[voice.provider] = false
+  }
+}
+
+function createTtsVoiceId(): string {
+  return typeof crypto !== 'undefined' && 'randomUUID' in crypto
+    ? crypto.randomUUID()
+    : `${selectedTtsProvider.value}-${Date.now()}`
+}
+
+function addTtsVoiceProfile() {
+  const voice = ttsVoiceDraft.voice.trim()
+  if (!voice) {
+    ui.addToast('请输入 voice_id', 'warning')
+    return
+  }
+  const provider = selectedTtsProviderMeta.value.id
+  tts.addCustomVoice(provider, {
+    id: createTtsVoiceId(),
+    name: ttsVoiceDraft.name.trim() || voice,
+    voice,
+    model: tts.settings[provider].model || undefined,
+    note: ttsVoiceDraft.note.trim() || undefined,
+  })
+  ttsVoiceDraft.name = ''
+  ttsVoiceDraft.voice = ''
+  ttsVoiceDraft.note = ''
+  ui.addToast('音色已保存', 'success')
+}
+
+function removeTtsVoiceProfile(voice: TtsVoiceItem) {
+  if (voice.source !== '自定义') return
+  tts.removeCustomVoice(voice.provider, voice.id)
+  ui.addToast('音色已删除', 'success')
+}
+
+watch(selectedTtsProvider, () => {
+  ttsVoiceSearch.value = ''
+  ttsVoiceDraft.name = ''
+  ttsVoiceDraft.voice = ''
+  ttsVoiceDraft.note = ''
+})
+
+async function testTtsProvider(provider: TtsProvider) {
+  ttsTesting[provider] = true
+  delete ttsTestResults[provider]
+  if (testAudio) {
+    testAudio.pause()
+    testAudio.src = ''
+    testAudio = null
+  }
+  try {
+    const cfg = tts.settings[provider]
+    const blob = await synthesizeSpeech({
+      text: TTS_SAMPLE_TEXT,
+      provider,
+      model: cfg.model,
+      voice: cfg.voice,
+      endpoint: cfg.endpoint,
+      extra: cfg.extra,
+    })
+    const url = URL.createObjectURL(blob)
+    const audio = new Audio(url)
+    testAudio = audio
+    audio.addEventListener('ended', () => {
+      URL.revokeObjectURL(url)
+      if (testAudio === audio) testAudio = null
+    })
+    audio.addEventListener('error', () => {
+      URL.revokeObjectURL(url)
+      if (testAudio === audio) testAudio = null
+    })
+    await audio.play()
+    ttsTestResults[provider] = { ok: true, message: '播放成功' }
+  } catch (e: any) {
+    ttsTestResults[provider] = { ok: false, message: e?.message || '测试失败' }
+  } finally {
+    ttsTesting[provider] = false
+  }
+}
+
+async function saveTtsSecret(provider: TtsProvider, secret: ProviderSecret) {
+  const draftKey = secretDraftKey(provider, secret.key)
+  const value = ttsKeyDrafts[draftKey]
+  if (!value?.trim()) {
+    ui.addToast(`请输入 ${secret.label}`, 'warning')
+    return
+  }
+  const meta = TTS_PROVIDERS.find((p) => p.id === provider)
+  if (!meta) return
+  savingTtsKey.value = draftKey
+  try {
+    await writeSecret(secret.key, value.trim(), `${meta.label} ${secret.label}`)
+    ttsKeyDrafts[draftKey] = ''
+    ui.addToast(`${secret.label} 已写入 ST secrets`, 'success')
+  } catch (e: any) {
+    ui.addToast(`保存失败：${e.message}`, 'error')
+  } finally {
+    savingTtsKey.value = ''
+  }
+}
 
 const positionLabels: Record<string, string> = {
   system_prepend: '系统前缀',
@@ -559,6 +881,8 @@ onMounted(async () => {
     mods.load(),
     presets.load(),
     personas.load(),
+    tts.load(),
+    imageGen.load(),
   ])
   selectedProfileId.value = models.activeProfileId || models.profiles[0]?.id || ''
   hydrateSetupFromProfile(selectedProfile.value)
@@ -566,6 +890,7 @@ onMounted(async () => {
   selectedPresetId.value = presets.activePresetId || presets.presets[0]?.id || ''
   selectedPersonaId.value = personas.activePersonaId || personas.personas[0]?.id || ''
   await loadWorlds()
+  await loadImageHistory()
 })
 
 watch(activeTab, (tab) => {
@@ -611,13 +936,13 @@ watch(
           <div>
             <p class="text-[11px] uppercase tracking-[0.2em] text-brand-300/80 mb-2">配置中心</p>
             <h2 class="text-xl md:text-2xl font-semibold text-ink-primary">
-              管理 <span class="text-brand-300">模型 · 生成参数 · 资料库</span>
+              管理 <span class="text-brand-300">模型 · 图像 · 语音 · 资料库</span>
             </h2>
             <p class="mt-1.5 text-xs md:text-sm text-ink-secondary max-w-xl">
-              模型、生成参数、我的身份、世界书和 MOD 分开管理。世界书是设定资料库，MOD 是提示词插件。
+              模型、生成参数、图像生成、语音、世界书和 MOD 分开管理。世界书是设定资料库，MOD 是提示词插件。
             </p>
           </div>
-          <div class="grid grid-cols-2 gap-2.5 md:min-w-[520px] md:grid-cols-5">
+          <div class="grid grid-cols-2 gap-2.5 md:min-w-[620px] md:grid-cols-6">
             <div class="rounded-xl bg-surface/70 backdrop-blur ring-1 ring-border-subtle p-3 text-center">
               <p class="text-[10px] uppercase tracking-wider text-ink-muted">模型</p>
               <p class="mt-1 text-xl font-semibold text-ink-primary tabular-nums">{{ models.profiles.length }}</p>
@@ -637,6 +962,10 @@ watch(
             <div class="rounded-xl bg-surface/70 backdrop-blur ring-1 ring-border-subtle p-3 text-center">
               <p class="text-[10px] uppercase tracking-wider text-ink-muted">MOD</p>
               <p class="mt-1 text-xl font-semibold text-ink-primary tabular-nums">{{ mods.mods.length }}</p>
+            </div>
+            <div class="rounded-xl bg-surface/70 backdrop-blur ring-1 ring-border-subtle p-3 text-center">
+              <p class="text-[10px] uppercase tracking-wider text-ink-muted">图片</p>
+              <p class="mt-1 text-xl font-semibold text-ink-primary tabular-nums">{{ imageHistory.length }}</p>
             </div>
           </div>
         </div>
@@ -1390,6 +1719,530 @@ watch(
           </template>
         </AppCard>
         </div>
+      </div>
+
+      <div v-if="activeTab === 'image'" class="space-y-4">
+        <AppCard padding="md" tone="glow" class="space-y-4">
+          <div class="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <p class="text-xs uppercase tracking-[0.18em] text-brand-300 font-semibold">文生图配置</p>
+              <h2 class="mt-2 text-xl font-semibold text-ink-primary">统一配置后，故事封面、角色图、聊天配图都会复用这里。</h2>
+              <p class="mt-1 text-sm text-ink-secondary max-w-2xl leading-relaxed">
+                图片会保存到本地 ST 用户目录下的 AIBAR 图片库，聊天记录和故事卡只保存图片引用。
+              </p>
+            </div>
+            <div class="rounded-lg bg-surface-sunken px-3 py-2 ring-1 ring-border-subtle">
+              <p class="text-[11px] text-ink-muted">当前渠道</p>
+              <p class="mt-0.5 max-w-[260px] truncate text-sm font-semibold text-ink-primary">
+                {{ selectedImageProviderMeta.label }}
+              </p>
+            </div>
+          </div>
+
+          <div class="grid md:grid-cols-3 gap-3">
+            <button
+              v-for="provider in IMAGE_PROVIDERS"
+              :key="provider.id"
+              type="button"
+              class="min-h-[108px] rounded-xl p-4 text-left ring-1 transition-all"
+              :class="imageGen.settings.provider === provider.id
+                ? 'bg-brand-500/15 text-brand-100 ring-brand-400/60'
+                : 'bg-surface-elevated text-ink-secondary ring-border-subtle hover:text-ink-primary hover:ring-brand-500/40'"
+              @click="setImageProvider(provider.id)"
+            >
+              <p class="text-sm font-semibold">{{ provider.label }}</p>
+              <p class="mt-1 text-xs leading-relaxed text-ink-muted">{{ provider.description }}</p>
+            </button>
+          </div>
+        </AppCard>
+
+        <div class="grid lg:grid-cols-[minmax(0,1fr)_340px] gap-4 items-start">
+          <AppCard padding="md" class="space-y-4">
+            <div class="grid md:grid-cols-2 gap-3">
+              <AppFormField label="模型">
+                <AppInput
+                  :model-value="imageGen.settings.model"
+                  :placeholder="selectedImageProviderMeta.defaultModel || '使用服务端当前模型'"
+                  @update:model-value="(v) => imageGen.updateSettings({ model: v })"
+                />
+              </AppFormField>
+              <AppFormField v-if="imageGen.settings.provider === 'openai'" label="OpenAI 尺寸">
+                <AppSelect
+                  :model-value="imageGen.settings.openaiSize"
+                  @update:model-value="(v) => imageGen.updateSettings({ openaiSize: v as string })"
+                >
+                  <option value="1024x1024">1024 x 1024</option>
+                  <option value="1024x1792">1024 x 1792</option>
+                  <option value="1792x1024">1792 x 1024</option>
+                </AppSelect>
+              </AppFormField>
+              <template v-else>
+                <AppFormField label="宽度">
+                  <AppInput
+                    type="number"
+                    min="256"
+                    max="2048"
+                    step="64"
+                    :model-value="imageGen.settings.width"
+                    @update:model-value="(v) => imageGen.updateSettings({ width: parseInt(v) || 768 })"
+                  />
+                </AppFormField>
+                <AppFormField label="高度">
+                  <AppInput
+                    type="number"
+                    min="256"
+                    max="2048"
+                    step="64"
+                    :model-value="imageGen.settings.height"
+                    @update:model-value="(v) => imageGen.updateSettings({ height: parseInt(v) || 1024 })"
+                  />
+                </AppFormField>
+              </template>
+
+              <AppFormField label="采样器">
+                <AppInput
+                  :model-value="imageGen.settings.sampler"
+                  placeholder="DPM++ 2M Karras / k_euler"
+                  @update:model-value="(v) => imageGen.updateSettings({ sampler: v })"
+                />
+              </AppFormField>
+              <AppFormField label="Steps">
+                <AppInput
+                  type="number"
+                  min="1"
+                  max="80"
+                  :model-value="imageGen.settings.steps"
+                  @update:model-value="(v) => imageGen.updateSettings({ steps: parseInt(v) || 28 })"
+                />
+              </AppFormField>
+              <AppFormField label="CFG Scale">
+                <AppInput
+                  type="number"
+                  min="1"
+                  max="30"
+                  step="0.5"
+                  :model-value="imageGen.settings.scale"
+                  @update:model-value="(v) => imageGen.updateSettings({ scale: Number(v) || 7 })"
+                />
+              </AppFormField>
+              <AppFormField label="Seed" hint="-1 表示随机。">
+                <AppInput
+                  type="number"
+                  :model-value="imageGen.settings.seed"
+                  @update:model-value="(v) => imageGen.updateSettings({ seed: parseInt(v) || -1 })"
+                />
+              </AppFormField>
+            </div>
+
+            <div v-if="imageGen.settings.provider === 'auto'" class="grid md:grid-cols-2 gap-3 rounded-xl bg-surface-sunken p-3 ring-1 ring-border-subtle">
+              <AppFormField label="SD WebUI 地址">
+                <AppInput
+                  :model-value="imageGen.settings.autoUrl"
+                  placeholder="http://127.0.0.1:7860"
+                  @update:model-value="(v) => imageGen.updateSettings({ autoUrl: v })"
+                />
+              </AppFormField>
+              <AppFormField label="Basic Auth" hint="如果没有就留空。">
+                <AppInput
+                  :model-value="imageGen.settings.autoAuth"
+                  placeholder="user:password"
+                  @update:model-value="(v) => imageGen.updateSettings({ autoAuth: v })"
+                />
+              </AppFormField>
+              <div class="md:col-span-2 flex justify-end">
+                <AppButton
+                  size="sm"
+                  variant="secondary"
+                  :disabled="imageGen.testing"
+                  @click="() => imageGen.testCurrentProvider().then(() => ui.addToast('SD WebUI 连接正常', 'success')).catch((e) => ui.addToast(`连接失败：${e.message}`, 'error'))"
+                >
+                  {{ imageGen.testing ? '检测中…' : '检测连接' }}
+                </AppButton>
+              </div>
+            </div>
+
+            <div v-if="selectedImageProviderMeta.secretKey" class="rounded-xl bg-surface-sunken p-3 ring-1 ring-border-subtle">
+              <AppFormField :label="selectedImageProviderMeta.secretLabel || 'API Key'" :hint="`ST secrets ${selectedImageProviderMeta.secretKey}`">
+                <div class="flex gap-2">
+                  <AppInput
+                    :model-value="imageKeyDrafts[imageSecretDraftKey(selectedImageProviderMeta.id, selectedImageProviderMeta.secretKey)] || ''"
+                    type="password"
+                    placeholder="留空不修改"
+                    @update:model-value="setImageSecretDraft"
+                  />
+                  <AppButton
+                    size="sm"
+                    variant="secondary"
+                    :disabled="savingImageKey === imageSecretDraftKey(selectedImageProviderMeta.id, selectedImageProviderMeta.secretKey)"
+                    @click="saveImageSecret"
+                  >
+                    {{ savingImageKey === imageSecretDraftKey(selectedImageProviderMeta.id, selectedImageProviderMeta.secretKey) ? '…' : '保存' }}
+                  </AppButton>
+                </div>
+              </AppFormField>
+            </div>
+
+            <AppFormField label="Prompt 前缀" hint="可用 {prompt} 指定插入位置。">
+              <AppTextarea
+                :model-value="imageGen.settings.promptPrefix"
+                :rows="3"
+                auto-grow
+                @update:model-value="(v) => imageGen.updateSettings({ promptPrefix: v })"
+              />
+            </AppFormField>
+            <AppFormField label="负面提示词">
+              <AppTextarea
+                :model-value="imageGen.settings.negativePrompt"
+                :rows="3"
+                auto-grow
+                @update:model-value="(v) => imageGen.updateSettings({ negativePrompt: v })"
+              />
+            </AppFormField>
+            <label class="flex items-center gap-2 text-xs text-ink-secondary cursor-pointer">
+              <input
+                type="checkbox"
+                :checked="imageGen.settings.enhance"
+                class="accent-brand-500"
+                @change="(e) => imageGen.updateSettings({ enhance: (e.target as HTMLInputElement).checked })"
+              />
+              Pollinations 增强 Prompt
+            </label>
+          </AppCard>
+
+          <AppCard padding="md" class="space-y-3">
+            <div>
+              <h3 class="text-sm font-semibold text-ink-primary">测试生成</h3>
+              <p class="mt-1 text-xs text-ink-muted">用于确认当前渠道、Key、尺寸和默认负面词是否可用。</p>
+            </div>
+            <AppTextarea v-model="imageTestPrompt" :rows="5" auto-grow />
+            <AppButton class="w-full" variant="gradient" :disabled="imageTesting || imageGen.generating" @click="runImageTest">
+              {{ imageTesting || imageGen.generating ? '生成中…' : '生成测试图' }}
+            </AppButton>
+            <div class="aspect-square overflow-hidden rounded-xl bg-surface-sunken ring-1 ring-border-subtle">
+              <img v-if="imageTestAsset" :src="imageTestAsset.url" class="h-full w-full object-cover" alt="" />
+              <div v-else class="flex h-full items-center justify-center px-4 text-center text-xs text-ink-muted">测试图会显示在这里</div>
+            </div>
+          </AppCard>
+        </div>
+
+        <AppCard padding="md" class="space-y-3">
+          <div class="flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <h3 class="text-sm font-semibold text-ink-primary">本地图片库</h3>
+              <p class="mt-1 text-xs text-ink-muted">故事封面、角色图、聊天配图生成后都会留在这里。</p>
+            </div>
+            <AppButton size="sm" variant="secondary" @click="loadImageHistory">刷新</AppButton>
+          </div>
+          <div v-if="imageHistory.length" class="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
+            <a
+              v-for="asset in imageHistory.slice(0, 20)"
+              :key="asset.id"
+              :href="asset.url"
+              target="_blank"
+              rel="noreferrer"
+              class="overflow-hidden rounded-lg bg-surface-sunken ring-1 ring-border-subtle hover:ring-brand-500/40"
+              :title="asset.prompt || asset.fileName"
+            >
+              <img :src="asset.url" class="aspect-square w-full object-cover" alt="" />
+              <div class="p-2">
+                <p class="truncate text-[11px] text-ink-secondary">{{ asset.contextType || 'image' }} · {{ asset.provider || 'unknown' }}</p>
+              </div>
+            </a>
+          </div>
+          <AppEmpty v-else icon="box" title="还没有本地图片" description="生成故事封面、角色图或聊天配图后会出现在这里。" />
+        </AppCard>
+      </div>
+
+      <div v-if="activeTab === 'tts'" class="space-y-4">
+        <AppCard padding="md">
+          <div class="flex flex-wrap items-center justify-between gap-x-6 gap-y-3">
+            <div>
+              <h2 class="text-sm font-semibold text-ink-primary">按消息朗读</h2>
+              <p class="mt-0.5 text-xs text-ink-muted">配置默认渠道和音色；聊天里每条消息单独触发播放。</p>
+            </div>
+            <div class="flex items-center gap-2 text-xs text-ink-secondary">
+              <span>默认 Provider</span>
+              <AppSelect
+                :model-value="tts.settings.defaultProvider"
+                class="!w-56"
+                @update:model-value="(v) => setDefaultTtsProvider(v as TtsProvider)"
+              >
+                <option v-for="provider in playableTtsProviders" :key="provider.id" :value="provider.id">
+                  {{ provider.label }}
+                </option>
+              </AppSelect>
+            </div>
+          </div>
+        </AppCard>
+
+        <div class="grid lg:grid-cols-[320px_minmax(0,1fr)] gap-4 items-start">
+          <AppCard padding="none" class="overflow-hidden">
+            <div class="px-4 py-3 border-b border-border-subtle flex items-center justify-between">
+              <div>
+                <h2 class="text-sm font-semibold text-ink-primary">TTS 渠道</h2>
+                <p class="text-[11px] text-ink-muted mt-0.5">选择一个渠道后在右侧配置。</p>
+              </div>
+              <span class="text-[11px] text-ink-muted">{{ playableTtsProviders.length }} 个</span>
+            </div>
+            <div class="max-h-[420px] overflow-y-auto divide-y divide-border-subtle">
+              <button
+                v-for="provider in playableTtsProviders"
+                :key="provider.id"
+                type="button"
+                :class="[
+                  'w-full text-left px-4 py-3 border-l-2 transition-colors',
+                  selectedTtsProvider === provider.id
+                    ? 'bg-brand-500/10 border-l-brand-400'
+                    : 'border-l-transparent hover:bg-white/[0.03]',
+                ]"
+                @click="selectTtsProvider(provider.id)"
+              >
+                <div class="flex items-start justify-between gap-3">
+                  <div class="min-w-0">
+                    <div class="flex items-center gap-2">
+                      <span class="text-sm font-medium text-ink-primary truncate">{{ provider.label }}</span>
+                      <span class="text-[10px] text-ink-muted rounded bg-surface-sunken px-1.5 py-0.5 shrink-0">ST</span>
+                    </div>
+                    <p class="text-[11px] text-ink-muted mt-1 truncate">{{ provider.description }}</p>
+                  </div>
+                  <span
+                    :class="[
+                      'text-[10px] shrink-0 mt-0.5',
+                      tts.settings.defaultProvider === provider.id
+                        ? 'text-emerald-300'
+                        : tts.settings[provider.id].enabled
+                          ? 'text-brand-300'
+                          : 'text-ink-muted',
+                    ]"
+                  >
+                    {{ ttsProviderStatusLabel(provider.id) }}
+                  </span>
+                </div>
+              </button>
+            </div>
+          </AppCard>
+
+          <AppCard padding="none">
+            <div
+              v-if="ttsTestResults[selectedTtsProviderMeta.id]"
+              :class="[
+                'px-4 py-2 text-xs rounded-t-xl flex items-center gap-2',
+                ttsTestResults[selectedTtsProviderMeta.id]?.ok
+                  ? 'bg-emerald-500/10 text-emerald-300 border-b border-emerald-500/20'
+                  : 'bg-red-500/10 text-red-300 border-b border-red-500/20',
+              ]"
+            >
+              <span class="w-1.5 h-1.5 rounded-full" :class="ttsTestResults[selectedTtsProviderMeta.id]?.ok ? 'bg-emerald-400' : 'bg-red-400'" />
+              <span class="flex-1 truncate">
+                {{ ttsTestResults[selectedTtsProviderMeta.id]?.ok ? '播放成功' : `失败：${ttsTestResults[selectedTtsProviderMeta.id]?.message}` }}
+              </span>
+            </div>
+
+            <div class="p-4 space-y-3">
+              <div class="flex items-start justify-between gap-2">
+                <div class="min-w-0">
+                  <div class="flex items-center gap-2">
+                    <h2 class="text-base font-semibold text-ink-primary truncate">{{ selectedTtsProviderMeta.label }}</h2>
+                    <span class="text-[10px] text-ink-muted rounded bg-surface-sunken px-1.5 py-0.5 shrink-0">
+                      ST: {{ selectedTtsProviderMeta.stName }}
+                    </span>
+                  </div>
+                  <p class="text-xs text-ink-muted mt-1 leading-relaxed">{{ selectedTtsProviderMeta.description }}</p>
+                </div>
+                <div class="flex items-center gap-2 shrink-0">
+                  <AppButton
+                    v-if="selectedTtsProviderMeta.playable && tts.settings.defaultProvider !== selectedTtsProviderMeta.id"
+                    size="sm"
+                    variant="secondary"
+                    @click="setDefaultTtsProvider(selectedTtsProviderMeta.id)"
+                  >
+                    设为默认
+                  </AppButton>
+                  <span v-if="tts.settings.defaultProvider === selectedTtsProviderMeta.id" class="text-[10px] text-emerald-300">默认</span>
+                  <label class="flex items-center gap-1 text-xs text-ink-secondary cursor-pointer">
+                    <input
+                      type="checkbox"
+                      :checked="tts.settings[selectedTtsProviderMeta.id].enabled"
+                      class="accent-brand-500"
+                      @change="(e) => tts.updateProvider(selectedTtsProviderMeta.id, { enabled: (e.target as HTMLInputElement).checked })"
+                    />
+                    启用
+                  </label>
+                </div>
+              </div>
+
+              <div class="grid sm:grid-cols-2 gap-2">
+                <AppFormField label="模型">
+                  <AppSelect
+                    v-if="PROVIDER_MODELS[selectedTtsProviderMeta.id]?.length && !selectedTtsProviderMeta.freeFormModel"
+                    :model-value="tts.settings[selectedTtsProviderMeta.id].model"
+                    @update:model-value="(v) => tts.updateProvider(selectedTtsProviderMeta.id, { model: v as string })"
+                  >
+                    <option v-for="m in PROVIDER_MODELS[selectedTtsProviderMeta.id]" :key="m" :value="m">{{ m }}</option>
+                  </AppSelect>
+                  <AppInput
+                    v-else
+                    :model-value="tts.settings[selectedTtsProviderMeta.id].model"
+                    :disabled="!selectedTtsProviderMeta.freeFormModel && !PROVIDER_MODELS[selectedTtsProviderMeta.id]?.length"
+                    :placeholder="selectedTtsProviderMeta.freeFormModel ? '自定义模型名' : '此 provider 不需要模型'"
+                    @update:model-value="(v) => tts.updateProvider(selectedTtsProviderMeta.id, { model: v })"
+                  />
+                </AppFormField>
+                <AppFormField label="默认音色">
+                  <AppSelect
+                    v-if="PROVIDER_VOICES[selectedTtsProviderMeta.id]?.length && !selectedTtsProviderMeta.freeFormVoice"
+                    :model-value="tts.settings[selectedTtsProviderMeta.id].voice"
+                    @update:model-value="(v) => tts.updateProvider(selectedTtsProviderMeta.id, { voice: v as string })"
+                  >
+                    <option v-for="v in PROVIDER_VOICES[selectedTtsProviderMeta.id]" :key="v" :value="v">{{ v }}</option>
+                  </AppSelect>
+                  <AppInput
+                    v-else
+                    :model-value="tts.settings[selectedTtsProviderMeta.id].voice"
+                    :placeholder="ttsVoicePlaceholder(selectedTtsProviderMeta.id)"
+                    @update:model-value="(v) => tts.updateProvider(selectedTtsProviderMeta.id, { voice: v })"
+                  />
+                </AppFormField>
+                <AppFormField v-if="selectedTtsProviderMeta.hasEndpoint" :label="selectedTtsProviderMeta.endpointLabel || 'Endpoint'">
+                  <AppInput
+                    :model-value="tts.settings[selectedTtsProviderMeta.id].endpoint || ''"
+                    :placeholder="selectedTtsProviderMeta.endpointPlaceholder || 'Provider endpoint'"
+                    @update:model-value="(v) => tts.updateProvider(selectedTtsProviderMeta.id, { endpoint: v })"
+                  />
+                </AppFormField>
+                <AppFormField
+                  v-for="field in selectedTtsProviderMeta.extraFields || []"
+                  :key="field.key"
+                  :label="field.label"
+                >
+                  <AppInput
+                    :model-value="String(getTtsExtra(selectedTtsProviderMeta.id, field.key))"
+                    :type="field.type || 'text'"
+                    :placeholder="field.placeholder"
+                    @update:model-value="(v) => updateTtsExtra(selectedTtsProviderMeta.id, field.key, v)"
+                  />
+                </AppFormField>
+              </div>
+
+              <div v-if="selectedTtsProviderMeta.secretKeys?.length" class="grid sm:grid-cols-2 gap-2">
+                <AppFormField
+                  v-for="secret in selectedTtsProviderMeta.secretKeys"
+                  :key="secret.key"
+                  :label="secret.label"
+                  :hint="`ST secrets ${secret.key}`"
+                >
+                  <div class="flex gap-2">
+                    <AppInput
+                      :model-value="ttsKeyDrafts[secretDraftKey(selectedTtsProviderMeta.id, secret.key)] || ''"
+                      type="password"
+                      :placeholder="secret.placeholder || '留空不修改'"
+                      @update:model-value="(v) => { ttsKeyDrafts[secretDraftKey(selectedTtsProviderMeta.id, secret.key)] = v }"
+                    />
+                    <AppButton
+                      size="sm"
+                      variant="secondary"
+                      :disabled="savingTtsKey === secretDraftKey(selectedTtsProviderMeta.id, secret.key)"
+                      @click="saveTtsSecret(selectedTtsProviderMeta.id, secret)"
+                    >
+                      {{ savingTtsKey === secretDraftKey(selectedTtsProviderMeta.id, secret.key) ? '…' : '保存' }}
+                    </AppButton>
+                  </div>
+                </AppFormField>
+              </div>
+
+              <div class="pt-1 flex items-center justify-between gap-3">
+                <span class="text-[11px] text-ink-muted truncate">Provider ID: {{ selectedTtsProviderMeta.id }}</span>
+                <AppButton
+                  size="sm"
+                  :disabled="ttsTesting[selectedTtsProviderMeta.id]"
+                  @click="testTtsProvider(selectedTtsProviderMeta.id)"
+                >
+                  {{ ttsTesting[selectedTtsProviderMeta.id] ? '合成中…' : '测试朗读' }}
+                </AppButton>
+              </div>
+            </div>
+          </AppCard>
+        </div>
+
+        <AppCard padding="md" class="space-y-4">
+          <div class="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <h2 class="text-sm font-semibold text-ink-primary">音色库</h2>
+              <p class="text-[11px] text-ink-muted mt-0.5">{{ selectedTtsProviderMeta.label }} · {{ selectedTtsVoices.length }} 个音色</p>
+            </div>
+            <div class="text-xs text-ink-muted">
+              当前：<span class="text-ink-primary">{{ tts.settings[selectedTtsProviderMeta.id].voice || '未选择' }}</span>
+            </div>
+          </div>
+
+          <div class="grid lg:grid-cols-[minmax(0,1fr)_320px] gap-4">
+            <div class="space-y-3">
+              <AppInput
+                v-model="ttsVoiceSearch"
+                placeholder="搜索音色"
+              />
+              <div class="max-h-80 overflow-y-auto rounded-xl border border-border-subtle divide-y divide-border-subtle">
+                <div
+                  v-for="voice in selectedTtsVoices"
+                  :key="voice.id"
+                  :class="[
+                    'px-3 py-2 flex items-center gap-3',
+                    isCurrentTtsVoice(voice) ? 'bg-brand-500/10' : 'bg-surface/30',
+                  ]"
+                >
+                  <div class="flex-1 min-w-0">
+                    <div class="flex items-center gap-2">
+                      <span class="text-sm text-ink-primary truncate">{{ voice.name }}</span>
+                      <span class="text-[10px] text-ink-muted rounded bg-surface-sunken px-1.5 py-0.5 shrink-0">{{ voice.source }}</span>
+                      <span v-if="isCurrentTtsVoice(voice)" class="text-[10px] text-emerald-300 shrink-0">当前</span>
+                    </div>
+                    <div class="text-[11px] text-ink-muted truncate">{{ voice.voice }}</div>
+                    <div v-if="voice.note" class="text-[11px] text-ink-muted truncate mt-0.5">{{ voice.note }}</div>
+                  </div>
+                  <div class="flex items-center gap-2 shrink-0">
+                    <AppButton size="sm" variant="secondary" :disabled="ttsTesting[voice.provider]" @click="testTtsVoice(voice)">
+                      试听
+                    </AppButton>
+                    <AppButton size="sm" :disabled="isCurrentTtsVoice(voice)" @click="selectTtsVoice(voice)">
+                      使用
+                    </AppButton>
+                    <AppButton
+                      v-if="voice.source === '自定义'"
+                      size="sm"
+                      variant="danger"
+                      @click="removeTtsVoiceProfile(voice)"
+                    >
+                      删除
+                    </AppButton>
+                  </div>
+                </div>
+                <div v-if="!selectedTtsVoices.length" class="px-4 py-8 text-center text-sm text-ink-muted">
+                  暂无音色
+                </div>
+              </div>
+            </div>
+
+            <div class="rounded-xl border border-border-subtle bg-surface/30 p-3 space-y-3">
+              <div>
+                <h3 class="text-sm font-semibold text-ink-primary">创作音色</h3>
+                <p class="text-[11px] text-ink-muted mt-0.5">{{ selectedTtsProviderMeta.label }}</p>
+              </div>
+              <AppFormField label="名称">
+                <AppInput v-model="ttsVoiceDraft.name" placeholder="例如：温柔旁白" />
+              </AppFormField>
+              <AppFormField label="voice_id">
+                <AppInput v-model="ttsVoiceDraft.voice" :placeholder="ttsVoicePlaceholder(selectedTtsProviderMeta.id)" />
+              </AppFormField>
+              <AppFormField label="备注">
+                <AppTextarea v-model="ttsVoiceDraft.note" :rows="3" placeholder="语气、来源、适用角色" />
+              </AppFormField>
+              <div class="flex justify-end">
+                <AppButton size="sm" @click="addTtsVoiceProfile">保存音色</AppButton>
+              </div>
+            </div>
+          </div>
+        </AppCard>
+
       </div>
 
       <AppCard v-if="activeTab === 'about'" padding="lg" tone="glow">
