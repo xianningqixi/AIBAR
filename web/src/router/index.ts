@@ -18,6 +18,11 @@ const router = createRouter({
       component: () => import('@/pages/CreatePage.vue'),
     },
     {
+      path: '/hub',
+      name: 'communityHub',
+      component: () => import('@/pages/CommunityHubPage.vue'),
+    },
+    {
       path: '/chat/:avatar',
       name: 'chat',
       component: () => import('@/pages/ChatPage.vue'),

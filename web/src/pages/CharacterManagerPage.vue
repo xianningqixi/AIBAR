@@ -159,6 +159,7 @@ onMounted(async () => {
     <AppPageHeader title="角色管理" :subtitle="`${chars.characters.length} 个角色`" back-to="/browse">
       <template #actions>
         <AppButton variant="secondary" size="sm" @click="importCards">导入</AppButton>
+        <AppButton variant="secondary" size="sm" @click="router.push('/hub')">社区导入</AppButton>
         <AppButton variant="gradient" size="sm" @click="router.push('/character/new')">+ 新建</AppButton>
       </template>
     </AppPageHeader>
@@ -214,6 +215,7 @@ onMounted(async () => {
       >
         <template #actions>
           <AppButton variant="secondary" size="sm" @click="importCards">导入角色</AppButton>
+          <AppButton variant="secondary" size="sm" @click="router.push('/hub')">社区导入</AppButton>
           <AppButton size="sm" @click="router.push('/character/new')">+ 新建角色</AppButton>
         </template>
       </AppEmpty>

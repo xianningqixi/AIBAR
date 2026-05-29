@@ -156,6 +156,12 @@ onMounted(async () => {
         >
           创作
         </button>
+        <button
+          class="w-full rounded-xl px-4 py-3 text-left text-sm font-semibold text-ink-secondary transition-all hover:bg-white/5 hover:text-ink-primary"
+          @click="router.push('/hub')"
+        >
+          社区 Hub
+        </button>
       </nav>
 
       <div class="mt-auto border-t border-border-subtle pt-4">
@@ -163,6 +169,9 @@ onMounted(async () => {
         <div class="mt-2 space-y-1">
           <button class="w-full rounded-lg px-3 py-2 text-left text-sm text-ink-secondary hover:bg-white/5 hover:text-ink-primary" @click="router.push('/characters')">
             角色库
+          </button>
+          <button class="w-full rounded-lg px-3 py-2 text-left text-sm text-ink-secondary hover:bg-white/5 hover:text-ink-primary" @click="router.push('/hub')">
+            社区导入
           </button>
           <button class="w-full rounded-lg px-3 py-2 text-left text-sm text-ink-secondary hover:bg-white/5 hover:text-ink-primary" @click="router.push({ path: '/settings', query: { tab: 'world' } })">
             世界书
@@ -198,7 +207,10 @@ onMounted(async () => {
             <p class="text-xs text-ink-muted">创作</p>
           </div>
         </button>
-        <AppButton size="sm" variant="ghost" @click="router.push('/browse')">探索</AppButton>
+        <div class="flex items-center gap-1">
+          <AppButton size="sm" variant="ghost" @click="router.push('/browse')">探索</AppButton>
+          <AppButton size="sm" variant="ghost" @click="router.push('/hub')">Hub</AppButton>
+        </div>
       </div>
     </header>
 
@@ -210,7 +222,7 @@ onMounted(async () => {
             <p class="mt-1 text-sm text-ink-muted">{{ activePlan.description }}</p>
           </div>
           <div class="flex items-center gap-2">
-            <AppButton size="md" variant="secondary" @click="router.push('/characters')">导入角色</AppButton>
+            <AppButton size="md" variant="secondary" @click="router.push('/hub')">导入资源</AppButton>
             <AppButton size="md" variant="gradient" @click="createTarget">
               {{ activePlan.actionLabel }}
             </AppButton>

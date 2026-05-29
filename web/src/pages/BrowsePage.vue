@@ -453,6 +453,12 @@ onMounted(async () => {
         >
           <span>创作</span>
         </button>
+        <button
+          class="w-full flex items-center justify-between rounded-xl px-4 py-3 text-left text-sm font-semibold text-ink-secondary transition-all hover:bg-white/5 hover:text-ink-primary"
+          @click="router.push('/hub')"
+        >
+          <span>社区 Hub</span>
+        </button>
       </nav>
 
       <div class="mt-auto border-t border-border-subtle pt-4">
@@ -460,6 +466,9 @@ onMounted(async () => {
         <div class="mt-2 space-y-1">
           <button class="w-full rounded-lg px-3 py-2 text-left text-sm text-ink-secondary hover:bg-white/5 hover:text-ink-primary" @click="router.push('/characters')">
             角色库
+          </button>
+          <button class="w-full rounded-lg px-3 py-2 text-left text-sm text-ink-secondary hover:bg-white/5 hover:text-ink-primary" @click="router.push('/hub')">
+            社区导入
           </button>
           <button class="w-full rounded-lg px-3 py-2 text-left text-sm text-ink-secondary hover:bg-white/5 hover:text-ink-primary" @click="router.push({ path: '/settings', query: { tab: 'world' } })">
             世界书
@@ -504,6 +513,7 @@ onMounted(async () => {
 
         <div class="flex items-center gap-1">
           <AppButton variant="ghost" size="md" @click="router.push('/create')">创作</AppButton>
+          <AppButton variant="ghost" size="md" @click="router.push('/hub')">Hub</AppButton>
           <AppButton variant="ghost" size="md" @click="router.push('/settings')">设置</AppButton>
         </div>
       </div>

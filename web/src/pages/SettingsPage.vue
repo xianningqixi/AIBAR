@@ -1708,6 +1708,7 @@ watch(
           <div class="flex flex-wrap gap-2 mb-4">
             <AppButton size="sm" @click="createWorld">+ 新建</AppButton>
             <AppButton size="sm" @click="importWorldClick">导入</AppButton>
+            <AppButton size="sm" variant="secondary" @click="router.push('/hub')">社区导入</AppButton>
             <AppButton size="sm" variant="secondary" @click="loadWorlds">刷新</AppButton>
             <AppButton size="sm" variant="secondary" @click="writeSampleWorld">写入示例</AppButton>
           </div>
