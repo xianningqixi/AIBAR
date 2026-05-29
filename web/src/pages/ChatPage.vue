@@ -29,6 +29,7 @@ import { saveStory } from '@/api/stories'
 import { getProviderLabel } from '@/lib/providers'
 import { buildChatMessageImagePrompt } from '@/lib/imagePrompts'
 import type { ChatEntry, Character, ImageAsset, ModelProfile, TtsProvider, WorldInfoSummary } from '@/api/types'
+import type { ReplyDraftOption } from '@/lib/replyDraft'
 
 const route = useRoute()
 const router = useRouter()
@@ -53,6 +54,7 @@ const modelSearch = ref('')
 const imageDrawerOpen = ref(false)
 const imageMessageIndex = ref(-1)
 const imagePrompt = ref('')
+const inputDraft = ref('')
 
 interface ModelTestResult {
   ok: boolean
@@ -250,13 +252,31 @@ async function saveChatAsStory() {
   }
 }
 
-function handleSend(text: string) { chat.sendMessage(text) }
+function handleSend(text: string) {
+  inputDraft.value = ''
+  chat.sendMessage(text)
+}
 function handleStop() { chat.stopGeneration() }
 function handleRegenerate() { chat.regenerateLast() }
 function handleContinue() { chat.continueLastReply() }
 function handleEdit(index: number, content: string) { chat.editMessage(index, content) }
 function handleDelete(index: number) { chat.deleteMessage(index) }
 function handleSwipe(index: number, direction: -1 | 1) { chat.applySwipe(index, direction) }
+
+async function handleDraftReplies(hint: string) {
+  ui.addToast('正在生成 5 个回复方向...', 'info', 1800)
+  await chat.draftUserReplies(hint)
+  if (chat.replyDraftOptions.length) {
+    ui.addToast('已生成 5 个回复方向', 'success')
+  } else if (chat.replyDraftError) {
+    ui.addToast(`拟回复失败：${chat.replyDraftError}`, 'error')
+  }
+}
+
+function handleDraftSelect(option: ReplyDraftOption) {
+  inputDraft.value = option.message
+  ui.addToast('已填入输入框，可以继续编辑', 'success')
+}
 
 function openMessageImagePanel(index: number) {
   const message = chat.messages[index]
@@ -289,6 +309,23 @@ async function handleWorldSelect(value: string) {
   ui.addToast(value ? '已绑定本聊天的世界书' : '已解除世界书绑定', 'success')
 }
 
+function formatMemoryUpdatedAt(value: string): string {
+  if (!value) return ''
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return ''
+  return date.toLocaleString('zh-CN', {
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  })
+}
+
+async function clearChatMemory() {
+  await chat.clearMemorySummary()
+  ui.addToast('记忆已清空', 'success')
+}
+
 const globalModIds = computed(() =>
   modsStore.mods.filter((m) => m.enabled).map((m) => m.id),
 )
@@ -315,6 +352,24 @@ const chatTtsVoiceOptions = computed(() => {
 })
 const chatTtsProviderEnabled = computed(() => !!tts.settings[chatTtsProvider.value]?.enabled)
 const chatTtsFollowingDefault = computed(() => !currentCharacterVoice.value)
+const memoryStatusLabel = computed(() => {
+  if (chat.memoryUpdating) return '整理中'
+  if (chat.memorySummary) return '已更新'
+  return chat.messages.length > 1 ? '待整理' : '等待对话'
+})
+const memoryStatusClass = computed(() => {
+  if (chat.memoryUpdating) return 'bg-brand-500/15 text-brand-300'
+  if (chat.memorySummary) return 'bg-emerald-500/15 text-emerald-300'
+  return chat.messages.length > 1 ? 'bg-amber-500/15 text-amber-300' : 'bg-white/5 text-ink-muted'
+})
+const memoryEmptyText = computed(() =>
+  chat.messages.length > 1 ? '下次发送时整理历史' : '暂无记忆',
+)
+const chatInputBusyLabel = computed(() => {
+  if (chat.memoryUpdating) return '整理记忆中...'
+  if (chat.replyDraftLoading) return 'AI 正在拟回复...'
+  return ''
+})
 
 function handleModIdsUpdate(ids: string[]) {
   const global = new Set(globalModIds.value)
@@ -564,10 +619,19 @@ watch(() => route.fullPath, initChat)
     />
 
     <ChatInput
-      :disabled="chat.loading"
+      v-model="inputDraft"
+      :disabled="chat.loading || chat.memoryUpdating"
       :is-streaming="chat.isStreaming"
+      :busy-label="chatInputBusyLabel"
+      :draft-loading="chat.replyDraftLoading"
+      :draft-options="chat.replyDraftOptions"
+      :draft-error="chat.replyDraftError"
+      :draft-disabled="chat.loading || chat.isStreaming || chat.memoryUpdating"
       @send="handleSend"
       @stop="handleStop"
+      @request-drafts="handleDraftReplies"
+      @select-draft="handleDraftSelect"
+      @clear-drafts="chat.clearReplyDrafts"
     />
 
     <input
@@ -690,6 +754,45 @@ watch(() => route.fullPath, initChat)
               <dd class="text-ink-primary">{{ chat.selectedProfile.temperature }} / {{ chat.selectedProfile.maxTokens }}</dd>
             </div>
           </dl>
+        </AppCard>
+
+        <AppCard padding="sm" tone="sunken">
+          <div class="flex items-start justify-between gap-3">
+            <div class="min-w-0">
+              <div class="flex flex-wrap items-center gap-2">
+                <h4 class="text-[11px] font-semibold uppercase tracking-wider text-ink-muted">
+                  自动记忆
+                </h4>
+                <span
+                  class="rounded-full px-2 py-0.5 text-[10px]"
+                  :class="memoryStatusClass"
+                >
+                  {{ memoryStatusLabel }}
+                </span>
+              </div>
+              <p v-if="chat.memorySummary" class="mt-1 text-[11px] text-ink-muted">
+                已记忆 {{ chat.memoryMessageCount }} 条历史消息
+                <span v-if="formatMemoryUpdatedAt(chat.memoryUpdatedAt)">
+                  · {{ formatMemoryUpdatedAt(chat.memoryUpdatedAt) }}
+                </span>
+              </p>
+              <p v-else class="mt-1 text-[11px] text-ink-muted">{{ memoryEmptyText }}</p>
+            </div>
+            <AppButton
+              size="sm"
+              variant="ghost"
+              :disabled="!chat.memorySummary || chat.memoryUpdating"
+              @click="clearChatMemory"
+            >
+              清空
+            </AppButton>
+          </div>
+          <p
+            v-if="chat.memorySummary"
+            class="mt-3 max-h-28 overflow-y-auto whitespace-pre-wrap break-words text-xs leading-relaxed text-ink-secondary"
+          >
+            {{ chat.memorySummary }}
+          </p>
         </AppCard>
 
         <div>

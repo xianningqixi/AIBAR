@@ -2,8 +2,9 @@ import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import type { ChatMessage, StreamState, Character, ImageAsset, ModelProfile } from '@/api/types'
 import { fetchChat, saveChat } from '@/api/chats'
-import { generateReplyStream } from '@/api/generate'
-import { buildGeneratePayload, getCharacterChatName } from '@/lib/buildPayload'
+import { generateReply, generateReplyStream } from '@/api/generate'
+import { buildChatCompletionPayload, buildGeneratePayload, getCharacterChatName } from '@/lib/buildPayload'
+import { buildReplyDraftPayload, parseReplyDraftOptions, type ReplyDraftOption } from '@/lib/replyDraft'
 import { getMatchedWorldInfo } from '@/lib/worldInfoMatch'
 import { useModelProfilesStore } from './modelProfiles'
 import { useModsStore } from './mods'
@@ -14,7 +15,29 @@ type GenerationOptions = {
   extraMessages?: ChatMessage[]
   appendToIndex?: number
   swipes?: string[]
+  updateMemory?: boolean
 }
+
+type ChatMemoryState = {
+  summary: string
+  updatedAt: string
+  messageCount: number
+}
+
+const MEMORY_TRANSCRIPT_MAX_CHARS = 120000
+const MEMORY_SUMMARY_MAX_CHARS = 1800
+const MEMORY_SUMMARY_PRESET = {
+  id: 'aibar-memory-summary',
+  name: 'Memory Summary',
+  temperature: 0.2,
+  topP: 0.85,
+  maxTokens: 1200,
+  presencePenalty: 0,
+  frequencyPenalty: 0,
+  systemPrompt: '',
+}
+
+let replyDraftRequestId = 0
 
 export const useChatStore = defineStore('chat', () => {
   const messages = ref<ChatMessage[]>([])
@@ -27,6 +50,10 @@ export const useChatStore = defineStore('chat', () => {
   const selectedModIds = ref<string[]>([])
   const loading = ref(false)
   const error = ref('')
+  const memoryUpdating = ref(false)
+  const replyDraftLoading = ref(false)
+  const replyDraftOptions = ref<ReplyDraftOption[]>([])
+  const replyDraftError = ref('')
 
   const streaming = ref<StreamState>({
     active: false,
@@ -36,6 +63,9 @@ export const useChatStore = defineStore('chat', () => {
 
   const isStreaming = computed(() => streaming.value.active)
   const streamingContent = computed(() => streaming.value.partial.content)
+  const memorySummary = computed(() => getMemoryState().summary)
+  const memoryUpdatedAt = computed(() => getMemoryState().updatedAt)
+  const memoryMessageCount = computed(() => getMemoryState().messageCount)
   const selectedProfile = computed<ModelProfile>(() => {
     const profiles = useModelProfilesStore()
     return profiles.getProfile(selectedProfileId.value) || profiles.activeProfile
@@ -56,6 +86,10 @@ export const useChatStore = defineStore('chat', () => {
     selectedWorld.value = ''
     selectedModIds.value = []
     streaming.value = { active: false, controller: null, partial: { content: '' } }
+    memoryUpdating.value = false
+    replyDraftLoading.value = false
+    replyDraftOptions.value = []
+    replyDraftError.value = ''
     error.value = ''
   }
 
@@ -162,6 +196,39 @@ export const useChatStore = defineStore('chat', () => {
     mergeMetadataAibar({ mods: ids })
   }
 
+  function getMemoryState(): ChatMemoryState {
+    const memory = getMetadataAibar().memory
+    if (!memory || typeof memory !== 'object') {
+      return { summary: '', updatedAt: '', messageCount: 0 }
+    }
+
+    const data = memory as Record<string, unknown>
+    return {
+      summary: typeof data.summary === 'string' ? data.summary : '',
+      updatedAt: typeof data.updatedAt === 'string' ? data.updatedAt : '',
+      messageCount: typeof data.messageCount === 'number' ? data.messageCount : 0,
+    }
+  }
+
+  function writeMemoryState(summary: string, messageCount: number) {
+    mergeMetadataAibar({
+      memory: {
+        summary: summary.trim(),
+        updatedAt: new Date().toISOString(),
+        messageCount,
+      },
+    })
+  }
+
+  async function clearMemorySummary() {
+    writeMemoryState('', 0)
+    try {
+      await persist()
+    } catch (e: any) {
+      error.value = 'Save failed: ' + e.message
+    }
+  }
+
   function getEffectiveCharacter(): Character | null {
     if (!character.value) return null
     const aibar = getMetadataAibar()
@@ -238,7 +305,8 @@ export const useChatStore = defineStore('chat', () => {
 
   async function sendMessage(text: string) {
     if (!text.trim() || !character.value) return
-    if (streaming.value.active) return
+    if (streaming.value.active || memoryUpdating.value) return
+    clearReplyDrafts()
 
     messages.value.push({
       role: 'user',
@@ -252,7 +320,167 @@ export const useChatStore = defineStore('chat', () => {
       error.value = 'Save failed: ' + e.message
     }
 
-    await runGeneration()
+    await runGeneration({ updateMemory: true })
+  }
+
+  function formatMemoryTranscript(
+    historyMessages: ChatMessage[],
+    userName: string,
+    characterName: string,
+  ): string {
+    return historyMessages
+      .map((message, index) => {
+        const content = message.content.trim()
+        if (!content) return ''
+        const role =
+          message.role === 'assistant'
+            ? characterName
+            : message.role === 'system'
+              ? '系统'
+              : userName
+        return `${index + 1}. ${role}：${content}`
+      })
+      .filter(Boolean)
+      .join('\n\n')
+  }
+
+  function trimMemoryTranscript(transcript: string): string {
+    if (transcript.length <= MEMORY_TRANSCRIPT_MAX_CHARS) return transcript
+    return [
+      '（早前内容已由旧记忆承接，下面保留最近的历史对话。）',
+      transcript.slice(-MEMORY_TRANSCRIPT_MAX_CHARS),
+    ].join('\n\n')
+  }
+
+  function normalizeMemoryReply(reply: string): string {
+    const cleaned = reply
+      .trim()
+      .replace(/^```[a-zA-Z0-9_-]*\s*/, '')
+      .replace(/\s*```$/, '')
+      .trim()
+
+    if (!cleaned || /^(无|暂无|没有|空)$/i.test(cleaned)) return ''
+    if (cleaned.length <= MEMORY_SUMMARY_MAX_CHARS) return cleaned
+    return `${cleaned.slice(0, MEMORY_SUMMARY_MAX_CHARS).trim()}...`
+  }
+
+  async function refreshMemorySummary(
+    sourceMessages: ChatMessage[],
+    config: ModelProfile,
+    effectiveCharacter: Character,
+    userName: string,
+  ): Promise<string> {
+    const historyMessages = sourceMessages.slice(0, Math.max(0, sourceMessages.length - 1))
+    if (!historyMessages.length) {
+      writeMemoryState('', 0)
+      return ''
+    }
+
+    const previousMemory = getMemoryState().summary
+    const transcript = trimMemoryTranscript(
+      formatMemoryTranscript(historyMessages, userName, effectiveCharacter.name || '角色'),
+    )
+    if (!transcript) {
+      writeMemoryState('', 0)
+      return ''
+    }
+
+    memoryUpdating.value = true
+    try {
+      const payload = buildChatCompletionPayload(
+        config,
+        [
+          {
+            role: 'system',
+            content: [
+              '你是聊天记忆整理器，只负责整理历史对话背景。',
+              '不要续写剧情，不要扮演角色，不要解释过程，只输出可直接注入下一轮角色扮演的背景记忆。',
+            ].join('\n'),
+          },
+          {
+            role: 'user',
+            content: [
+              '请把旧记忆与历史对话合并成一份稳定、紧凑的背景信息。',
+              '保留：用户身份与偏好、角色关系变化、重要剧情事实、世界状态、未完成目标、关键约定。',
+              '忽略：寒暄、重复措辞、无长期价值的临时表达。',
+              `摘要控制在 ${MEMORY_SUMMARY_MAX_CHARS} 字以内；如果没有值得记忆的信息，输出“无”。`,
+              '',
+              `旧记忆：\n${previousMemory || '无'}`,
+              '',
+              `历史对话：\n${transcript}`,
+            ].join('\n'),
+          },
+        ],
+        effectiveCharacter,
+        MEMORY_SUMMARY_PRESET,
+        userName,
+      )
+      const reply = await generateReply(payload)
+      const summary = normalizeMemoryReply(reply)
+      writeMemoryState(summary, historyMessages.length)
+      try {
+        await persist()
+      } catch (e: any) {
+        error.value = 'Save failed: ' + e.message
+      }
+      return summary
+    } finally {
+      memoryUpdating.value = false
+    }
+  }
+
+  function clearReplyDrafts() {
+    replyDraftRequestId += 1
+    replyDraftLoading.value = false
+    replyDraftOptions.value = []
+    replyDraftError.value = ''
+  }
+
+  async function draftUserReplies(userNote = '') {
+    if (!character.value) return
+    if (streaming.value.active || memoryUpdating.value || replyDraftLoading.value) return
+
+    replyDraftLoading.value = true
+    replyDraftError.value = ''
+    const requestId = ++replyDraftRequestId
+
+    try {
+      const config = selectedProfile.value
+      const effectiveCharacter = getEffectiveCharacter() || character.value
+      const personas = usePersonasStore()
+      const personaName = personas.activePersona?.name || 'User'
+      const personaDescription = personas.activePersona?.description || ''
+
+      let worldInfoText = ''
+      try {
+        worldInfoText = await getMatchedWorldInfo(selectedWorld.value, effectiveCharacter, messages.value)
+      } catch (e) {
+        console.warn('World info scan failed for reply draft', e)
+      }
+
+      const payload = buildReplyDraftPayload(config, effectiveCharacter, messages.value, {
+        userName: personaName,
+        personaDescription,
+        memorySummary: getMemoryState().summary,
+        worldInfoText,
+        userNote,
+      })
+      const reply = await generateReply(payload)
+      if (requestId !== replyDraftRequestId) return
+      const options = parseReplyDraftOptions(reply)
+      if (!options.length) {
+        throw new Error('模型没有返回可用的回复选项')
+      }
+      replyDraftOptions.value = options
+    } catch (e: any) {
+      if (requestId !== replyDraftRequestId) return
+      replyDraftError.value = e?.message || '拟回复失败'
+      replyDraftOptions.value = []
+    } finally {
+      if (requestId === replyDraftRequestId) {
+        replyDraftLoading.value = false
+      }
+    }
   }
 
   async function runGeneration(options: GenerationOptions = {}) {
@@ -286,8 +514,33 @@ export const useChatStore = defineStore('chat', () => {
     const personas = usePersonasStore()
     const personaName = personas.activePersona?.name || 'User'
     const personaDescription = personas.activePersona?.description || ''
+    let memorySummaryForPrompt = getMemoryState().summary
 
-    const payload = buildGeneratePayload(config, effectiveCharacter, sourceMessages, worldInfoText, allMods, selectedPreset.value, personaName, personaDescription)
+    if (options.updateMemory) {
+      try {
+        memorySummaryForPrompt = await refreshMemorySummary(
+          sourceMessages,
+          config,
+          effectiveCharacter,
+          personaName,
+        )
+      } catch (e) {
+        console.warn('Memory summary failed', e)
+        memorySummaryForPrompt = getMemoryState().summary
+      }
+    }
+
+    const payload = buildGeneratePayload(
+      config,
+      effectiveCharacter,
+      sourceMessages,
+      worldInfoText,
+      allMods,
+      selectedPreset.value,
+      personaName,
+      personaDescription,
+      memorySummaryForPrompt,
+    )
 
     const controller = new AbortController()
     streaming.value = {
@@ -389,6 +642,7 @@ export const useChatStore = defineStore('chat', () => {
   async function clearCurrentChat() {
     if (!character.value) return
     messages.value = []
+    writeMemoryState('', 0)
     try {
       await persist()
     } catch (e: any) {
@@ -538,6 +792,13 @@ export const useChatStore = defineStore('chat', () => {
     selectedModIds,
     loading,
     error,
+    memoryUpdating,
+    memorySummary,
+    memoryUpdatedAt,
+    memoryMessageCount,
+    replyDraftLoading,
+    replyDraftOptions,
+    replyDraftError,
     streaming,
     isStreaming,
     streamingContent,
@@ -552,6 +813,9 @@ export const useChatStore = defineStore('chat', () => {
     attachImageToMessage,
     continueLastReply,
     applySwipe,
+    clearMemorySummary,
+    draftUserReplies,
+    clearReplyDrafts,
     setSelectedProfileId,
     setSelectedPresetId,
     setSelectedWorld,

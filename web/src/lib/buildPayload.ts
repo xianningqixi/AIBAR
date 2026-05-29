@@ -45,6 +45,7 @@ export function getSystemPrompt(
   mods: ModItem[] = [],
   presetSystemPrompt = '',
   personaDescription = '',
+  memorySummary = '',
 ): string {
   const personality = trimText(character.data?.personality || character.personality)
   const scenario = trimText(character.data?.scenario || character.scenario)
@@ -68,6 +69,7 @@ export function getSystemPrompt(
   const pieces = [
     modPrepend,
     personaDescription ? `用户身份：${personaDescription}` : '',
+    memorySummary ? `长期记忆 / 背景信息：\n${memorySummary}` : '',
     `你正在扮演角色：${character.name || '未命名角色'}。`,
     description ? `角色描述：\n${description}` : '',
     personality ? `性格：\n${personality}` : '',
@@ -104,6 +106,7 @@ export function buildGeneratePayload(
   preset?: Preset | null,
   userName = 'User',
   personaDescription = '',
+  memorySummary = '',
 ): Record<string, unknown> {
   const recentMessages = sourceMessages.slice(-24).map((m) => ({
     role: m.role === 'assistant' ? 'assistant' : 'user',
@@ -128,7 +131,14 @@ export function buildGeneratePayload(
   }
 
   const presetSystemPrompt = preset?.systemPrompt || ''
-  const systemPrompt = getSystemPrompt(character, worldInfoText, mods, presetSystemPrompt, personaDescription)
+  const systemPrompt = getSystemPrompt(
+    character,
+    worldInfoText,
+    mods,
+    presetSystemPrompt,
+    personaDescription,
+    memorySummary,
+  )
   const messages = [{ role: 'system', content: systemPrompt }, ...recentMessages]
 
   return buildChatCompletionPayload(config, messages, character, preset, userName)
