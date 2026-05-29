@@ -64,14 +64,15 @@ export function buildChatMessageImagePrompt(
   character?: Character | null,
 ): string {
   const context = nearbyMessages
-    .slice(-4)
-    .map((item) => `${item.role}: ${stripMarkdown(item.content).slice(0, 320)}`)
+    .slice(-2)
+    .map((item) => `${item.role}: ${stripMarkdown(item.content).slice(0, 180)}`)
     .join('\n')
   return [
     character ? `Scene illustration with ${character.name}.` : 'Scene illustration.',
     character?.description || character?.data?.description || '',
-    `Selected message: ${stripMarkdown(message.content).slice(0, 900)}`,
+    `Selected message visual cue: ${stripMarkdown(message.content).slice(0, 420)}`,
     context ? `Recent context:\n${context}` : '',
+    'Use the text only as visual reference. Make a concise, non-explicit scene prompt for an image model.',
     'cinematic composition, no text, no speech bubbles',
   ]
     .filter(Boolean)

@@ -9,7 +9,7 @@ import { useImageGenStore } from '@/stores/imageGen'
 import { getStory, saveStory } from '@/api/stories'
 import { listWorldInfo } from '@/api/worldinfo'
 import { generateReply } from '@/api/generate'
-import type { Character, ImageAsset, StoryCard, WorldInfoSummary } from '@/api/types'
+import type { Character, ImageAsset, ModelProfile, StoryCard, WorldInfoSummary } from '@/api/types'
 import AppButton from '@/components/ui/AppButton.vue'
 import AppInput from '@/components/ui/AppInput.vue'
 import AppSelect from '@/components/ui/AppSelect.vue'
@@ -131,6 +131,21 @@ function fillFromStory(story: StoryCard) {
 
 function getDraftProfile() {
   return models.getProfile(draft.profileId) || models.activeProfile
+}
+
+function isLocalPlaceholderProfile(profile?: ModelProfile): boolean {
+  return Boolean(profile?.source === 'custom' && /(?:127\.0\.0\.1|localhost):11434/i.test(profile.endpoint || ''))
+}
+
+function defaultDraftProfileId(): string {
+  const active = models.getProfile(models.activeProfileId)
+  if (active && !isLocalPlaceholderProfile(active)) return active.id
+  const remote = models.profiles.find((profile) => (
+    profile.id !== active?.id
+    && !isLocalPlaceholderProfile(profile)
+    && (profile.apiKeySaved || profile.secretId)
+  ))
+  return remote?.id || active?.id || models.profiles[0]?.id || ''
 }
 
 function currentStoryDraftForm() {
@@ -312,7 +327,7 @@ onMounted(async () => {
     imageGen.load(),
   ])
   worlds.value = await listWorldInfo().catch(() => [])
-  draft.profileId = models.activeProfileId
+  draft.profileId = defaultDraftProfileId()
   if (isEdit.value) {
     loadingStory.value = true
     try {
@@ -365,7 +380,7 @@ function applyStoryCover(asset: ImageAsset) {
         </div>
       </section>
 
-      <AppCard v-if="!isAdvancedCreate" padding="md" tone="glow" class="space-y-4">
+      <AppCard v-if="!isEdit" padding="md" tone="glow" class="space-y-4">
         <div class="flex flex-wrap items-start justify-between gap-3">
           <div>
             <h3 class="flex items-center gap-2 text-sm font-semibold text-ink-primary">
@@ -527,6 +542,7 @@ function applyStoryCover(asset: ImageAsset) {
             context-type="story"
             :context-id="storyImageContextId"
             action-label="生成并设为封面"
+            :draft-profile="getDraftProfile()"
             @generated="applyStoryCover"
           />
         </div>

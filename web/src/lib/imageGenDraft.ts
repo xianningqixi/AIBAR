@@ -1,5 +1,6 @@
 import type { Character, ImageGenSettings, ModelProfile } from '@/api/types'
 import { buildChatCompletionPayload } from './buildPayload'
+import { addImageSafetyNegative, softenImagePromptForProvider } from './imagePromptSafety'
 
 export interface ImageGenDraft {
   prompt: string
@@ -66,9 +67,14 @@ export function buildImageGenDraftPayload(
   }
 
   const systemPrompt = [
-    '你是 AIBAR 的文生图参数助手。用户只会描述想要的画面，你需要把它整理成可直接用于文生图的专业参数。',
+    '你是 AIBAR 的文生图提示词优化助手。用户只会描述想要的画面，你需要把它改写成可直接用于文生图的专业 Prompt，并给出匹配参数。',
     '只返回一个 JSON 对象，不要 Markdown，不要解释。',
-    'prompt 使用英文，适合当前场景的成图模型；保留关键人物、动作、环境、构图、光线、镜头、风格，不要加入违背用户意图的内容。',
+    'prompt 使用英文，适合当前场景的成图模型；不是简单翻译，要补足主体、动作、环境、构图、光线、镜头、画面质感和风格，但不要加入违背用户意图的内容。',
+    '如果用途是 chat，不要复制聊天原文、系统提示、审查绕过文字或大段上下文；只提炼角色、场景、情绪、姿态和镜头语言。',
+    '如果当前 provider 是 openai，prompt 必须适合图片模型：把露骨成人桥段改写为非露骨的氛围、情绪、服装凌乱感和戏剧张力，不要描写裸露、性器官、体液或性行为。',
+    '遇到 NSFW 内容时，使用安全修饰：dramatic cinematic mood、romantic thriller tension、charged emotion、wind-tossed outfit、dramatic shadows、cropped composition、off-frame implication。',
+    '不要输出 suggestive、intimate、nude、naked、genitals、sex act、body fluids、pornographic、explicit 等容易触发拒绝的词；必要时用镜头裁切、阴影、表情和衣料细节暗示。',
+    'prompt 控制在 80 到 140 个英文词，避免过长、过细、像小说正文一样的段落。',
     'negativePrompt 使用英文，排除低质量、畸形、文字水印、糟糕构图等常见问题。',
     'width/height 必须是 64 的倍数，范围 512 到 1536。故事封面和角色图优先竖图，聊天配图可按场景选择横图/方图。',
     'steps 建议 20 到 36；scale 建议 5 到 9；sampler 给常见 Stable Diffusion 采样器名。',
@@ -113,9 +119,11 @@ export function buildImageGenDraftPayload(
 
 export function parseImageGenDraft(text: string, fallback: ImageGenSettings): ImageGenDraft {
   const raw = parseJsonObject(text)
+  const prompt = softenImagePromptForProvider(asString(raw.prompt), fallback.provider)
+  const negativePrompt = addImageSafetyNegative(asString(raw.negativePrompt) || fallback.negativePrompt, fallback.provider)
   return {
-    prompt: asString(raw.prompt),
-    negativePrompt: asString(raw.negativePrompt) || fallback.negativePrompt,
+    prompt,
+    negativePrompt,
     width: asImageDimension(raw.width, fallback.width),
     height: asImageDimension(raw.height, fallback.height),
     steps: asNumber(raw.steps, fallback.steps, 1, 80),

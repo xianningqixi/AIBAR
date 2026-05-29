@@ -10,7 +10,7 @@ import { useImageGenStore } from '@/stores/imageGen'
 import { generateReply } from '@/api/generate'
 import { buildGeneratePayload } from '@/lib/buildPayload'
 import { getMatchedWorldInfo } from '@/lib/worldInfoMatch'
-import type { Character, ImageAsset, WorldInfoSummary } from '@/api/types'
+import type { Character, ImageAsset, ModelProfile, WorldInfoSummary } from '@/api/types'
 import AppButton from '@/components/ui/AppButton.vue'
 import AppInput from '@/components/ui/AppInput.vue'
 import AppSelect from '@/components/ui/AppSelect.vue'
@@ -122,6 +122,21 @@ function payload() {
 
 function getDraftProfile() {
   return models.getProfile(draft.profileId) || models.activeProfile
+}
+
+function isLocalPlaceholderProfile(profile?: ModelProfile): boolean {
+  return Boolean(profile?.source === 'custom' && /(?:127\.0\.0\.1|localhost):11434/i.test(profile.endpoint || ''))
+}
+
+function defaultDraftProfileId(): string {
+  const active = models.getProfile(models.activeProfileId)
+  if (active && !isLocalPlaceholderProfile(active)) return active.id
+  const remote = models.profiles.find((profile) => (
+    profile.id !== active?.id
+    && !isLocalPlaceholderProfile(profile)
+    && (profile.apiKeySaved || profile.secretId)
+  ))
+  return remote?.id || active?.id || models.profiles[0]?.id || ''
 }
 
 function draftAnswersText(): string {
@@ -359,8 +374,8 @@ onMounted(async () => {
   worlds.value = await listWorldInfo().catch(() => [])
   await models.loadSecrets()
   await imageGen.load()
-  draft.profileId = models.activeProfileId
-  test.profileId = models.activeProfileId
+  draft.profileId = defaultDraftProfileId()
+  test.profileId = defaultDraftProfileId()
   if (isEdit.value) {
     loading.value = true
     try {
@@ -391,7 +406,7 @@ onMounted(async () => {
     </AppPageHeader>
 
     <main class="max-w-5xl mx-auto px-5 py-6 animate-fade-in-up">
-      <AppCard v-if="!isAdvancedCreate" padding="md" tone="glow" class="mb-4 space-y-4">
+      <AppCard v-if="!isEdit" padding="md" tone="glow" class="mb-4 space-y-4">
         <div class="flex flex-wrap items-start justify-between gap-3">
           <div>
             <h3 class="flex items-center gap-2 text-sm font-semibold text-ink-primary">
@@ -518,6 +533,7 @@ onMounted(async () => {
             context-type="character"
             :context-id="characterImageContextId"
             action-label="生成并作为头像"
+            :draft-profile="getDraftProfile()"
             @generated="applyGeneratedAvatar"
           />
         </div>

@@ -1,12 +1,49 @@
-import { apiPost, apiStream } from './client'
+import { ApiError, apiPost, apiStream } from './client'
 import { providerConfigs } from '@/lib/providers'
 import type { ModelProfile } from './types'
 
+function explainGenerateError(error: unknown, payload?: Record<string, unknown>): string {
+  const raw = error instanceof ApiError
+    ? error.body
+    : error instanceof Error
+      ? error.message
+      : String(error || '')
+
+  let message = raw
+  try {
+    const parsed = JSON.parse(raw) as any
+    message = parsed?.error?.message || parsed?.message || raw
+  } catch {
+    // Plain text errors are common for network failures.
+  }
+
+  const endpoint = String(payload?.custom_url || payload?.reverse_proxy || '').trim()
+  const refused = /ECONNREFUSED|Connection refused/i.test(message)
+  if (refused) {
+    const matched = message.match(/request to\s+(\S+)\s+failed/i)?.[1] || endpoint
+    const target = matched || '当前模型端点'
+    if (/127\.0\.0\.1:11434|localhost:11434/i.test(target)) {
+      return `优化提示词使用的是本地 Ollama 模型，但 ${target} 没有服务在运行。请启动 Ollama，或在模型下拉里切到已配置的 DS/OpenAI/Gemini。`
+    }
+    return `优化提示词连接模型端点失败：${target}。请检查模型连接配置或切换到可用渠道。`
+  }
+
+  if (/502|Bad Gateway/i.test(message)) {
+    return `模型服务返回 502：${message}`
+  }
+  return message || '模型生成失败，请检查模型连接配置'
+}
+
 export async function generateReply(payload: Record<string, unknown>): Promise<string> {
-  const data = await apiPost<Record<string, unknown>>(
-    '/api/backends/chat-completions/generate',
-    payload,
-  )
+  let data: Record<string, unknown>
+  try {
+    data = await apiPost<Record<string, unknown>>(
+      '/api/backends/chat-completions/generate',
+      payload,
+    )
+  } catch (error) {
+    throw new Error(explainGenerateError(error, payload))
+  }
   const reply =
     (data?.choices as any)?.[0]?.message?.content ||
     (data?.choices as any)?.[0]?.text ||

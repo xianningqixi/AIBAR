@@ -32,7 +32,7 @@ const router = useRouter()
 const promptDraft = ref(props.prompt)
 const lastPropPrompt = ref(props.prompt)
 const generatedAsset = ref<ImageAsset | null>(null)
-const drafting = ref(false)
+const optimizing = ref(false)
 const draftReason = ref('')
 const draftSettings = ref<Partial<ImageGenSettings> | null>(null)
 
@@ -85,6 +85,10 @@ async function generate() {
     ui.addToast('Prompt 不能为空', 'warning')
     return
   }
+  if (props.contextType === 'chat' && imageGen.settings.provider === 'openai' && !draftSettings.value) {
+    ui.addToast('聊天配图请先优化提示词，避免把整段聊天上下文直接发给图片模型', 'warning')
+    return
+  }
   try {
     const asset = await imageGen.generateAndSave({
       prompt: promptDraft.value,
@@ -99,7 +103,7 @@ async function generate() {
   }
 }
 
-async function completeWithAi() {
+async function optimizePrompt() {
   if (!promptDraft.value.trim()) {
     ui.addToast('先写一句你想要的画面', 'warning')
     return
@@ -110,7 +114,7 @@ async function completeWithAi() {
     ui.addToast('未配置可用大模型，先到模型连接里添加一个渠道', 'warning')
     return
   }
-  drafting.value = true
+  optimizing.value = true
   draftReason.value = ''
   try {
     const reply = await generateReply(buildImageGenDraftPayload(
@@ -135,11 +139,11 @@ async function completeWithAi() {
       promptPrefix: draft.promptPrefix,
       enhance: draft.enhance,
     }
-    ui.addToast('已让大模型补全生图参数', 'success')
+    ui.addToast('已优化提示词，可继续微调后生成', 'success')
   } catch (e: any) {
-    ui.addToast(`补全失败：${e.message || '请检查模型配置'}`, 'error')
+    ui.addToast(`优化失败：${e.message || '请检查模型配置'}`, 'error')
   } finally {
-    drafting.value = false
+    optimizing.value = false
   }
 }
 </script>
@@ -152,13 +156,10 @@ async function completeWithAi() {
         <p v-if="description" class="mt-1 text-xs leading-relaxed text-ink-muted">{{ description }}</p>
         <p class="mt-1 text-[11px] text-ink-muted">{{ providerText }}</p>
         <p v-if="draftParameterText" class="mt-1 text-[11px] text-brand-start">
-          本次参数 · {{ draftParameterText }}
+          建议参数 · {{ draftParameterText }}
         </p>
       </div>
       <div class="flex shrink-0 items-center gap-2">
-        <AppButton size="sm" variant="secondary" :disabled="drafting" @click="completeWithAi">
-          {{ drafting ? '补全中…' : 'AI 补参数' }}
-        </AppButton>
         <AppButton size="sm" variant="secondary" @click="router.push({ path: '/settings', query: { tab: 'image' } })">
           图像配置
         </AppButton>
@@ -171,10 +172,18 @@ async function completeWithAi() {
           v-model="promptDraft"
           :rows="5"
           auto-grow
-          placeholder="直接描述画面即可，也可以点 AI 补参数生成专业 Prompt"
+          placeholder="先用自然语言描述画面，再点“优化提示词”生成更适合文生图的 Prompt"
         />
+        <div class="mt-2 flex flex-wrap items-center justify-between gap-2">
+          <p class="text-[11px] leading-relaxed text-ink-muted">
+            优化后会替换成英文成图 Prompt，并把敏感桥段修饰成更含蓄的镜头语言。
+          </p>
+          <AppButton size="sm" variant="secondary" :disabled="optimizing" @click="optimizePrompt">
+            {{ optimizing ? '优化中…' : '优化提示词' }}
+          </AppButton>
+        </div>
         <p v-if="draftReason" class="mt-2 rounded-md bg-surface-sunken px-3 py-2 text-[11px] leading-relaxed text-ink-muted ring-1 ring-border-subtle">
-          AI 参数说明：{{ draftReason }}
+          优化说明：{{ draftReason }}
         </p>
       </AppFormField>
 

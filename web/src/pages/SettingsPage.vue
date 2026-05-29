@@ -11,7 +11,7 @@ import { useImageGenStore } from '@/stores/imageGen'
 import { writeSecret } from '@/api/secrets'
 import { TTS_PROVIDERS, PROVIDER_MODELS, PROVIDER_VOICES, synthesizeSpeech, type ProviderSecret } from '@/api/tts'
 import { IMAGE_PROVIDERS, listImageAssets } from '@/api/imageGen'
-import type { ImageAsset, ImageGenProvider, Preset, Persona, TtsProvider, TtsVoiceProfile } from '@/api/types'
+import type { ImageAsset, ImageGenProvider, ImageGenSettings, Preset, Persona, TtsProvider, TtsVoiceProfile } from '@/api/types'
 import AppButton from '@/components/ui/AppButton.vue'
 import AppInput from '@/components/ui/AppInput.vue'
 import AppSelect from '@/components/ui/AppSelect.vue'
@@ -22,7 +22,8 @@ import AppPageHeader from '@/components/ui/AppPageHeader.vue'
 import AppTabs from '@/components/ui/AppTabs.vue'
 import AppEmpty from '@/components/ui/AppEmpty.vue'
 import { providerConfigs } from '@/lib/providers'
-import { testConnection } from '@/api/generate'
+import { generateReply, testConnection } from '@/api/generate'
+import { buildImageGenDraftPayload, parseImageGenDraft } from '@/lib/imageGenDraft'
 import type { ModelProfile, WorldInfoEntry, WorldInfoFile, WorldInfoSummary } from '@/api/types'
 import {
   deleteWorldInfo,
@@ -121,9 +122,26 @@ const imageTestPrompt = ref('A cinematic story cover, a mysterious tavern at nig
 const imageTestAsset = ref<ImageAsset | null>(null)
 const imageHistory = ref<ImageAsset[]>([])
 const imageTesting = ref(false)
+const imageOptimizing = ref(false)
+const imageTestDraftReason = ref('')
+const imageTestDraftSettings = ref<Partial<ImageGenSettings> | null>(null)
 const selectedImageProviderMeta = computed(() => (
   IMAGE_PROVIDERS.find((provider) => provider.id === imageGen.settings.provider) || IMAGE_PROVIDERS[0]
 ))
+const imageTestDraftParameterText = computed(() => {
+  const settings = imageTestDraftSettings.value
+  if (!settings) return ''
+  const size = imageGen.settings.provider === 'openai'
+    ? settings.openaiSize || imageGen.settings.openaiSize
+    : `${settings.width || imageGen.settings.width}x${settings.height || imageGen.settings.height}`
+  const pieces = [
+    size,
+    settings.steps ? `${settings.steps} steps` : '',
+    settings.scale ? `CFG ${settings.scale}` : '',
+    settings.sampler || '',
+  ].filter(Boolean)
+  return pieces.join(' · ')
+})
 
 function setImageProvider(provider: string) {
   imageGen.setProvider(provider as ImageGenProvider)
@@ -168,6 +186,51 @@ async function loadImageHistory() {
   imageHistory.value = await listImageAssets().catch(() => [])
 }
 
+async function optimizeImageTestPrompt() {
+  if (!imageTestPrompt.value.trim()) {
+    ui.addToast('先写一句你想要的测试画面', 'warning')
+    return
+  }
+  if (!models.loaded) await models.loadSecrets()
+  const profile = models.activeProfile
+  if (!profile) {
+    ui.addToast('未配置可用大模型，先到模型连接里添加一个渠道', 'warning')
+    return
+  }
+
+  imageOptimizing.value = true
+  imageTestDraftReason.value = ''
+  try {
+    const reply = await generateReply(buildImageGenDraftPayload(
+      profile,
+      imageTestPrompt.value,
+      imageGen.settings,
+      'settings',
+    ))
+    const draft = parseImageGenDraft(reply, imageGen.settings)
+    if (!draft.prompt) throw new Error('模型没有返回有效 Prompt')
+
+    imageTestPrompt.value = draft.prompt
+    imageTestDraftReason.value = draft.reason
+    imageTestDraftSettings.value = {
+      negativePrompt: draft.negativePrompt,
+      width: draft.width,
+      height: draft.height,
+      steps: draft.steps,
+      scale: draft.scale,
+      sampler: draft.sampler,
+      openaiSize: draft.openaiSize,
+      promptPrefix: draft.promptPrefix,
+      enhance: draft.enhance,
+    }
+    ui.addToast('已优化测试图提示词', 'success')
+  } catch (e: any) {
+    ui.addToast(`优化失败：${e.message || '请检查模型配置'}`, 'error')
+  } finally {
+    imageOptimizing.value = false
+  }
+}
+
 async function runImageTest() {
   imageTesting.value = true
   imageTestAsset.value = null
@@ -176,7 +239,7 @@ async function runImageTest() {
       prompt: imageTestPrompt.value,
       contextType: 'settings',
       contextId: 'image-test',
-    })
+    }, imageTestDraftSettings.value || undefined)
     imageTestAsset.value = asset
     await loadImageHistory()
     ui.addToast('测试图片已生成', 'success')
@@ -1927,7 +1990,19 @@ watch(
               <p class="mt-1 text-xs text-ink-muted">用于确认当前渠道、Key、尺寸和默认负面词是否可用。</p>
             </div>
             <AppTextarea v-model="imageTestPrompt" :rows="5" auto-grow />
-            <AppButton class="w-full" variant="gradient" :disabled="imageTesting || imageGen.generating" @click="runImageTest">
+            <div class="flex flex-wrap items-center justify-between gap-2">
+              <p class="text-[11px] leading-relaxed text-ink-muted">先优化，再生成；敏感桥段会被修饰成更含蓄的镜头语言。</p>
+              <AppButton size="sm" variant="secondary" :disabled="imageOptimizing || imageTesting || imageGen.generating" @click="optimizeImageTestPrompt">
+                {{ imageOptimizing ? '优化中…' : '优化提示词' }}
+              </AppButton>
+            </div>
+            <p v-if="imageTestDraftParameterText" class="text-[11px] text-brand-start">
+              建议参数 · {{ imageTestDraftParameterText }}
+            </p>
+            <p v-if="imageTestDraftReason" class="rounded-md bg-surface-sunken px-3 py-2 text-[11px] leading-relaxed text-ink-muted ring-1 ring-border-subtle">
+              优化说明：{{ imageTestDraftReason }}
+            </p>
+            <AppButton class="w-full" variant="gradient" :disabled="imageOptimizing || imageTesting || imageGen.generating" @click="runImageTest">
               {{ imageTesting || imageGen.generating ? '生成中…' : '生成测试图' }}
             </AppButton>
             <div class="aspect-square overflow-hidden rounded-xl bg-surface-sunken ring-1 ring-border-subtle">

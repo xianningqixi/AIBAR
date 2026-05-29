@@ -1,5 +1,6 @@
-import { apiPost } from './client'
+import { ApiError, apiPost } from './client'
 import type { ImageAsset, ImageGenProvider, ImageGenSettings } from './types'
+import { softenImagePromptForProvider } from '@/lib/imagePromptSafety'
 
 export interface ImageProviderMeta {
   id: ImageGenProvider
@@ -136,6 +137,32 @@ export function buildFinalPrompt(settings: ImageGenSettings, prompt: string): st
   return `${prefix}, ${raw}`
 }
 
+function openAiImageErrorMessage(error: unknown): string {
+  const raw = error instanceof ApiError
+    ? error.body
+    : error instanceof Error
+      ? error.message
+      : String(error || '')
+  let message = raw
+  try {
+    const parsed = JSON.parse(raw) as any
+    message = parsed?.error?.message || parsed?.message || raw
+  } catch {
+    // Keep the original text when the provider returns a plain string.
+  }
+
+  if (/auth_unavailable|no auth available/i.test(message)) {
+    return '图片中转没有可用的 OpenAI Images 授权，请换一个生图模型/渠道，或稍后重试'
+  }
+  if (/upstream did not return image output/i.test(message)) {
+    return '图片中转没有返回图片，常见原因是提示词被上游拒绝或模型未产出图片；先点“优化提示词”再试'
+  }
+  if (/stream error|INTERNAL_ERROR|Bad Gateway|Service Unavailable/i.test(message)) {
+    return '图片中转上游连接异常，请稍后重试，或换一个图片渠道'
+  }
+  return message ? `OpenAI 图片生成失败：${message}` : 'OpenAI 图片生成失败，请检查图片渠道配置'
+}
+
 export async function testImageProvider(settings: ImageGenSettings): Promise<void> {
   if (settings.provider !== 'auto') return
   await apiPost('/api/sd/ping', {
@@ -145,7 +172,7 @@ export async function testImageProvider(settings: ImageGenSettings): Promise<voi
 }
 
 export async function generateImage(settings: ImageGenSettings, request: ImageGenerateRequest): Promise<ImageGenerateResult> {
-  const prompt = buildFinalPrompt(settings, request.prompt)
+  const prompt = softenImagePromptForProvider(buildFinalPrompt(settings, request.prompt), settings.provider)
   const negativePrompt = request.negativePrompt ?? settings.negativePrompt
   const model = settings.model || getImageProviderMeta(settings.provider).defaultModel
   const width = settings.width
@@ -178,14 +205,19 @@ export async function generateImage(settings: ImageGenSettings, request: ImageGe
       return { image, format: 'png', provider: settings.provider, model, prompt, negativePrompt, width, height, seed }
     }
     case 'openai': {
-      const data = await apiPost<any>('/api/openai/generate-image', {
-        model,
-        prompt,
-        size: settings.openaiSize || `${width}x${height}`,
-        n: 1,
-        response_format: 'b64_json',
-        reverse_proxy: settings.openaiBaseUrl.trim() || undefined,
-      })
+      let data: any
+      try {
+        data = await apiPost<any>('/api/openai/generate-image', {
+          model,
+          prompt,
+          size: settings.openaiSize || `${width}x${height}`,
+          n: 1,
+          response_format: 'b64_json',
+          reverse_proxy: settings.openaiBaseUrl.trim() || undefined,
+        })
+      } catch (error) {
+        throw new Error(openAiImageErrorMessage(error))
+      }
       const image = data?.data?.[0]?.b64_json
       if (!image) throw new Error('OpenAI 没有返回 base64 图片')
       const [w, h] = String(settings.openaiSize || '').split('x').map((item) => Number(item))
