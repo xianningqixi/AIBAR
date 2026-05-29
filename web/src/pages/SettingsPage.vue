@@ -1776,6 +1776,18 @@ watch(
                   <option value="1792x1024">1792 x 1024</option>
                 </AppSelect>
               </AppFormField>
+              <AppFormField
+                v-if="imageGen.settings.provider === 'openai'"
+                label="中转 URL"
+                hint="留空使用 OpenAI 官方；支持 https://host/v1 或完整 /images/generations。"
+                class="md:col-span-2"
+              >
+                <AppInput
+                  :model-value="imageGen.settings.openaiBaseUrl"
+                  placeholder="https://api.example.com/v1"
+                  @update:model-value="(v) => imageGen.updateSettings({ openaiBaseUrl: v })"
+                />
+              </AppFormField>
               <template v-else>
                 <AppFormField label="宽度">
                   <AppInput

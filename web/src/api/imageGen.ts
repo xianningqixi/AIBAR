@@ -90,6 +90,7 @@ export const DEFAULT_IMAGE_SETTINGS: ImageGenSettings = {
   autoUrl: 'http://127.0.0.1:7860',
   autoAuth: '',
   openaiSize: '1024x1024',
+  openaiBaseUrl: '',
   enhance: false,
 }
 
@@ -116,6 +117,7 @@ export function normalizeImageSettings(input: unknown): ImageGenSettings {
     autoUrl: typeof obj.autoUrl === 'string' ? obj.autoUrl : DEFAULT_IMAGE_SETTINGS.autoUrl,
     autoAuth: typeof obj.autoAuth === 'string' ? obj.autoAuth : DEFAULT_IMAGE_SETTINGS.autoAuth,
     openaiSize: typeof obj.openaiSize === 'string' ? obj.openaiSize : DEFAULT_IMAGE_SETTINGS.openaiSize,
+    openaiBaseUrl: typeof obj.openaiBaseUrl === 'string' ? obj.openaiBaseUrl : DEFAULT_IMAGE_SETTINGS.openaiBaseUrl,
     enhance: typeof obj.enhance === 'boolean' ? obj.enhance : DEFAULT_IMAGE_SETTINGS.enhance,
   }
 }
@@ -182,6 +184,7 @@ export async function generateImage(settings: ImageGenSettings, request: ImageGe
         size: settings.openaiSize || `${width}x${height}`,
         n: 1,
         response_format: 'b64_json',
+        reverse_proxy: settings.openaiBaseUrl.trim() || undefined,
       })
       const image = data?.data?.[0]?.b64_json
       if (!image) throw new Error('OpenAI 没有返回 base64 图片')

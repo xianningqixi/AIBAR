@@ -202,6 +202,7 @@ export interface ImageGenSettings {
   autoUrl: string
   autoAuth: string
   openaiSize: string
+  openaiBaseUrl: string
   enhance: boolean
 }
 
