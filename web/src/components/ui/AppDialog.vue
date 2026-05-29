@@ -18,10 +18,10 @@ defineEmits<{
         class="fixed inset-0 z-50 flex items-center justify-center p-4"
         @click.self="$emit('update:modelValue', false)"
       >
-        <div class="absolute inset-0 bg-black/65 backdrop-blur-sm" />
+        <div class="absolute inset-0 bg-black/70 backdrop-blur-sm" />
         <div
           :class="[
-            'relative w-full rounded-xl bg-surface-elevated border border-border shadow-elevated',
+            'relative w-full rounded-2xl bg-surface-elevated/95 backdrop-blur-xl border border-border shadow-elevated',
             size === 'sm' ? 'max-w-sm' : size === 'lg' ? 'max-w-2xl' : size === 'xl' ? 'max-w-4xl' : 'max-w-md',
           ]"
         >
@@ -58,9 +58,11 @@ defineEmits<{
 .dialog-leave-active {
   transition: opacity 0.2s ease;
 }
-.dialog-enter-active .relative,
 .dialog-leave-active .relative {
   transition: transform 0.2s ease;
+}
+.dialog-enter-active .relative {
+  transition: transform 0.26s cubic-bezier(0.22, 1, 0.36, 1);
 }
 .dialog-enter-from,
 .dialog-leave-to {
@@ -68,6 +70,6 @@ defineEmits<{
 }
 .dialog-enter-from .relative,
 .dialog-leave-to .relative {
-  transform: scale(0.96);
+  transform: scale(0.96) translateY(8px);
 }
 </style>

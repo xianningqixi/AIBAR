@@ -44,41 +44,47 @@ function autoGrow() {
 </script>
 
 <template>
-  <div class="border-t border-border-subtle bg-bg/85 backdrop-blur p-3">
-    <div class="flex items-end gap-2 max-w-3xl mx-auto">
-      <div class="flex-1 relative">
+  <div class="border-t border-border-subtle bg-bg/85 px-3 pb-3 pt-2.5 backdrop-blur">
+    <div class="mx-auto max-w-3xl">
+      <div
+        class="flex items-end gap-2 rounded-2xl border border-border bg-surface-elevated/80 p-1.5 shadow-sm transition-all focus-within:border-brand-500/60 focus-within:shadow-glow"
+      >
         <textarea
           ref="textarea"
           v-model="text"
           :disabled="disabled"
           rows="1"
-          class="w-full rounded-xl bg-surface-elevated border border-border px-4 py-3 text-sm text-ink-primary placeholder-ink-muted focus:outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500/25 resize-none overflow-y-auto leading-snug transition-colors"
-          placeholder="给角色发条消息…  Shift+Enter 换行"
+          class="min-h-[2.75rem] flex-1 resize-none overflow-y-auto bg-transparent px-3 py-2.5 text-sm leading-snug text-ink-primary placeholder-ink-muted focus:outline-none"
+          placeholder="给角色发条消息…"
           @keydown="onKeydown"
           @input="autoGrow"
         />
+        <button
+          v-if="isStreaming"
+          class="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-red-500/30 bg-red-500/15 text-red-300 transition-colors hover:bg-red-500/25"
+          @click="handleSend"
+          title="停止生成 (Esc)"
+        >
+          <svg class="h-4 w-4" fill="currentColor" viewBox="0 0 24 24">
+            <rect x="6" y="6" width="12" height="12" rx="1.5" />
+          </svg>
+        </button>
+        <button
+          v-else
+          :disabled="!text.trim() || disabled"
+          class="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-brand-gradient text-white shadow-glow transition-all hover:brightness-110 active:scale-95 disabled:opacity-30 disabled:shadow-none disabled:cursor-not-allowed"
+          @click="handleSend"
+          title="发送 (Enter)"
+        >
+          <svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 19V5m0 0l-6 6m6-6l6 6" />
+          </svg>
+        </button>
       </div>
-      <button
-        v-if="isStreaming"
-        class="shrink-0 h-11 w-11 flex items-center justify-center rounded-xl bg-red-500/15 text-red-300 hover:bg-red-500/25 border border-red-500/30 transition-colors"
-        @click="handleSend"
-        title="停止生成"
-      >
-        <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
-          <rect x="6" y="6" width="12" height="12" rx="1.5" />
-        </svg>
-      </button>
-      <button
-        v-else
-        :disabled="!text.trim() || disabled"
-        class="shrink-0 h-11 w-11 flex items-center justify-center rounded-xl bg-brand-gradient text-white hover:brightness-110 disabled:opacity-30 disabled:cursor-not-allowed transition-all shadow-glow active:scale-95"
-        @click="handleSend"
-        title="发送"
-      >
-        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 19V5m0 0l-6 6m6-6l6 6" />
-        </svg>
-      </button>
+      <p class="mt-1.5 px-1 text-center text-[10px] text-ink-muted/60">
+        <template v-if="isStreaming">生成中 · 按 Esc 或点按钮停止</template>
+        <template v-else>Enter 发送 · Shift+Enter 换行</template>
+      </p>
     </div>
   </div>
 </template>

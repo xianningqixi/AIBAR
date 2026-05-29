@@ -30,8 +30,8 @@ defineEmits<{
       :min="min"
       :max="max"
       :class="[
-        'w-full rounded-lg bg-surface border border-border text-sm text-ink-primary placeholder-ink-muted transition-colors duration-150',
-        'focus:outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500/30',
+        'w-full rounded-lg bg-surface border border-border text-sm text-ink-primary placeholder-ink-muted transition-all duration-150 hover:border-border-strong',
+        'focus:outline-none focus:border-brand-500/70 focus:ring-2 focus:ring-brand-500/30 focus:shadow-glow',
         'disabled:opacity-50 disabled:cursor-not-allowed',
         $slots.prefix ? 'pl-9' : 'pl-3',
         $slots.suffix ? 'pr-9' : 'pr-3',

@@ -203,7 +203,7 @@ onMounted(async () => {
     </header>
 
     <main class="w-full flex-1 px-5 py-5 md:px-8 lg:px-10">
-      <div class="mx-auto max-w-6xl space-y-6">
+      <div class="mx-auto max-w-6xl space-y-6 animate-fade-in-up">
         <header class="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
           <div>
             <h2 class="text-2xl font-semibold tracking-tight text-ink-primary">创作</h2>
@@ -221,10 +221,10 @@ onMounted(async () => {
           <button
             v-for="mode in modeCards"
             :key="mode.key"
-            class="min-h-[150px] rounded-2xl p-6 text-left ring-1 transition-all"
+            class="min-h-[150px] rounded-2xl p-6 text-left ring-1 transition-all duration-200"
             :class="activeMode === mode.key
               ? 'bg-brand-500/15 ring-brand-500/40 shadow-glow'
-              : 'bg-surface ring-border-subtle hover:ring-brand-500/35'"
+              : 'bg-surface ring-border-subtle hover:-translate-y-0.5 hover:ring-brand-500/35 hover:shadow-glow'"
             @click="activeMode = mode.key"
           >
             <span
@@ -266,7 +266,7 @@ onMounted(async () => {
               <button
                 v-for="story in sortedStories"
                 :key="story.id"
-                class="rounded-2xl bg-surface p-5 text-left ring-1 ring-border-subtle transition-all hover:ring-brand-500/40 hover:shadow-glow"
+                class="rounded-2xl bg-surface p-5 text-left ring-1 ring-border-subtle transition-all duration-200 hover:-translate-y-0.5 hover:ring-brand-500/40 hover:shadow-glow"
                 @click="openStory(story)"
               >
                 <div class="flex gap-4">
@@ -300,7 +300,7 @@ onMounted(async () => {
               <button
                 v-for="character in sortedCharacters"
                 :key="character.avatar"
-                class="rounded-2xl bg-surface p-5 text-left ring-1 ring-border-subtle transition-all hover:ring-brand-500/40 hover:shadow-glow"
+                class="rounded-2xl bg-surface p-5 text-left ring-1 ring-border-subtle transition-all duration-200 hover:-translate-y-0.5 hover:ring-brand-500/40 hover:shadow-glow"
                 @click="openCharacter(character)"
               >
                 <div class="flex gap-4">

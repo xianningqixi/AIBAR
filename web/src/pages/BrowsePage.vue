@@ -23,6 +23,7 @@ const models = useModelProfilesStore()
 
 const stories = ref<StoryCard[]>([])
 const chatEntries = ref<ChatEntry[]>([])
+const loading = ref(true)
 
 function normalizeTab(value: unknown): BrowseTab {
   return value === 'stories' || value === 'chats' ? value : 'characters'
@@ -33,9 +34,23 @@ const charFilter = ref<'all' | 'recent' | 'favorites' | 'withChat'>('all')
 const noImage = ref(false)
 const startingNewChat = ref(false)
 const modelPickerOpen = ref(false)
+const searchQuery = ref('')
+
+const searchPlaceholder = computed(() => {
+  if (activeTab.value === 'stories') return '搜索故事卡（标题、简介、标签）…'
+  if (activeTab.value === 'chats') return '搜索聊天记录…'
+  return '搜索角色（名称、简介、标签）…'
+})
+
+function includesQuery(fields: Array<string | undefined | null>): boolean {
+  const q = searchQuery.value.trim().toLowerCase()
+  if (!q) return true
+  return fields.some((f) => (f || '').toLowerCase().includes(q))
+}
 
 watch(activeTab, (tab) => {
   router.replace({ query: { ...route.query, tab } })
+  searchQuery.value = ''
   if (typeof window !== 'undefined') window.scrollTo({ top: 0, behavior: 'smooth' })
 })
 
@@ -93,12 +108,6 @@ function formatRelative(value?: unknown): string {
   return formatDate(value)
 }
 
-const continueChats = computed(() =>
-  [...chatEntries.value]
-    .sort((a, b) => toTimestamp(b.last_mes) - toTimestamp(a.last_mes))
-    .slice(0, 6),
-)
-
 function isProfileUsable(profile: ModelProfile): boolean {
   if (!profile.model) return false
   if (profile.source === 'custom') return Boolean(profile.endpoint)
@@ -117,12 +126,23 @@ const activeModelSubtitle = computed(() =>
   `${getProviderLabel(models.activeProfile.source)} · ${isProfileUsable(models.activeProfile) ? '可用' : '待配置'}`,
 )
 
-const activeTabMeta = computed(() => {
+const activeModelReady = computed(() => isProfileUsable(models.activeProfile))
+
+type TabAction = {
+  title: string
+  status: string
+  actionLabel: string
+  variant: 'gradient' | 'secondary'
+  action: () => void
+}
+
+const activeTabMeta = computed<TabAction>(() => {
   if (activeTab.value === 'stories') {
     return {
       title: '故事开局',
       status: stories.value.length ? `${stories.value.length} 个故事卡` : '还没有故事卡',
       actionLabel: '去创作',
+      variant: 'gradient',
       action: () => router.push('/create?kind=story'),
     }
   }
@@ -131,6 +151,7 @@ const activeTabMeta = computed(() => {
       title: '继续聊天',
       status: sortedChats.value.length ? `${sortedChats.value.length} 条聊天记录` : '还没有聊天记录',
       actionLabel: '随机新聊天',
+      variant: 'secondary',
       action: startNewChat,
     }
   }
@@ -138,15 +159,9 @@ const activeTabMeta = computed(() => {
     title: '选角色',
     status: store.characters.length ? `${store.characters.length} 个角色` : '还没有角色',
     actionLabel: store.characters.length ? '随机角色' : '去创作',
+    variant: store.characters.length ? 'secondary' : 'gradient',
     action: () => (store.characters.length ? pickRandom() : router.push('/create?kind=character')),
   }
-})
-
-const readyStatusText = computed(() => {
-  if (!hasUsableModel.value) return '模型未就绪'
-  if (!store.characters.length) return '先创建一个角色'
-  if (continueChats.value.length) return `最近 ${continueChats.value.length} 条聊天可继续`
-  return '可以开始新聊天'
 })
 
 function modelStatusLabel(profile: ModelProfile): string {
@@ -285,16 +300,46 @@ const sortedChats = computed(() =>
   [...chatEntries.value].sort((a, b) => toTimestamp(b.last_mes) - toTimestamp(a.last_mes)),
 )
 
-const sortedCharacters = computed(() =>
-  [...store.characters].sort((a, b) => {
-    const favDiff = (b.fav === 'true' ? 1 : 0) - (a.fav === 'true' ? 1 : 0)
-    if (favDiff !== 0) return favDiff
-    const ac = Number(a.chat_size) || 0
-    const bc = Number(b.chat_size) || 0
-    if (ac !== bc) return bc - ac
-    return a.name.localeCompare(b.name)
-  }),
-)
+const recentChats = computed(() => sortedChats.value.slice(0, 12))
+
+const charSort = ref<'smart' | 'recent' | 'popular' | 'name'>('smart')
+const charSortOptions = [
+  { key: 'smart' as const, label: '推荐' },
+  { key: 'recent' as const, label: '最近' },
+  { key: 'popular' as const, label: '最热' },
+  { key: 'name' as const, label: '名称' },
+]
+
+function charLastChatMs(c: Character): number {
+  const v = c.date_last_chat
+  if (typeof v === 'number') return v * 1000
+  if (typeof v === 'string') {
+    const t = new Date(v).getTime()
+    return Number.isFinite(t) ? t : 0
+  }
+  return 0
+}
+
+const sortedCharacters = computed(() => {
+  const list = [...store.characters]
+  if (charSort.value === 'recent') {
+    list.sort((a, b) => charLastChatMs(b) - charLastChatMs(a) || a.name.localeCompare(b.name))
+  } else if (charSort.value === 'popular') {
+    list.sort((a, b) => (Number(b.chat_size) || 0) - (Number(a.chat_size) || 0) || a.name.localeCompare(b.name))
+  } else if (charSort.value === 'name') {
+    list.sort((a, b) => a.name.localeCompare(b.name))
+  } else {
+    list.sort((a, b) => {
+      const favDiff = (b.fav === 'true' ? 1 : 0) - (a.fav === 'true' ? 1 : 0)
+      if (favDiff !== 0) return favDiff
+      const ac = Number(a.chat_size) || 0
+      const bc = Number(b.chat_size) || 0
+      if (ac !== bc) return bc - ac
+      return a.name.localeCompare(b.name)
+    })
+  }
+  return list
+})
 
 const filteredCharacters = computed(() => {
   let list = sortedCharacters.value
@@ -312,7 +357,26 @@ const filteredCharacters = computed(() => {
       return t && (now - t) < 7 * dayMs
     })
   }
+  if (searchQuery.value.trim()) {
+    list = list.filter((c) =>
+      includesQuery([c.name, getCharacterDescription(c), getCharacterTags(c).join(' ')]),
+    )
+  }
   return list
+})
+
+const filteredStories = computed(() => {
+  if (!searchQuery.value.trim()) return stories.value
+  return stories.value.filter((s) =>
+    includesQuery([s.title, s.summary, s.scenario, (s.tags || []).join(' '), getStoryCharacter(s)?.name]),
+  )
+})
+
+const filteredChats = computed(() => {
+  if (!searchQuery.value.trim()) return sortedChats.value
+  return sortedChats.value.filter((entry) =>
+    includesQuery([getChatTitle(entry), getChatCharacterName(entry), entry.mes]),
+  )
 })
 
 const charFilters = [
@@ -330,17 +394,36 @@ function getCharacterDescription(c: Character): string {
   return c.description || c.data?.description || ''
 }
 
+function cleanDescription(c: Character): string {
+  let t = getCharacterDescription(c)
+  if (!t) return ''
+  t = t.replace(/\{\{char\}\}/gi, c.name).replace(/\{\{user\}\}/gi, '你')
+  // 去掉常见的设定包裹符号（方括号、引号、星号、花括号）
+  t = t.replace(/[[\]{}"*]/g, ' ')
+  // 去掉 SillyTavern 风格的「字段= 值」标签前缀，例如 "Seraphina's Personality= ..."
+  t = t.replace(/[A-Za-z][A-Za-z'’ ]*=\s*/g, '')
+  // 把因去引号产生的「 , 」碎片收成顿号
+  t = t.replace(/\s*,\s*/g, '、')
+  // 折叠多余空白与换行
+  t = t.replace(/\s+/g, ' ').trim()
+  return t
+}
+
 onMounted(async () => {
-  await Promise.all([
-    store.characters.length ? Promise.resolve() : store.load(),
-    models.loadSecrets().catch(() => undefined),
-    listStories()
-      .then((res) => (stories.value = res))
-      .catch(() => undefined),
-    fetchRecentChats(500)
-      .then((res) => (chatEntries.value = res))
-      .catch(() => undefined),
-  ])
+  try {
+    await Promise.all([
+      store.characters.length ? Promise.resolve() : store.load(),
+      models.loadSecrets().catch(() => undefined),
+      listStories()
+        .then((res) => (stories.value = res))
+        .catch(() => undefined),
+      fetchRecentChats(500)
+        .then((res) => (chatEntries.value = res))
+        .catch(() => undefined),
+    ])
+  } finally {
+    loading.value = false
+  }
 })
 </script>
 
@@ -369,23 +452,6 @@ onMounted(async () => {
           @click="router.push('/create')"
         >
           <span>创作</span>
-        </button>
-      </nav>
-
-      <nav class="mt-6 space-y-1 border-t border-border-subtle pt-4">
-        <button
-          v-for="t in tabs"
-          :key="t.key"
-          :class="[
-            'w-full flex items-center justify-between rounded-xl px-4 py-3 text-left text-sm font-semibold transition-all',
-            activeTab === t.key
-              ? 'bg-brand-500/15 text-brand-200 ring-1 ring-brand-500/35'
-              : 'text-ink-secondary hover:bg-white/5 hover:text-ink-primary',
-          ]"
-          @click="focusTab(t.key)"
-        >
-          <span>{{ t.label }}</span>
-          <span v-if="t.badge !== undefined" class="text-xs text-ink-muted">{{ t.badge }}</span>
         </button>
       </nav>
 
@@ -436,29 +502,6 @@ onMounted(async () => {
           </div>
         </button>
 
-        <nav class="hidden md:flex items-center gap-1.5">
-          <button
-            v-for="t in tabs"
-            :key="t.key"
-            :class="[
-              'px-5 py-2.5 rounded-xl text-base font-semibold transition-all',
-              activeTab === t.key
-                ? 'bg-brand-500/20 text-brand-200 ring-1 ring-brand-500/40 shadow-glow'
-                : 'text-ink-secondary hover:text-ink-primary hover:bg-white/5',
-            ]"
-            @click="goTab(t.key)"
-          >
-            {{ t.label }}
-            <span
-              v-if="t.badge !== undefined"
-              :class="[
-                'ml-1.5 text-sm font-medium',
-                activeTab === t.key ? 'text-brand-300' : 'text-ink-muted',
-              ]"
-            >{{ t.badge }}</span>
-          </button>
-        </nav>
-
         <div class="flex items-center gap-1">
           <AppButton variant="ghost" size="md" @click="router.push('/create')">创作</AppButton>
           <AppButton variant="ghost" size="md" @click="router.push('/settings')">设置</AppButton>
@@ -494,30 +537,47 @@ onMounted(async () => {
     <main class="w-full flex-1 px-5 py-5 md:px-8 lg:px-10">
       <div class="mx-auto max-w-6xl space-y-6">
         <header class="sticky top-0 z-20 -mx-5 hidden border-b border-border-subtle bg-bg/90 backdrop-blur md:block md:-mx-8 lg:-mx-10">
-          <div class="relative mx-auto flex h-14 max-w-6xl items-center justify-between px-8 lg:px-10">
-            <p class="min-w-0 max-w-[32%] truncate text-sm text-ink-muted">{{ readyStatusText }}</p>
-
-            <button
-              class="absolute left-1/2 top-1/2 inline-flex -translate-x-1/2 -translate-y-1/2 items-center gap-2 rounded-lg bg-surface px-4 py-2 text-sm font-semibold text-ink-primary ring-1 ring-border-subtle shadow-sm transition-all hover:ring-brand-500/40"
-              :class="modelPickerOpen ? 'bg-brand-500/10 ring-brand-500/50' : ''"
-              @click="modelPickerOpen = true"
-            >
-              <span class="max-w-[240px] truncate">{{ activeModelTitle }}</span>
-              <svg class="h-4 w-4 text-ink-muted" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 9l6 6 6-6" />
+          <div class="mx-auto flex h-14 max-w-6xl items-center gap-3 px-8 lg:px-10">
+            <div class="relative min-w-0 flex-1 max-w-xl">
+              <svg class="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-ink-muted" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-4.35-4.35M17 11a6 6 0 11-12 0 6 6 0 0112 0z" />
               </svg>
-            </button>
+              <input
+                v-model="searchQuery"
+                type="search"
+                :placeholder="searchPlaceholder"
+                class="w-full rounded-lg bg-surface py-2 pl-9 pr-3 text-sm text-ink-primary ring-1 ring-border-subtle transition-all placeholder:text-ink-muted hover:ring-border-strong focus:outline-none focus:ring-2 focus:ring-brand-500/40 focus:shadow-glow"
+              />
+            </div>
 
-            <button
-              class="ml-auto rounded-lg p-2 text-ink-secondary transition-colors hover:bg-white/5 hover:text-ink-primary"
-              title="设置"
-              @click="router.push('/settings')"
-            >
-              <svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-              </svg>
-            </button>
+            <div class="ml-auto flex items-center gap-2">
+              <button
+                class="inline-flex max-w-[14rem] items-center gap-2 rounded-lg bg-surface px-3 py-2 text-sm font-medium text-ink-secondary ring-1 ring-border-subtle transition-all hover:text-ink-primary hover:ring-brand-500/40"
+                :class="modelPickerOpen ? 'bg-brand-500/10 text-ink-primary ring-brand-500/50' : ''"
+                title="选择默认模型"
+                @click="modelPickerOpen = true"
+              >
+                <span
+                  class="h-2 w-2 shrink-0 rounded-full"
+                  :class="activeModelReady ? 'bg-emerald-400' : 'bg-amber-400'"
+                />
+                <span class="truncate">{{ activeModelTitle }}</span>
+                <svg class="h-4 w-4 shrink-0 text-ink-muted" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 9l6 6 6-6" />
+                </svg>
+              </button>
+
+              <button
+                class="shrink-0 rounded-lg p-2 text-ink-secondary transition-colors hover:bg-white/5 hover:text-ink-primary"
+                title="设置"
+                @click="router.push('/settings')"
+              >
+                <svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                </svg>
+              </button>
+            </div>
           </div>
         </header>
 
@@ -532,7 +592,79 @@ onMounted(async () => {
           <AppButton size="sm" variant="secondary" @click="router.push('/settings')">去配置</AppButton>
         </section>
 
+        <section
+          v-if="!loading && recentChats.length && activeTab !== 'chats' && !searchQuery.trim()"
+          class="space-y-3"
+        >
+          <div class="flex items-center justify-between">
+            <h3 class="flex items-center gap-2 text-sm font-semibold text-ink-primary">
+              <span class="h-1.5 w-1.5 rounded-full bg-brand-gradient" />
+              最近在聊
+            </h3>
+            <button class="text-xs text-brand-300 transition-colors hover:text-brand-200" @click="goTab('chats')">
+              查看全部
+            </button>
+          </div>
+          <div class="-mx-1 flex gap-3 overflow-x-auto px-1 pb-1">
+            <button
+              v-for="entry in recentChats"
+              :key="entry.avatar ? `${entry.avatar}:${entry.file_name}` : entry.file_name"
+              class="group flex w-60 shrink-0 items-center gap-3 rounded-xl bg-surface p-3 text-left shadow-sm ring-1 ring-border-subtle transition-all duration-200 hover:-translate-y-0.5 hover:ring-brand-500/40 hover:shadow-glow"
+              @click="openChatEntry(entry)"
+            >
+              <img
+                v-if="chatThumbnail(entry)"
+                :src="chatThumbnail(entry)"
+                loading="lazy"
+                decoding="async"
+                alt=""
+                class="h-12 w-12 shrink-0 rounded-lg object-cover ring-1 ring-border-subtle"
+              />
+              <div v-else class="flex h-12 w-12 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-brand-500/30 to-accent-500/20 text-xl ring-1 ring-border-subtle">💬</div>
+              <div class="min-w-0 flex-1">
+                <p class="truncate text-sm font-semibold text-ink-primary">{{ getChatCharacterName(entry) }}</p>
+                <p class="truncate text-xs text-ink-muted">{{ entry.mes || '继续上次的对话' }}</p>
+                <p class="mt-0.5 text-[11px] text-ink-muted">{{ formatRelative(entry.last_mes) }}</p>
+              </div>
+            </button>
+          </div>
+        </section>
+
         <div id="browse-results" class="scroll-mt-20 space-y-5">
+          <div class="hidden md:flex">
+            <div class="inline-flex rounded-xl bg-surface p-1 ring-1 ring-border-subtle">
+              <button
+                v-for="t in tabs"
+                :key="t.key"
+                :class="[
+                  'inline-flex items-center gap-1.5 rounded-lg px-4 py-1.5 text-sm font-semibold transition-all',
+                  activeTab === t.key
+                    ? 'bg-brand-gradient text-white shadow-glow'
+                    : 'text-ink-secondary hover:text-ink-primary',
+                ]"
+                @click="goTab(t.key)"
+              >
+                {{ t.label }}
+                <span
+                  v-if="t.badge !== undefined"
+                  :class="['text-xs', activeTab === t.key ? 'text-white/80' : 'text-ink-muted']"
+                >{{ t.badge }}</span>
+              </button>
+            </div>
+          </div>
+
+          <div class="relative md:hidden">
+            <svg class="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-ink-muted" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-4.35-4.35M17 11a6 6 0 11-12 0 6 6 0 0112 0z" />
+            </svg>
+            <input
+              v-model="searchQuery"
+              type="search"
+              :placeholder="searchPlaceholder"
+              class="w-full rounded-lg bg-surface py-2.5 pl-9 pr-3 text-sm text-ink-primary ring-1 ring-border-subtle transition-all placeholder:text-ink-muted focus:outline-none focus:ring-2 focus:ring-brand-500/40"
+            />
+          </div>
+
           <div class="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
             <div class="min-w-0">
               <h2 class="text-2xl font-semibold tracking-tight text-ink-primary">{{ activeTabMeta.title }}</h2>
@@ -544,7 +676,7 @@ onMounted(async () => {
               </AppButton>
               <AppButton
                 size="md"
-                variant="gradient"
+                :variant="activeTabMeta.variant"
                 :disabled="activeTab === 'chats' && startingNewChat"
                 @click="activeTabMeta.action"
               >
@@ -552,8 +684,19 @@ onMounted(async () => {
               </AppButton>
             </div>
           </div>
+      <!-- 加载骨架 -->
+      <div v-if="loading" class="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
+        <div v-for="n in 8" :key="n" class="overflow-hidden rounded-2xl bg-surface ring-1 ring-border-subtle">
+          <div class="skeleton aspect-[3/4] w-full" />
+          <div class="space-y-2 p-3">
+            <div class="skeleton h-3 w-3/4" />
+            <div class="skeleton h-3 w-1/2" />
+          </div>
+        </div>
+      </div>
+
       <!-- 角色卡列表 -->
-      <section v-if="activeTab === 'characters'">
+      <section v-if="!loading && activeTab === 'characters'">
         <div class="flex flex-wrap items-center gap-3 mb-4">
           <div class="flex items-center gap-1">
             <button
@@ -569,6 +712,13 @@ onMounted(async () => {
             >{{ f.label }}</button>
           </div>
           <div class="flex-1" />
+          <select
+            v-model="charSort"
+            class="rounded-lg bg-surface px-2.5 py-1.5 text-sm text-ink-secondary ring-1 ring-border-subtle transition-colors hover:text-ink-primary focus:outline-none focus:ring-2 focus:ring-brand-500/40"
+            title="排序方式"
+          >
+            <option v-for="o in charSortOptions" :key="o.key" :value="o.key">排序 · {{ o.label }}</option>
+          </select>
           <label class="flex items-center gap-1.5 text-xs text-ink-muted cursor-pointer select-none">
             <input v-model="noImage" type="checkbox" class="accent-brand-500" />
             无图模式
@@ -597,48 +747,55 @@ onMounted(async () => {
         </div>
         <div v-else-if="!filteredCharacters.length" class="rounded-2xl ring-1 ring-border-subtle bg-surface p-12 text-center">
           <p class="text-5xl mb-3">🔍</p>
-          <p class="text-lg font-semibold text-ink-primary">当前筛选下没有角色</p>
-          <p class="text-sm text-ink-muted mt-2">试试切换筛选条件。</p>
-          <AppButton size="md" variant="secondary" class="mt-4" @click="charFilter = 'all'">显示全部</AppButton>
+          <p class="text-lg font-semibold text-ink-primary">没有匹配的角色</p>
+          <p class="text-sm text-ink-muted mt-2">{{ searchQuery.trim() ? '换个关键词，或重置筛选。' : '试试切换筛选条件。' }}</p>
+          <AppButton size="md" variant="secondary" class="mt-4" @click="charFilter = 'all'; searchQuery = ''">显示全部</AppButton>
         </div>
-        <div v-else class="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
+        <div v-else class="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
           <button
             v-for="c in filteredCharacters"
             :key="c.avatar"
-            class="text-left rounded-2xl ring-1 ring-border-subtle hover:ring-brand-500/40 hover:shadow-glow bg-surface transition-all p-5"
+            class="group flex flex-col overflow-hidden rounded-2xl bg-surface text-left shadow-sm ring-1 ring-border-subtle transition-all duration-200 hover:-translate-y-1 hover:ring-brand-500/50 hover:shadow-glow"
             @click="openCharacter(c)"
           >
-            <div class="flex gap-4">
+            <div class="relative aspect-[3/4] w-full overflow-hidden bg-gradient-to-br from-brand-500/25 to-accent-500/15">
               <img
                 v-if="!noImage && c.avatar && c.avatar !== 'none'"
                 :src="`/thumbnail?type=avatar&file=${encodeURIComponent(c.avatar)}`"
-                class="w-14 h-20 rounded-lg object-cover ring-1 ring-border-subtle shrink-0"
+                loading="lazy"
+                decoding="async"
+                alt=""
+                class="h-full w-full object-cover transition-transform duration-300 group-hover:scale-105"
               />
-              <div v-else class="w-14 h-20 rounded-lg bg-gradient-to-br from-brand-500/30 to-accent-500/20 ring-1 ring-border-subtle shrink-0 flex items-center justify-center text-2xl">🎭</div>
-              <div class="min-w-0 flex-1">
-                <div class="flex items-center gap-2">
-                  <h4 class="text-base font-semibold text-ink-primary truncate">{{ c.name }}</h4>
-                  <span v-if="c.fav === 'true'" class="text-accent-400 text-sm shrink-0">★</span>
-                </div>
-                <p class="mt-1 text-sm text-ink-muted">{{ c.chat_size ? `${c.chat_size} 条聊天` : '未开始' }}</p>
-                <p class="mt-2 min-h-[2.75rem] text-sm text-ink-secondary line-clamp-2 leading-relaxed">
-                  {{ getCharacterDescription(c) || '这个角色还没有简介。' }}
-                </p>
+              <div v-else class="flex h-full w-full items-center justify-center text-5xl">🎭</div>
+              <div class="pointer-events-none absolute inset-x-0 bottom-0 h-3/5 bg-gradient-to-t from-black/90 via-black/45 to-transparent" />
+              <span
+                v-if="c.fav === 'true'"
+                class="absolute right-2 top-2 rounded-full bg-black/40 px-1.5 py-0.5 text-sm text-accent-300 backdrop-blur-sm"
+              >★</span>
+              <div class="absolute inset-x-0 bottom-0 p-3">
+                <h4 class="truncate text-sm font-semibold text-white [text-shadow:0_1px_3px_rgba(0,0,0,0.7)]">{{ c.name }}</h4>
+                <p class="mt-0.5 text-xs text-white/80 [text-shadow:0_1px_2px_rgba(0,0,0,0.6)]">{{ c.chat_size ? `${c.chat_size} 条聊天` : '未开始' }}</p>
               </div>
             </div>
-            <div v-if="getCharacterTags(c).length" class="mt-3 flex flex-wrap gap-1.5">
-              <span
-                v-for="tag in getCharacterTags(c).slice(0, 4)"
-                :key="tag"
-                class="text-xs px-2 py-0.5 rounded bg-brand-500/10 text-brand-300 font-medium"
-              >{{ tag }}</span>
+            <div class="flex flex-1 flex-col p-3">
+              <p class="line-clamp-2 min-h-[2.5rem] text-xs leading-relaxed text-ink-secondary">
+                {{ cleanDescription(c) || '这个角色还没有简介。' }}
+              </p>
+              <div v-if="getCharacterTags(c).length" class="mt-2 flex flex-wrap gap-1">
+                <span
+                  v-for="tag in getCharacterTags(c).slice(0, 3)"
+                  :key="tag"
+                  class="rounded bg-brand-500/10 px-1.5 py-0.5 text-[10px] font-medium text-brand-300"
+                >{{ tag }}</span>
+              </div>
             </div>
           </button>
         </div>
       </section>
 
       <!-- 故事卡列表 -->
-      <section v-if="activeTab === 'stories'">
+      <section v-if="!loading && activeTab === 'stories'">
         <div v-if="!stories.length" class="rounded-2xl ring-1 ring-border-subtle bg-surface p-12 text-center">
           <p class="text-5xl mb-3">📖</p>
           <p class="text-lg font-semibold text-ink-primary">还没有故事卡</p>
@@ -648,58 +805,82 @@ onMounted(async () => {
             <AppButton size="md" variant="secondary" @click="focusTab('characters')">先挑角色</AppButton>
           </div>
         </div>
-        <div v-else class="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
+        <div v-else-if="!filteredStories.length" class="rounded-2xl ring-1 ring-border-subtle bg-surface p-12 text-center">
+          <p class="text-5xl mb-3">🔍</p>
+          <p class="text-lg font-semibold text-ink-primary">没有匹配的故事卡</p>
+          <p class="text-sm text-ink-muted mt-2">换个关键词试试。</p>
+          <AppButton size="md" variant="secondary" class="mt-4" @click="searchQuery = ''">清除搜索</AppButton>
+        </div>
+        <div v-else class="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
           <button
-            v-for="story in stories"
+            v-for="story in filteredStories"
             :key="story.id"
-            class="text-left rounded-2xl ring-1 ring-border-subtle hover:ring-brand-500/40 hover:shadow-glow bg-surface transition-all p-5"
+            class="group flex flex-col overflow-hidden rounded-2xl bg-surface text-left shadow-sm ring-1 ring-border-subtle transition-all duration-200 hover:-translate-y-1 hover:ring-brand-500/50 hover:shadow-glow"
             @click="openStoryDetail(story)"
           >
-            <div class="flex gap-4">
+            <div class="relative aspect-[3/4] w-full overflow-hidden bg-gradient-to-br from-brand-500/25 to-accent-500/15">
               <img
                 v-if="storyThumbnail(story)"
                 :src="storyThumbnail(story)"
-                class="w-14 h-20 rounded-lg object-cover ring-1 ring-border-subtle shrink-0"
+                loading="lazy"
+                decoding="async"
+                alt=""
+                class="h-full w-full object-cover transition-transform duration-300 group-hover:scale-105"
               />
-              <div v-else class="w-14 h-20 rounded-lg bg-gradient-to-br from-brand-500/30 to-accent-500/20 ring-1 ring-border-subtle shrink-0 flex items-center justify-center text-2xl">📖</div>
-              <div class="min-w-0 flex-1">
-                <h4 class="text-base font-semibold text-ink-primary truncate">{{ story.title }}</h4>
-                <p class="mt-1 text-sm text-ink-muted truncate">{{ getStoryCharacter(story)?.name || '角色已缺失' }}</p>
-                <p class="mt-2 min-h-[2.75rem] text-sm text-ink-secondary line-clamp-2 leading-relaxed">
-                  {{ story.summary || story.scenario || '这个故事卡还没有简介。' }}
-                </p>
+              <div v-else class="flex h-full w-full items-center justify-center text-5xl">📖</div>
+              <div class="pointer-events-none absolute inset-x-0 bottom-0 h-3/5 bg-gradient-to-t from-black/90 via-black/45 to-transparent" />
+              <span class="absolute left-2 top-2 rounded-full bg-brand-gradient px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-white shadow-glow">故事</span>
+              <div class="absolute inset-x-0 bottom-0 p-3">
+                <h4 class="truncate text-sm font-semibold text-white [text-shadow:0_1px_3px_rgba(0,0,0,0.7)]">{{ story.title }}</h4>
+                <p class="mt-0.5 truncate text-xs text-white/80 [text-shadow:0_1px_2px_rgba(0,0,0,0.6)]">{{ getStoryCharacter(story)?.name || '角色已缺失' }}</p>
               </div>
             </div>
-            <div v-if="story.tags?.length" class="mt-3 flex flex-wrap gap-1.5">
-              <span
-                v-for="tag in story.tags.slice(0, 4)"
-                :key="tag"
-                class="text-xs px-2 py-0.5 rounded bg-brand-500/10 text-brand-300 font-medium"
-              >{{ tag }}</span>
+            <div class="flex flex-1 flex-col p-3">
+              <p class="line-clamp-2 min-h-[2.5rem] text-xs leading-relaxed text-ink-secondary">
+                {{ story.summary || story.scenario || '这个故事卡还没有简介。' }}
+              </p>
+              <div class="mt-2 flex items-center justify-between gap-2">
+                <div v-if="story.tags?.length" class="flex flex-wrap gap-1">
+                  <span
+                    v-for="tag in story.tags.slice(0, 2)"
+                    :key="tag"
+                    class="rounded bg-brand-500/10 px-1.5 py-0.5 text-[10px] font-medium text-brand-300"
+                  >{{ tag }}</span>
+                </div>
+                <span class="shrink-0 text-[10px] text-ink-muted">{{ formatDate(story.updatedAt || story.createdAt) }}</span>
+              </div>
             </div>
-            <p class="mt-3 text-xs text-ink-muted">{{ formatDate(story.updatedAt || story.createdAt) }}</p>
           </button>
         </div>
       </section>
 
       <!-- 聊天记录列表 -->
-      <section v-if="activeTab === 'chats'">
+      <section v-if="!loading && activeTab === 'chats'">
         <div v-if="!sortedChats.length" class="rounded-2xl ring-1 ring-border-subtle bg-surface p-12 text-center">
           <p class="text-5xl mb-3">💬</p>
           <p class="text-lg font-semibold text-ink-primary">还没有聊天记录</p>
           <p class="text-sm text-ink-muted mt-2">选一张角色卡或故事卡开始第一段对话吧。</p>
         </div>
+        <div v-else-if="!filteredChats.length" class="rounded-2xl ring-1 ring-border-subtle bg-surface p-12 text-center">
+          <p class="text-5xl mb-3">🔍</p>
+          <p class="text-lg font-semibold text-ink-primary">没有匹配的聊天</p>
+          <p class="text-sm text-ink-muted mt-2">换个关键词试试。</p>
+          <AppButton size="md" variant="secondary" class="mt-4" @click="searchQuery = ''">清除搜索</AppButton>
+        </div>
         <div v-else class="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
           <button
-            v-for="entry in sortedChats"
+            v-for="entry in filteredChats"
             :key="entry.avatar ? `${entry.avatar}:${entry.file_name}` : entry.file_name"
-            class="text-left rounded-2xl ring-1 ring-border-subtle hover:ring-brand-500/40 hover:shadow-glow bg-surface transition-all p-5"
+            class="text-left rounded-2xl shadow-sm ring-1 ring-border-subtle bg-surface p-5 transition-all duration-200 hover:-translate-y-0.5 hover:ring-brand-500/40 hover:shadow-glow"
             @click="openChatEntry(entry)"
           >
             <div class="flex gap-4">
               <img
                 v-if="chatThumbnail(entry)"
                 :src="chatThumbnail(entry)"
+                loading="lazy"
+                decoding="async"
+                alt=""
                 class="w-14 h-14 rounded-lg object-cover ring-1 ring-border-subtle shrink-0"
               />
               <div v-else class="w-14 h-14 rounded-lg bg-gradient-to-br from-brand-500/30 to-accent-500/20 ring-1 ring-border-subtle shrink-0 flex items-center justify-center text-2xl">💬</div>

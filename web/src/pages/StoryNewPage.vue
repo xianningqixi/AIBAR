@@ -349,7 +349,7 @@ function applyStoryCover(asset: ImageAsset) {
       <AppSpinner size="lg" />
     </div>
 
-    <main v-else class="max-w-4xl mx-auto px-5 py-6 space-y-4">
+    <main v-else class="max-w-4xl mx-auto px-5 py-6 space-y-4 animate-fade-in-up">
       <section class="relative overflow-hidden rounded-2xl ring-1 ring-border-subtle bg-hero-radial">
         <div class="absolute -top-12 -right-12 w-56 h-56 rounded-full bg-accent-500/20 blur-3xl pointer-events-none" />
         <div class="absolute -bottom-16 -left-8 w-56 h-56 rounded-full bg-brand-500/15 blur-3xl pointer-events-none" />
@@ -437,7 +437,7 @@ function applyStoryCover(asset: ImageAsset) {
                 class="max-w-full whitespace-normal break-words rounded-full px-3 py-1.5 text-left text-xs leading-relaxed ring-1 transition"
                 :class="isDraftOptionSelected(question, option)
                   ? 'bg-brand-500/20 text-brand-100 ring-brand-400/70'
-                  : 'bg-surface-card text-ink-secondary ring-border-subtle hover:text-ink-primary hover:ring-brand-400/40'"
+                  : 'bg-surface text-ink-secondary ring-border-subtle hover:text-ink-primary hover:ring-brand-400/40'"
                 @click="selectDraftOption(question, option)"
               >
                 {{ option }}
@@ -446,8 +446,8 @@ function applyStoryCover(asset: ImageAsset) {
                 type="button"
                 class="max-w-full whitespace-normal break-words rounded-full px-3 py-1.5 text-left text-xs leading-relaxed ring-1 transition"
                 :class="isCustomDraftAnswer(question)
-                  ? 'bg-accent-500/15 text-accent-100 ring-accent-300/60'
-                  : 'bg-surface-card text-ink-secondary ring-border-subtle hover:text-ink-primary hover:ring-accent-300/40'"
+                  ? 'bg-accent-500/15 text-accent-200 ring-accent-300/60'
+                  : 'bg-surface text-ink-secondary ring-border-subtle hover:text-ink-primary hover:ring-accent-300/40'"
                 @click="useCustomDraftAnswer(question)"
               >
                 其他

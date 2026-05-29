@@ -48,10 +48,46 @@
   .card-hover {
     @apply transition-all duration-200 hover:scale-[1.01] hover:shadow-elevated;
   }
+
+  /* 加载骨架:暗色底 + 流光 */
+  .skeleton {
+    @apply rounded-lg bg-white/[0.04] bg-shimmer bg-[length:200%_100%] animate-shimmer;
+  }
+
+  /* 聊天气泡内 Markdown 排版微调 */
+  .prose :where(p):not(:first-child) {
+    margin-top: 0.6em;
+  }
+  .prose :where(p):last-child {
+    margin-bottom: 0;
+  }
+  .prose :where(a) {
+    @apply text-brand-300 underline decoration-brand-500/40 underline-offset-2 transition-colors hover:text-brand-200 hover:decoration-brand-400;
+  }
+  .prose :where(code):not(pre code) {
+    @apply rounded bg-white/[0.08] px-1.5 py-0.5 text-[0.85em] text-accent-300 before:content-none after:content-none;
+  }
+  .prose :where(pre) {
+    @apply rounded-xl border border-border-subtle bg-surface-sunken;
+  }
+  .prose :where(blockquote) {
+    @apply border-l-2 border-brand-500/50 not-italic text-ink-secondary;
+  }
+  /* RP 常用的「动作/旁白」星号强调,降一档色重 */
+  .prose :where(em) {
+    @apply text-ink-secondary;
+  }
 }
 
 @layer utilities {
   .text-balance {
     text-wrap: balance;
+  }
+
+  /* 触屏设备没有 hover,操作栏需常驻可见 */
+  @media (hover: none) {
+    .touch-always-visible {
+      opacity: 1 !important;
+    }
   }
 }

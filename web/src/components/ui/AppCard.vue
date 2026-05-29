@@ -18,7 +18,7 @@ defineProps<{
           ? 'bg-surface border-brand-500/30 shadow-glow'
           : 'bg-surface border-border',
       padding === 'none' ? '' : padding === 'sm' ? 'p-3' : padding === 'lg' ? 'p-6' : 'p-4',
-      hover ? 'transition-all duration-150 hover:border-brand-500/40 hover:shadow-glow' : '',
+      hover ? 'transition-all duration-200 hover:-translate-y-0.5 hover:border-brand-500/40 hover:shadow-glow' : '',
     ]"
   >
     <slot />

@@ -390,7 +390,7 @@ onMounted(async () => {
       </template>
     </AppPageHeader>
 
-    <main class="max-w-5xl mx-auto px-5 py-6">
+    <main class="max-w-5xl mx-auto px-5 py-6 animate-fade-in-up">
       <AppCard v-if="!isAdvancedCreate" padding="md" tone="glow" class="mb-4 space-y-4">
         <div class="flex flex-wrap items-start justify-between gap-3">
           <div>
@@ -461,7 +461,7 @@ onMounted(async () => {
                 class="max-w-full whitespace-normal break-words rounded-full px-3 py-1.5 text-left text-xs leading-relaxed ring-1 transition"
                 :class="isDraftOptionSelected(question, option)
                   ? 'bg-brand-500/20 text-brand-100 ring-brand-400/70'
-                  : 'bg-surface-card text-ink-secondary ring-border-subtle hover:text-ink-primary hover:ring-brand-400/40'"
+                  : 'bg-surface text-ink-secondary ring-border-subtle hover:text-ink-primary hover:ring-brand-400/40'"
                 @click="selectDraftOption(question, option)"
               >
                 {{ option }}
@@ -470,8 +470,8 @@ onMounted(async () => {
                 type="button"
                 class="max-w-full whitespace-normal break-words rounded-full px-3 py-1.5 text-left text-xs leading-relaxed ring-1 transition"
                 :class="isCustomDraftAnswer(question)
-                  ? 'bg-accent-500/15 text-accent-100 ring-accent-300/60'
-                  : 'bg-surface-card text-ink-secondary ring-border-subtle hover:text-ink-primary hover:ring-accent-300/40'"
+                  ? 'bg-accent-500/15 text-accent-200 ring-accent-300/60'
+                  : 'bg-surface text-ink-secondary ring-border-subtle hover:text-ink-primary hover:ring-accent-300/40'"
                 @click="useCustomDraftAnswer(question)"
               >
                 其他

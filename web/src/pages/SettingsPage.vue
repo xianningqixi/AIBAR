@@ -928,7 +928,7 @@ watch(
   <div class="min-h-screen flex flex-col bg-bg">
     <AppPageHeader title="设置" back-to="/browse" />
 
-    <div class="max-w-6xl mx-auto w-full px-5 py-6 flex-1">
+    <div class="max-w-6xl mx-auto w-full px-5 py-6 flex-1 animate-fade-in-up">
       <section class="relative overflow-hidden rounded-2xl ring-1 ring-border-subtle bg-hero-radial mb-6">
         <div class="absolute -top-12 -right-12 w-56 h-56 rounded-full bg-brand-500/20 blur-3xl pointer-events-none" />
         <div class="absolute -bottom-16 -left-8 w-56 h-56 rounded-full bg-accent-500/15 blur-3xl pointer-events-none" />

@@ -63,16 +63,21 @@ function typeIcon(type: string) {
 </template>
 
 <style scoped>
-.toast-enter-active,
+.toast-enter-active {
+  transition: all 0.32s cubic-bezier(0.22, 1, 0.36, 1);
+}
 .toast-leave-active {
-  transition: all 0.25s ease;
+  transition: all 0.2s ease;
 }
 .toast-enter-from {
   opacity: 0;
-  transform: translateX(20px);
+  transform: translateX(24px) scale(0.96);
 }
 .toast-leave-to {
   opacity: 0;
-  transform: translateX(20px);
+  transform: translateX(24px) scale(0.96);
+}
+.toast-move {
+  transition: transform 0.25s ease;
 }
 </style>

@@ -6,9 +6,9 @@ const router = useRouter()
 </script>
 
 <template>
-  <div class="flex flex-col items-center justify-center h-screen text-center px-4 bg-bg">
-    <h1 class="text-7xl font-bold text-ink-muted/30 tracking-tight mb-4">404</h1>
-    <p class="text-ink-secondary mb-6">页面未找到</p>
+  <div class="relative flex flex-col items-center justify-center h-screen text-center px-4 bg-bg bg-hero-radial overflow-hidden">
+    <h1 class="bg-brand-gradient bg-clip-text text-transparent text-8xl font-extrabold tracking-tight mb-4 animate-fade-in-up">404</h1>
+    <p class="text-ink-secondary mb-6">页面走丢了，回到首页继续探索吧</p>
     <AppButton @click="router.push('/browse')">返回首页</AppButton>
   </div>
 </template>

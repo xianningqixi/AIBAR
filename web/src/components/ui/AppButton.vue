@@ -26,8 +26,8 @@ defineProps<{
             : variant === 'icon'
               ? ''
               : variant === 'gradient'
-                ? 'bg-brand-gradient text-white shadow-glow hover:brightness-110 active:brightness-95'
-                : 'bg-brand-500 text-white shadow-sm hover:bg-brand-600 hover:shadow-glow active:bg-brand-700',
+                ? 'bg-brand-gradient text-white shadow-glow hover:shadow-glow-lg hover:brightness-110 active:brightness-95 active:scale-[0.98]'
+                : 'bg-brand-500 text-white shadow-sm hover:bg-brand-600 hover:shadow-glow active:bg-brand-700 active:scale-[0.98]',
     ]"
   >
     <slot />

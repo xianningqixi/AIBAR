@@ -563,19 +563,12 @@ watch(() => route.fullPath, initChat)
       @generate-image="openMessageImagePanel"
     />
 
-    <div class="border-t border-border-subtle bg-bg/85 backdrop-blur">
-      <div class="max-w-3xl mx-auto px-5 py-1.5 flex items-center gap-3 text-[10px] text-ink-muted/60 flex-wrap">
-        <span>Enter 发送</span><span class="text-ink-muted/30">|</span>
-        <span>Shift+Enter 换行</span><span class="text-ink-muted/30">|</span>
-        <span>Esc 停止</span>
-      </div>
-      <ChatInput
-        :disabled="chat.loading"
-        :is-streaming="chat.isStreaming"
-        @send="handleSend"
-        @stop="handleStop"
-      />
-    </div>
+    <ChatInput
+      :disabled="chat.loading"
+      :is-streaming="chat.isStreaming"
+      @send="handleSend"
+      @stop="handleStop"
+    />
 
     <input
       ref="importInput"

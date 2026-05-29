@@ -271,7 +271,7 @@ onMounted(loadData)
       <AppSpinner size="lg" />
     </div>
 
-    <main v-else-if="story" class="max-w-4xl mx-auto px-5 py-6 space-y-4">
+    <main v-else-if="story" class="max-w-4xl mx-auto px-5 py-6 space-y-4 animate-fade-in-up">
       <section class="relative overflow-hidden rounded-2xl ring-1 ring-border-subtle bg-hero-radial">
         <div
           v-if="storyHeroImage"

@@ -237,7 +237,7 @@ onMounted(loadData)
       <AppSpinner size="lg" />
     </div>
 
-    <main v-else-if="character" class="max-w-5xl mx-auto px-5 py-6 space-y-4">
+    <main v-else-if="character" class="max-w-5xl mx-auto px-5 py-6 space-y-4 animate-fade-in-up">
       <section class="relative overflow-hidden rounded-2xl ring-1 ring-border-subtle bg-hero-radial">
         <div
           v-if="character.avatar && character.avatar !== 'none'"
@@ -387,7 +387,7 @@ onMounted(loadData)
           <div
             v-for="entry in chatList"
             :key="entry.file_name"
-            class="flex flex-wrap items-center gap-3 px-3 py-2.5 rounded-lg bg-surface-sunken ring-1 ring-border-subtle"
+            class="flex flex-wrap items-center gap-3 px-3 py-2.5 rounded-lg bg-surface-sunken ring-1 ring-border-subtle transition-colors hover:ring-brand-500/30"
           >
             <div class="min-w-0 flex-1">
               <button
@@ -423,7 +423,7 @@ onMounted(loadData)
           <div
             v-for="entry in stories"
             :key="entry.id"
-            class="flex flex-wrap items-center gap-3 px-3 py-2.5 rounded-lg bg-surface-sunken ring-1 ring-border-subtle"
+            class="flex flex-wrap items-center gap-3 px-3 py-2.5 rounded-lg bg-surface-sunken ring-1 ring-border-subtle transition-colors hover:ring-brand-500/30"
           >
             <div class="min-w-0 flex-1">
               <button
