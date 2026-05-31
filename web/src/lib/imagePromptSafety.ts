@@ -3,13 +3,16 @@ import type { ImageGenProvider } from '@/api/types'
 const PUBLIC_IMAGE_PROVIDERS = new Set<ImageGenProvider>(['openai', 'pollinations'])
 
 const SOFTEN_RULES: Array<[RegExp, string]> = [
+  [/\b(teen|teenage|schoolgirl|student girl|young girl|loli|childlike|minor-looking|underage)\b/gi, 'clearly adult woman'],
   [/\b(nude|naked|topless|bottomless|undressed)\b/gi, 'tastefully framed'],
+  [/\b(transparent clothing|see-through clothing|wet transparent clothing|wardrobe malfunction)\b/gi, 'layered opaque clothing'],
   [/\b(genitals?|penis|vagina|vulva|clitoris|nipples?|explicit breasts?)\b/gi, 'off-frame intimate detail'],
-  [/\b(sex|intercourse|penetration|oral sex|fellatio|cunnilingus|masturbat\w*)\b/gi, 'intimate tension'],
-  [/\b(orgasm|aroused|lustful|pornographic|erotic)\b/gi, 'charged emotion'],
+  [/\b(sex|intercourse|penetration|oral sex|fellatio|cunnilingus|masturbat\w*)\b/gi, 'cinematic tension'],
+  [/\b(orgasm|aroused|lustful|pornographic|erotic|seductive|provocative|sexy)\b/gi, 'restrained adult allure'],
   [/\b(cum|semen|saliva|bodily fluids?|wetness|slick|dripping)\b/gi, 'glossy highlights'],
   [/\b(panties|underwear|lingerie pulled aside|exposed underwear)\b/gi, 'delicate clothing details'],
-  [/\b(spread legs?|exposed skin)\b/gi, 'dramatic pose'],
+  [/\b(body part close-?up|breast close-?up|thigh close-?up|hip close-?up|low angle body shot)\b/gi, 'balanced portrait composition'],
+  [/\b(spread legs?|exposed skin)\b/gi, 'stable cinematic pose'],
   [/\b(NSFW|explicit adult content|graphic sexual content)\b/gi, 'dramatic cinematic mood'],
   [/\bsuggestive\b/gi, 'dramatic'],
   [/\bintimate\b/gi, 'private'],
@@ -26,12 +29,21 @@ const SOFTEN_RULES: Array<[RegExp, string]> = [
 ]
 
 const SAFETY_NEGATIVE = [
+  'minor-looking',
+  'childlike',
+  'schoolgirl',
+  'student uniform fetish',
   'explicit nudity',
   'genitalia',
   'pornographic content',
   'graphic sex acts',
   'body fluids',
   'underage',
+  'transparent clothing',
+  'wardrobe malfunction',
+  'body-part close-up',
+  'low-angle fetish shot',
+  'vulgar pose',
 ]
 
 export function shouldSoftenImagePrompt(provider: ImageGenProvider): boolean {
