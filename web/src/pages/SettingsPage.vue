@@ -2,7 +2,6 @@
 import { onMounted, ref, watch, type Component } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useModelProfilesStore } from '@/stores/modelProfiles'
-import { useModsStore } from '@/stores/mods'
 import { usePresetsStore } from '@/stores/presets'
 import { usePersonasStore } from '@/stores/personas'
 import { useTtsStore } from '@/stores/tts'
@@ -12,15 +11,12 @@ import AppTabs from '@/components/ui/AppTabs.vue'
 import ModelTab from '@/components/settings/ModelTab.vue'
 import PresetsTab from '@/components/settings/PresetsTab.vue'
 import PersonasTab from '@/components/settings/PersonasTab.vue'
-import WorldTab from '@/components/settings/WorldTab.vue'
-import ModsTab from '@/components/settings/ModsTab.vue'
 import ImageTab from '@/components/settings/ImageTab.vue'
 import TtsTab from '@/components/settings/TtsTab.vue'
 import AboutTab from '@/components/settings/AboutTab.vue'
-import { imageHistory, loadImageHistory, refreshWorldList, worlds } from '@/components/settings/shared'
+import { imageHistory, loadImageHistory } from '@/components/settings/shared'
 
 const models = useModelProfilesStore()
-const mods = useModsStore()
 const presets = usePresetsStore()
 const personas = usePersonasStore()
 const tts = useTtsStore()
@@ -30,8 +26,8 @@ const router = useRouter()
 
 function initialTab(): string {
   const raw = String(route.query.tab || '')
-  if (['model', 'mods', 'world', 'presets', 'personas', 'image', 'tts', 'about'].includes(raw)) return raw
-  return route.path === '/mods' ? 'mods' : 'model'
+  if (['model', 'presets', 'personas', 'image', 'tts', 'about'].includes(raw)) return raw
+  return 'model'
 }
 
 function syncTabFromRoute() {
@@ -47,8 +43,6 @@ const tabs = [
   { key: 'model', label: '模型连接' },
   { key: 'presets', label: '生成参数' },
   { key: 'personas', label: '我的身份' },
-  { key: 'world', label: '世界书' },
-  { key: 'mods', label: '提示词 MOD' },
   { key: 'image', label: '图像生成' },
   { key: 'tts', label: '语音 (TTS)' },
   { key: 'about', label: '关于' },
@@ -58,8 +52,6 @@ const tabComponents: Record<string, Component> = {
   model: ModelTab,
   presets: PresetsTab,
   personas: PersonasTab,
-  world: WorldTab,
-  mods: ModsTab,
   image: ImageTab,
   tts: TtsTab,
   about: AboutTab,
@@ -68,13 +60,11 @@ const tabComponents: Record<string, Component> = {
 onMounted(async () => {
   await Promise.all([
     models.loadSecrets(),
-    mods.load(),
     presets.load(),
     personas.load(),
     tts.load(),
     imageGen.load(),
   ])
-  await refreshWorldList().catch(() => {})
   await loadImageHistory()
 })
 
@@ -89,7 +79,7 @@ watch(() => [route.path, route.query.tab], syncTabFromRoute)
 
 <template>
   <div class="min-h-screen flex flex-col bg-bg">
-    <AppPageHeader title="设置" back-to="/browse" />
+    <AppPageHeader title="设置" back-to="/browse" mobile-only-back />
 
     <div class="max-w-6xl mx-auto w-full px-5 py-6 flex-1 animate-fade-in-up">
       <section class="relative overflow-hidden rounded-2xl ring-1 ring-border-subtle bg-hero-radial mb-6">
@@ -99,13 +89,13 @@ watch(() => [route.path, route.query.tab], syncTabFromRoute)
           <div>
             <p class="text-[11px] uppercase tracking-[0.2em] text-brand-300/80 mb-2">配置中心</p>
             <h2 class="text-xl md:text-2xl font-semibold text-ink-primary">
-              管理 <span class="text-brand-300">模型 · 图像 · 语音 · 资料库</span>
+              管理 <span class="text-brand-300">模型 · 参数 · 图像 · 语音</span>
             </h2>
             <p class="mt-1.5 text-xs md:text-sm text-ink-secondary max-w-xl">
-              模型、生成参数、图像生成、语音、世界书和 MOD 分开管理。世界书是设定资料库，MOD 是提示词插件。
+              模型连接、生成参数、身份、图像和语音在这里配置。世界书和提示词 MOD 已移到左侧资料库单独管理。
             </p>
           </div>
-          <div class="grid grid-cols-2 gap-2.5 md:min-w-[620px] md:grid-cols-6">
+          <div class="grid grid-cols-2 gap-2.5 md:min-w-[420px] md:grid-cols-4">
             <div class="rounded-xl bg-surface/70 backdrop-blur ring-1 ring-border-subtle p-3 text-center">
               <p class="text-[10px] uppercase tracking-wider text-ink-muted">模型</p>
               <p class="mt-1 text-xl font-semibold text-ink-primary tabular-nums">{{ models.profiles.length }}</p>
@@ -117,14 +107,6 @@ watch(() => [route.path, route.query.tab], syncTabFromRoute)
             <div class="rounded-xl bg-surface/70 backdrop-blur ring-1 ring-border-subtle p-3 text-center">
               <p class="text-[10px] uppercase tracking-wider text-ink-muted">身份</p>
               <p class="mt-1 text-xl font-semibold text-ink-primary tabular-nums">{{ personas.personas.length }}</p>
-            </div>
-            <div class="rounded-xl bg-surface/70 backdrop-blur ring-1 ring-border-subtle p-3 text-center">
-              <p class="text-[10px] uppercase tracking-wider text-ink-muted">世界书</p>
-              <p class="mt-1 text-xl font-semibold text-ink-primary tabular-nums">{{ worlds.length }}</p>
-            </div>
-            <div class="rounded-xl bg-surface/70 backdrop-blur ring-1 ring-border-subtle p-3 text-center">
-              <p class="text-[10px] uppercase tracking-wider text-ink-muted">MOD</p>
-              <p class="mt-1 text-xl font-semibold text-ink-primary tabular-nums">{{ mods.mods.length }}</p>
             </div>
             <div class="rounded-xl bg-surface/70 backdrop-blur ring-1 ring-border-subtle p-3 text-center">
               <p class="text-[10px] uppercase tracking-wider text-ink-muted">图片</p>

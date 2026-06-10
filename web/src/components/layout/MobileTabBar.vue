@@ -41,7 +41,7 @@ function isActive(key: string): boolean {
     case 'hub':
       return path.startsWith('/hub')
     case 'settings':
-      return path.startsWith('/settings') || path === '/mods'
+      return path.startsWith('/settings')
     default:
       return false
   }

@@ -66,11 +66,22 @@ const router = createRouter({
       path: '/settings',
       name: 'settings',
       component: () => import('@/pages/SettingsPage.vue'),
+      // 世界书和 MOD 已独立成页，旧的 ?tab= 链接重定向过去
+      beforeEnter: (to) => {
+        if (to.query.tab === 'world') return { path: '/worlds' }
+        if (to.query.tab === 'mods') return { path: '/mods' }
+        return true
+      },
+    },
+    {
+      path: '/worlds',
+      name: 'worlds',
+      component: () => import('@/pages/WorldsPage.vue'),
     },
     {
       path: '/mods',
       name: 'mods',
-      component: () => import('@/pages/SettingsPage.vue'),
+      component: () => import('@/pages/ModsPage.vue'),
     },
     {
       path: '/:pathMatch(.*)*',

@@ -6,9 +6,12 @@ const props = withDefaults(defineProps<{
   subtitle?: string
   backTo?: string
   showBack?: boolean
+  // 顶层页面桌面端有常驻侧栏，返回按钮只在移动端显示
+  mobileOnlyBack?: boolean
   sticky?: boolean
 }>(), {
   showBack: true,
+  mobileOnlyBack: false,
   sticky: true,
 })
 
@@ -39,7 +42,10 @@ function goBack() {
   >
     <button
       v-if="showBack"
-      class="inline-flex items-center gap-1.5 text-ink-secondary hover:text-ink-primary px-2 py-1.5 -ml-2 rounded-lg transition-colors hover:bg-ink-primary/5"
+      :class="[
+        'inline-flex items-center gap-1.5 text-ink-secondary hover:text-ink-primary px-2 py-1.5 -ml-2 rounded-lg transition-colors hover:bg-ink-primary/5',
+        mobileOnlyBack ? 'md:hidden' : '',
+      ]"
       aria-label="返回"
       @click="goBack"
     >

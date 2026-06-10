@@ -156,7 +156,7 @@ onMounted(async () => {
 
 <template>
   <div class="min-h-screen bg-bg">
-    <AppPageHeader title="角色管理" :subtitle="`${chars.characters.length} 个角色`" back-to="/browse">
+    <AppPageHeader title="角色管理" :subtitle="`${chars.characters.length} 个角色`" back-to="/browse" mobile-only-back>
       <template #actions>
         <AppButton variant="secondary" size="sm" @click="importCards">导入</AppButton>
         <AppButton variant="secondary" size="sm" @click="router.push('/hub')">社区导入</AppButton>

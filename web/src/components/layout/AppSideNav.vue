@@ -29,12 +29,6 @@ const mainNav: Array<{ key: string; label: string; to: string; names: string[]; 
   },
 ]
 
-const settingsTab = computed(() => {
-  if (route.name !== 'settings' && route.name !== 'mods') return ''
-  if (route.name === 'mods') return 'mods'
-  return String(route.query.tab || 'model')
-})
-
 const libraryNav: Array<{ label: string; to: RouteLocationRaw; isActive: () => boolean; icon: string }> = [
   {
     label: '角色库',
@@ -44,20 +38,20 @@ const libraryNav: Array<{ label: string; to: RouteLocationRaw; isActive: () => b
   },
   {
     label: '世界书',
-    to: { path: '/settings', query: { tab: 'world' } },
-    isActive: () => settingsTab.value === 'world',
+    to: '/worlds',
+    isActive: () => route.name === 'worlds',
     icon: 'M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253',
   },
   {
     label: '提示词 MOD',
-    to: { path: '/settings', query: { tab: 'mods' } },
-    isActive: () => settingsTab.value === 'mods',
+    to: '/mods',
+    isActive: () => route.name === 'mods',
     icon: 'M11 4a2 2 0 114 0v1a1 1 0 001 1h3a1 1 0 011 1v3a1 1 0 01-1 1h-1a2 2 0 100 4h1a1 1 0 011 1v3a1 1 0 01-1 1h-3a1 1 0 01-1-1v-1a2 2 0 10-4 0v1a1 1 0 01-1 1H7a1 1 0 01-1-1v-3a1 1 0 00-1-1H4a2 2 0 110-4h1a1 1 0 001-1V7a1 1 0 011-1h3a1 1 0 001-1V4z',
   },
 ]
 
 const activeMain = computed(() => mainNav.find((item) => item.names.includes(String(route.name)))?.key)
-const settingsActive = computed(() => !!settingsTab.value && settingsTab.value !== 'world' && settingsTab.value !== 'mods')
+const settingsActive = computed(() => route.name === 'settings')
 </script>
 
 <template>

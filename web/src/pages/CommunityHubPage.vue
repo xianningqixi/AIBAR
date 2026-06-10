@@ -125,7 +125,7 @@ async function importFromUrl() {
 
 <template>
   <div class="min-h-screen bg-bg">
-    <AppPageHeader title="社区 Hub" subtitle="类脑 Discord 角色卡导入" back-to="/browse">
+    <AppPageHeader title="社区 Hub" subtitle="类脑 Discord 角色卡导入" back-to="/browse" mobile-only-back>
       <template #actions>
         <AppButton variant="secondary" size="sm" @click="router.push('/characters')">角色库</AppButton>
       </template>

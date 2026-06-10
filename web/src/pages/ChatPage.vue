@@ -879,7 +879,7 @@ watch(() => route.fullPath, initChat)
             </label>
             <button
               class="text-[11px] text-brand-300 hover:text-brand-200"
-              @click="router.push({ path: '/settings', query: { tab: 'world' } })"
+              @click="router.push('/worlds')"
             >
               管理世界书
             </button>
@@ -906,7 +906,7 @@ watch(() => route.fullPath, initChat)
           @update:model-value="handleModIdsUpdate"
         />
 
-        <AppButton variant="secondary" class="w-full" @click="router.push({ path: '/settings', query: { tab: 'mods' } })">
+        <AppButton variant="secondary" class="w-full" @click="router.push('/mods')">
           管理 MOD
         </AppButton>
       </div>
