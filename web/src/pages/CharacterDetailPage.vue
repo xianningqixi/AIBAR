@@ -223,15 +223,7 @@ onMounted(loadData)
 
 <template>
   <div class="min-h-screen bg-bg">
-    <AppPageHeader title="角色详情" back-to="/browse">
-      <template #actions>
-        <AppButton v-if="character" size="sm" variant="ghost" @click="toggleFavorite">
-          {{ character.fav === 'true' ? '★ 已收藏' : '☆ 收藏' }}
-        </AppButton>
-        <AppButton v-if="character" size="sm" variant="secondary" @click="router.push(`/character/${encodeURIComponent(character.avatar)}/edit`)">编辑</AppButton>
-        <AppButton v-if="character" size="sm" @click="openChat()">对话</AppButton>
-      </template>
-    </AppPageHeader>
+    <AppPageHeader title="角色详情" back-to="/browse" />
 
     <div v-if="loading" class="flex justify-center py-16">
       <AppSpinner size="lg" />

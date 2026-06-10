@@ -93,7 +93,7 @@ function toggleMod(id: string) {
       >
         <span class="inline-flex items-center gap-1.5">
           {{ tab.label }}
-          <span class="rounded-full bg-white/5 px-1.5 py-0.5 text-[10px] leading-none text-ink-muted">{{ tab.count }}</span>
+          <span class="rounded-full bg-ink-primary/5 px-1.5 py-0.5 text-[10px] leading-none text-ink-muted">{{ tab.count }}</span>
         </span>
         <span v-if="activeTab === tab.key" class="absolute inset-x-2 -bottom-px h-0.5 rounded-full bg-brand-500" />
       </button>
@@ -126,9 +126,9 @@ function toggleMod(id: string) {
           <div class="min-w-0 flex-1">
             <div class="flex flex-wrap items-center gap-1.5">
               <span class="truncate text-sm font-medium text-ink-primary">{{ mod.name }}</span>
-              <span class="rounded bg-white/5 px-1.5 py-0.5 text-[10px] text-ink-muted">{{ mod.builtin ? '公用' : '我的' }}</span>
-              <span v-if="mod.enabled" class="rounded bg-emerald-500/10 px-1.5 py-0.5 text-[10px] text-emerald-300">全局</span>
-              <span class="rounded bg-white/5 px-1.5 py-0.5 text-[10px] text-ink-muted">{{ positionLabel(mod.position) }}</span>
+              <span class="rounded bg-ink-primary/5 px-1.5 py-0.5 text-[10px] text-ink-muted">{{ mod.builtin ? '公用' : '我的' }}</span>
+              <span v-if="mod.enabled" class="rounded bg-emerald-500/10 px-1.5 py-0.5 text-[10px] text-emerald-600">全局</span>
+              <span class="rounded bg-ink-primary/5 px-1.5 py-0.5 text-[10px] text-ink-muted">{{ positionLabel(mod.position) }}</span>
             </div>
             <p v-if="mod.description" class="mt-1 line-clamp-2 text-xs leading-relaxed text-ink-secondary">
               {{ mod.description }}

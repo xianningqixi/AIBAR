@@ -230,7 +230,7 @@ onMounted(async () => {
           v-for="(character, idx) in filtered"
           :key="character.avatar"
           :class="[
-            'group grid md:grid-cols-[1fr_auto] gap-3 px-4 py-3.5 items-center transition-colors hover:bg-white/[0.02]',
+            'group grid md:grid-cols-[1fr_auto] gap-3 px-4 py-3.5 items-center transition-colors hover:bg-ink-primary/[0.03]',
             idx !== 0 ? 'border-t border-border-subtle' : '',
           ]"
         >
@@ -239,6 +239,7 @@ onMounted(async () => {
               v-if="character.avatar && character.avatar !== 'none'"
               :src="`/thumbnail?type=avatar&file=${encodeURIComponent(character.avatar)}`"
               class="w-12 h-12 rounded-lg object-cover shrink-0 ring-1 ring-border-subtle group-hover:ring-brand-500/40 transition-all cursor-pointer"
+              loading="lazy"
               @click="router.push(`/character/${encodeURIComponent(character.avatar)}`)"
             />
             <div v-else class="w-12 h-12 rounded-lg bg-brand-soft ring-1 ring-border-subtle shrink-0 flex items-center justify-center text-brand-300">

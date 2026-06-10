@@ -151,7 +151,7 @@ function deleteEntry() {
             'w-full text-left px-2.5 py-2 rounded-md text-xs transition-colors',
             selectedKey === item.key
               ? 'bg-brand-500/15 text-brand-300'
-              : 'text-ink-secondary hover:bg-white/5 hover:text-ink-primary',
+              : 'text-ink-secondary hover:bg-ink-primary/5 hover:text-ink-primary',
             item.entry.disable ? 'opacity-50' : '',
           ]"
           @click="selectedKey = item.key"

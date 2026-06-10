@@ -46,6 +46,14 @@ export default defineConfig(({ mode }) => {
     build: {
       outDir: 'dist',
       emptyOutDir: true,
+      rollupOptions: {
+        output: {
+          manualChunks: {
+            vue: ['vue', 'vue-router', 'pinia', '@vueuse/core'],
+            markdown: ['marked', 'dompurify'],
+          },
+        },
+      },
     },
     base: process.env.NODE_ENV === 'production' ? '/aibar/' : '/',
   }

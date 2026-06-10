@@ -22,7 +22,7 @@ const providerLabel = computed(() => getProviderLabel(props.profile.source))
 <template>
   <div class="relative flex items-center gap-3 px-4 py-3 border-b border-border-subtle bg-bg/90 backdrop-blur">
     <button
-      class="p-2 -ml-1 rounded-lg text-ink-secondary hover:text-ink-primary hover:bg-white/5 transition-colors"
+      class="p-2 -ml-1 rounded-lg text-ink-secondary hover:text-ink-primary hover:bg-ink-primary/5 transition-colors"
       @click="$emit('back')"
     >
       <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -31,7 +31,7 @@ const providerLabel = computed(() => getProviderLabel(props.profile.source))
     </button>
 
     <button
-      class="p-2 rounded-lg text-ink-secondary hover:text-ink-primary hover:bg-white/5 transition-colors"
+      class="p-2 rounded-lg text-ink-secondary hover:text-ink-primary hover:bg-ink-primary/5 transition-colors"
       title="聊天列表"
       @click="$emit('toggleSidebar')"
     >
@@ -81,14 +81,14 @@ const providerLabel = computed(() => getProviderLabel(props.profile.source))
         class="inline-flex items-center gap-1.5 rounded-lg bg-surface px-3 py-2 text-xs font-medium text-ink-secondary ring-1 ring-border-subtle hover:text-ink-primary hover:ring-brand-500/40 transition-colors md:hidden"
         @click="$emit('toggleModelPicker')"
       >
-        <span class="max-w-[120px] truncate">{{ profile.model || profile.name }}</span>
+        <span class="max-w-[38vw] truncate">{{ profile.model || profile.name }}</span>
         <svg class="h-3.5 w-3.5 text-ink-muted" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 9l6 6 6-6" />
         </svg>
       </button>
 
       <button
-        class="p-2 rounded-lg text-ink-secondary hover:text-ink-primary hover:bg-white/5 transition-colors"
+        class="p-2 rounded-lg text-ink-secondary hover:text-ink-primary hover:bg-ink-primary/5 transition-colors"
         title="高级设置"
         @click="$emit('openSettings')"
       >

@@ -10,6 +10,7 @@ import { useModelProfilesStore } from './modelProfiles'
 import { useModsStore } from './mods'
 import { usePresetsStore } from './presets'
 import { usePersonasStore } from './personas'
+import { useUiStore } from './ui'
 
 type GenerationOptions = {
   extraMessages?: ChatMessage[]
@@ -104,8 +105,8 @@ export const useChatStore = defineStore('chat', () => {
       const result = await fetchChat(char.name, currentChatFile.value, char.avatar)
       messages.value = result.messages.map(normalizeSwipeMessage)
       metadata.value = result.metadata
-    } catch (e: any) {
-      console.warn('Load chat failed (may be new):', e.message)
+    } catch (e) {
+      console.warn('Load chat failed (may be new):', e instanceof Error ? e.message : e)
       messages.value = []
       metadata.value = { simple_ui: true }
     } finally {
@@ -142,6 +143,33 @@ export const useChatStore = defineStore('chat', () => {
       messages.value,
       metadata.value,
     )
+  }
+
+  let persistPromise: Promise<void> | null = null
+  let persistDirty = false
+
+  // 合并并发保存：写入进行中时新的请求只置脏标记，写完后补一次，避免重复 IO 与乱序覆盖
+  function persistSafe(): Promise<void> {
+    if (persistPromise) {
+      persistDirty = true
+      return persistPromise
+    }
+    persistPromise = (async () => {
+      try {
+        do {
+          persistDirty = false
+          await persist()
+        } while (persistDirty)
+        error.value = ''
+      } catch (e) {
+        const message = e instanceof Error ? e.message : String(e)
+        error.value = 'Save failed: ' + message
+        useUiStore().addToast(`聊天保存失败：${message}`, 'error', 5000)
+      } finally {
+        persistPromise = null
+      }
+    })()
+    return persistPromise
   }
 
   function getMetadataProfileId(): string {
@@ -222,11 +250,7 @@ export const useChatStore = defineStore('chat', () => {
 
   async function clearMemorySummary() {
     writeMemoryState('', 0)
-    try {
-      await persist()
-    } catch (e: any) {
-      error.value = 'Save failed: ' + e.message
-    }
+    await persistSafe()
   }
 
   function getEffectiveCharacter(): Character | null {
@@ -264,11 +288,7 @@ export const useChatStore = defineStore('chat', () => {
   async function setSelectedPresetId(presetId: string) {
     selectedPresetId.value = presetId
     writeMetadataPresetId(presetId)
-    try {
-      await persist()
-    } catch (e: any) {
-      error.value = 'Save failed: ' + e.message
-    }
+    await persistSafe()
   }
 
   async function setSelectedProfileId(profileId: string) {
@@ -276,31 +296,19 @@ export const useChatStore = defineStore('chat', () => {
     if (!profiles.getProfile(profileId)) return
     selectedProfileId.value = profileId
     writeMetadataProfileId(profileId)
-    try {
-      await persist()
-    } catch (e: any) {
-      error.value = 'Save failed: ' + e.message
-    }
+    await persistSafe()
   }
 
   async function setSelectedWorld(world: string) {
     selectedWorld.value = world
     writeMetadataWorld(world)
-    try {
-      await persist()
-    } catch (e: any) {
-      error.value = 'Save failed: ' + e.message
-    }
+    await persistSafe()
   }
 
   async function setSelectedModIds(ids: string[]) {
     selectedModIds.value = [...ids]
     writeMetadataModIds(selectedModIds.value)
-    try {
-      await persist()
-    } catch (e: any) {
-      error.value = 'Save failed: ' + e.message
-    }
+    await persistSafe()
   }
 
   async function sendMessage(text: string) {
@@ -314,11 +322,7 @@ export const useChatStore = defineStore('chat', () => {
       date: new Date().toISOString(),
     })
 
-    try {
-      await persist()
-    } catch (e: any) {
-      error.value = 'Save failed: ' + e.message
-    }
+    await persistSafe()
 
     await runGeneration({ updateMemory: true })
   }
@@ -418,11 +422,7 @@ export const useChatStore = defineStore('chat', () => {
       const reply = await generateReply(payload)
       const summary = normalizeMemoryReply(reply)
       writeMemoryState(summary, historyMessages.length)
-      try {
-        await persist()
-      } catch (e: any) {
-        error.value = 'Save failed: ' + e.message
-      }
+      await persistSafe()
       return summary
     } finally {
       memoryUpdating.value = false
@@ -472,9 +472,9 @@ export const useChatStore = defineStore('chat', () => {
         throw new Error('模型没有返回可用的回复选项')
       }
       replyDraftOptions.value = options
-    } catch (e: any) {
+    } catch (e) {
       if (requestId !== replyDraftRequestId) return
-      replyDraftError.value = e?.message || '拟回复失败'
+      replyDraftError.value = e instanceof Error && e.message ? e.message : '拟回复失败'
       replyDraftOptions.value = []
     } finally {
       if (requestId === replyDraftRequestId) {
@@ -565,35 +565,30 @@ export const useChatStore = defineStore('chat', () => {
       if (content) {
         commitAssistantContent(content, options, reasoningContent)
       }
-    } catch (e: any) {
-      if (e.name === 'AbortError') {
-        const partial = streaming.value.partial.content.trim()
-        if (partial) {
-          commitAssistantContent(`${partial}\n\n[中断]`, options)
-        } else if (options.swipes?.length) {
-          const restored = options.swipes[options.swipes.length - 1]
-          messages.value.push({
-            role: 'assistant',
-            content: restored,
-            date: new Date().toISOString(),
-            swipes: options.swipes,
-            swipe_id: options.swipes.length - 1,
-          })
-        }
-      } else {
+    } catch (e) {
+      const err = e instanceof Error ? e : new Error(String(e))
+      const aborted = err.name === 'AbortError'
+      if (!aborted) {
+        useUiStore().addToast(`生成失败：${err.message || '请检查模型配置'}`, 'error', 5000)
+      }
+
+      // 已收到的部分内容仍然保留；没有部分内容时恢复重新生成前的 swipes
+      const partial = streaming.value.partial.content.trim()
+      if (partial) {
+        commitAssistantContent(`${partial}\n\n[中断]`, options)
+      } else if (options.swipes?.length) {
+        const restored = options.swipes[options.swipes.length - 1]
         messages.value.push({
           role: 'assistant',
-          content: `生成失败：${e.message || '请检查模型配置'}`,
+          content: restored,
           date: new Date().toISOString(),
+          swipes: options.swipes,
+          swipe_id: options.swipes.length - 1,
         })
       }
     } finally {
       streaming.value = { active: false, controller: null, partial: { content: '' } }
-      try {
-        await persist()
-      } catch (e: any) {
-        error.value = 'Save failed: ' + e.message
-      }
+      await persistSafe()
     }
   }
 
@@ -643,11 +638,7 @@ export const useChatStore = defineStore('chat', () => {
     if (!character.value) return
     messages.value = []
     writeMemoryState('', 0)
-    try {
-      await persist()
-    } catch (e: any) {
-      error.value = 'Save failed: ' + e.message
-    }
+    await persistSafe()
   }
 
   async function regenerateLast() {
@@ -663,9 +654,7 @@ export const useChatStore = defineStore('chat', () => {
     }
 
     messages.value.splice(idx, 1)
-    try {
-      await persist()
-    } catch {}
+    await persistSafe()
 
     await runGeneration({ swipes: oldSwipes })
   }
@@ -687,11 +676,7 @@ export const useChatStore = defineStore('chat', () => {
       swipe_id: nextIdx,
     }
 
-    try {
-      await persist()
-    } catch (e: any) {
-      error.value = 'Save failed: ' + e.message
-    }
+    await persistSafe()
   }
 
   async function editMessage(index: number, newContent: string) {
@@ -709,21 +694,13 @@ export const useChatStore = defineStore('chat', () => {
       }
     }
     messages.value[index] = next
-    try {
-      await persist()
-    } catch (e: any) {
-      error.value = 'Save failed: ' + e.message
-    }
+    await persistSafe()
   }
 
   async function deleteMessage(index: number) {
     if (index < 0 || index >= messages.value.length) return
     messages.value.splice(index, 1)
-    try {
-      await persist()
-    } catch (e: any) {
-      error.value = 'Save failed: ' + e.message
-    }
+    await persistSafe()
   }
 
   async function attachImageToMessage(index: number, asset: ImageAsset) {
@@ -734,11 +711,7 @@ export const useChatStore = defineStore('chat', () => {
       images.push(asset)
     }
     messages.value[index] = { ...msg, images }
-    try {
-      await persist()
-    } catch (e: any) {
-      error.value = 'Save failed: ' + e.message
-    }
+    await persistSafe()
   }
 
   async function continueLastReply() {
@@ -808,6 +781,7 @@ export const useChatStore = defineStore('chat', () => {
     clearCurrentChat,
     regenerateLast,
     persist,
+    persistSafe,
     editMessage,
     deleteMessage,
     attachImageToMessage,

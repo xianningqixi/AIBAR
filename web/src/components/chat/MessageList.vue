@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, watch, nextTick, onMounted } from 'vue'
+import { refThrottled } from '@vueuse/core'
 import type { ChatMessage } from '@/api/types'
 import MessageBubble from './MessageBubble.vue'
 import AppSpinner from '../ui/AppSpinner.vue'
@@ -15,6 +16,13 @@ const props = defineProps<{
 }>()
 
 const { render } = useMarkdown()
+
+// 流式 token 高频到达，节流后再做 markdown + sanitize，避免每个 token 都全量渲染
+const throttledStreaming = refThrottled(
+  computed(() => props.streaming || ''),
+  150,
+)
+const streamingHtml = computed(() => (throttledStreaming.value ? render(throttledStreaming.value) : ''))
 
 const lastAssistantIndex = computed(() => {
   for (let i = props.messages.length - 1; i >= 0; i--) {
@@ -66,14 +74,11 @@ watch(
 )
 
 // 流式增量:只有用户本就在底部时才跟随,避免打断向上翻阅
-watch(
-  () => props.streaming,
-  async () => {
-    if (!atBottom.value) return
-    await nextTick()
-    scrollToBottom()
-  },
-)
+watch(throttledStreaming, async () => {
+  if (!atBottom.value) return
+  await nextTick()
+  scrollToBottom()
+})
 
 watch(
   () => props.isStreaming,
@@ -137,11 +142,11 @@ onMounted(() => nextTick(() => scrollToBottom()))
                 <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" /></svg>
               </div>
             </div>
-            <div class="max-w-[min(82%,42rem)] rounded-2xl rounded-bl-md border border-border-subtle bg-surface-elevated/90 px-4 py-2.5 text-sm leading-relaxed text-ink-primary shadow-sm backdrop-blur-sm">
+            <div class="max-w-[min(88%,48rem)] rounded-2xl rounded-bl-md border border-border-subtle bg-surface-elevated/90 px-4 py-2.5 text-sm leading-relaxed text-ink-primary shadow-sm backdrop-blur-sm">
               <div
-                v-if="streaming"
+                v-if="streamingHtml"
                 class="prose prose-invert prose-sm max-w-none break-words"
-                v-html="render(streaming)"
+                v-html="streamingHtml"
               />
               <span v-else class="inline-flex items-center gap-1 py-1">
                 <span class="h-1.5 w-1.5 animate-bounce rounded-full bg-brand-400" />

@@ -173,11 +173,11 @@ function modelStatusClass(profile: ModelProfile): string {
   if (profile.id === models.activeProfileId) {
     return isProfileUsable(profile)
       ? 'bg-brand-500/15 text-brand-200 ring-brand-500/30'
-      : 'bg-amber-500/15 text-amber-300 ring-amber-500/30'
+      : 'bg-amber-500/15 text-amber-600 ring-amber-500/30'
   }
   return isProfileUsable(profile)
-    ? 'bg-emerald-500/10 text-emerald-300 ring-emerald-500/20'
-    : 'bg-amber-500/10 text-amber-300 ring-amber-500/20'
+    ? 'bg-emerald-500/10 text-emerald-600 ring-emerald-500/20'
+    : 'bg-amber-500/10 text-amber-600 ring-amber-500/20'
 }
 
 function selectDefaultModel(profile: ModelProfile) {
@@ -428,77 +428,7 @@ onMounted(async () => {
 </script>
 
 <template>
-  <div class="min-h-screen bg-bg md:flex">
-    <aside class="hidden md:flex h-screen w-64 shrink-0 flex-col overflow-y-auto border-r border-border-subtle bg-surface/70 px-5 py-6 sticky top-0">
-      <button class="flex items-center gap-3 text-left" @click="focusTab('characters')">
-        <div class="w-11 h-11 rounded-xl bg-brand-gradient flex items-center justify-center text-white text-lg font-bold shadow-glow">
-          A
-        </div>
-        <div class="leading-tight">
-          <h1 class="text-xl font-semibold text-ink-primary tracking-tight">AIBAR</h1>
-          <p class="text-xs text-ink-muted">选角色，开聊</p>
-        </div>
-      </button>
-
-      <nav class="mt-10 space-y-1">
-        <button
-          class="w-full flex items-center justify-between rounded-xl bg-brand-500/15 px-4 py-3 text-left text-sm font-semibold text-brand-200 ring-1 ring-brand-500/35"
-          @click="router.push('/browse')"
-        >
-          <span>探索</span>
-        </button>
-        <button
-          class="w-full flex items-center justify-between rounded-xl px-4 py-3 text-left text-sm font-semibold text-ink-secondary transition-all hover:bg-white/5 hover:text-ink-primary"
-          @click="router.push('/create')"
-        >
-          <span>创作</span>
-        </button>
-        <button
-          class="w-full flex items-center justify-between rounded-xl px-4 py-3 text-left text-sm font-semibold text-ink-secondary transition-all hover:bg-white/5 hover:text-ink-primary"
-          @click="router.push('/hub')"
-        >
-          <span>社区 Hub</span>
-        </button>
-      </nav>
-
-      <div class="mt-auto border-t border-border-subtle pt-4">
-        <p class="px-3 text-[11px] font-semibold uppercase tracking-[0.16em] text-ink-muted">资料库</p>
-        <div class="mt-2 space-y-1">
-          <button class="w-full rounded-lg px-3 py-2 text-left text-sm text-ink-secondary hover:bg-white/5 hover:text-ink-primary" @click="router.push('/characters')">
-            角色库
-          </button>
-          <button class="w-full rounded-lg px-3 py-2 text-left text-sm text-ink-secondary hover:bg-white/5 hover:text-ink-primary" @click="router.push('/hub')">
-            社区导入
-          </button>
-          <button class="w-full rounded-lg px-3 py-2 text-left text-sm text-ink-secondary hover:bg-white/5 hover:text-ink-primary" @click="router.push({ path: '/settings', query: { tab: 'world' } })">
-            世界书
-          </button>
-          <button class="w-full rounded-lg px-3 py-2 text-left text-sm text-ink-secondary hover:bg-white/5 hover:text-ink-primary" @click="router.push({ path: '/settings', query: { tab: 'mods' } })">
-            提示词 MOD
-          </button>
-        </div>
-
-        <p class="mt-4 px-3 text-[11px] font-semibold uppercase tracking-[0.16em] text-ink-muted">设置</p>
-        <div class="mt-2 space-y-1">
-          <button class="w-full rounded-lg px-3 py-2 text-left text-sm text-ink-secondary hover:bg-white/5 hover:text-ink-primary" @click="router.push({ path: '/settings', query: { tab: 'model' } })">
-            模型连接
-          </button>
-          <button class="w-full rounded-lg px-3 py-2 text-left text-sm text-ink-secondary hover:bg-white/5 hover:text-ink-primary" @click="router.push({ path: '/settings', query: { tab: 'presets' } })">
-            生成参数
-          </button>
-          <button class="w-full rounded-lg px-3 py-2 text-left text-sm text-ink-secondary hover:bg-white/5 hover:text-ink-primary" @click="router.push({ path: '/settings', query: { tab: 'image' } })">
-            图像生成
-          </button>
-          <button class="w-full rounded-lg px-3 py-2 text-left text-sm text-ink-secondary hover:bg-white/5 hover:text-ink-primary" @click="router.push({ path: '/settings', query: { tab: 'tts' } })">
-            语音配置
-          </button>
-          <button class="w-full rounded-lg px-3 py-2 text-left text-sm text-ink-secondary hover:bg-white/5 hover:text-ink-primary" @click="router.push({ path: '/settings', query: { tab: 'personas' } })">
-            我的身份
-          </button>
-        </div>
-      </div>
-    </aside>
-
+  <div class="min-h-screen bg-bg">
     <header class="md:hidden border-b border-border-subtle bg-bg/80 backdrop-blur-md sticky top-0 z-20">
       <div class="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between gap-4">
         <button class="flex items-center gap-3 group" @click="goTab('characters')">
@@ -511,11 +441,6 @@ onMounted(async () => {
           </div>
         </button>
 
-        <div class="flex items-center gap-1">
-          <AppButton variant="ghost" size="md" @click="router.push('/create')">创作</AppButton>
-          <AppButton variant="ghost" size="md" @click="router.push('/hub')">Hub</AppButton>
-          <AppButton variant="ghost" size="md" @click="router.push('/settings')">设置</AppButton>
-        </div>
       </div>
 
       <nav class="md:hidden border-t border-border-subtle">
@@ -544,11 +469,32 @@ onMounted(async () => {
       </nav>
     </header>
 
-    <main class="w-full flex-1 px-5 py-5 md:px-8 lg:px-10">
-      <div class="mx-auto max-w-6xl space-y-6">
-        <header class="sticky top-0 z-20 -mx-5 hidden border-b border-border-subtle bg-bg/90 backdrop-blur md:block md:-mx-8 lg:-mx-10">
-          <div class="mx-auto flex h-14 max-w-6xl items-center gap-3 px-8 lg:px-10">
-            <div class="relative min-w-0 flex-1 max-w-xl">
+    <main class="w-full flex-1">
+      <!-- 桌面端置顶工具栏：与下方内容共用同一容器宽度，保证左右边缘对齐 -->
+      <header class="sticky top-0 z-20 hidden border-b border-border-subtle bg-bg/90 backdrop-blur md:block">
+        <div class="px-5 md:px-8 lg:px-10">
+          <div class="mx-auto flex h-16 max-w-6xl items-center gap-3">
+            <div class="inline-flex shrink-0 rounded-xl bg-surface p-1 ring-1 ring-border-subtle">
+              <button
+                v-for="t in tabs"
+                :key="t.key"
+                :class="[
+                  'inline-flex items-center gap-1.5 rounded-lg px-4 py-1.5 text-sm font-semibold transition-all',
+                  activeTab === t.key
+                    ? 'bg-brand-gradient text-white shadow-glow'
+                    : 'text-ink-secondary hover:text-ink-primary',
+                ]"
+                @click="goTab(t.key)"
+              >
+                {{ t.label }}
+                <span
+                  v-if="t.badge !== undefined"
+                  :class="['text-xs', activeTab === t.key ? 'text-white/80' : 'text-ink-muted']"
+                >{{ t.badge }}</span>
+              </button>
+            </div>
+
+            <div class="relative min-w-0 flex-1">
               <svg class="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-ink-muted" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-4.35-4.35M17 11a6 6 0 11-12 0 6 6 0 0112 0z" />
               </svg>
@@ -560,9 +506,9 @@ onMounted(async () => {
               />
             </div>
 
-            <div class="ml-auto flex items-center gap-2">
+            <div class="flex shrink-0 items-center gap-2">
               <button
-                class="inline-flex max-w-[14rem] items-center gap-2 rounded-lg bg-surface px-3 py-2 text-sm font-medium text-ink-secondary ring-1 ring-border-subtle transition-all hover:text-ink-primary hover:ring-brand-500/40"
+                class="inline-flex max-w-[13rem] items-center gap-2 rounded-lg bg-surface px-3 py-2 text-sm font-medium text-ink-secondary ring-1 ring-border-subtle transition-all hover:text-ink-primary hover:ring-brand-500/40"
                 :class="modelPickerOpen ? 'bg-brand-500/10 text-ink-primary ring-brand-500/50' : ''"
                 title="选择默认模型"
                 @click="modelPickerOpen = true"
@@ -577,26 +523,27 @@ onMounted(async () => {
                 </svg>
               </button>
 
-              <button
-                class="shrink-0 rounded-lg p-2 text-ink-secondary transition-colors hover:bg-white/5 hover:text-ink-primary"
-                title="设置"
-                @click="router.push('/settings')"
+              <AppButton
+                size="md"
+                :variant="activeTabMeta.variant"
+                :disabled="activeTab === 'chats' && startingNewChat"
+                @click="activeTabMeta.action"
               >
-                <svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                </svg>
-              </button>
+                {{ activeTab === 'chats' && startingNewChat ? '创建中…' : activeTabMeta.actionLabel }}
+              </AppButton>
             </div>
           </div>
-        </header>
+        </div>
+      </header>
 
+      <div class="px-5 py-5 md:px-8 lg:px-10">
+        <div class="mx-auto max-w-6xl space-y-6">
         <section
           v-if="!hasUsableModel"
           class="flex flex-col gap-3 rounded-lg bg-amber-500/10 p-4 ring-1 ring-amber-400/35 sm:flex-row sm:items-center sm:justify-between"
         >
           <div>
-            <p class="text-sm font-semibold text-amber-200">模型还没连上</p>
+            <p class="text-sm font-semibold text-amber-700">模型还没连上</p>
             <p class="mt-1 text-sm text-ink-secondary">先测通一个模型，聊天和 AI 起草才会正常工作。</p>
           </div>
           <AppButton size="sm" variant="secondary" @click="router.push('/settings')">去配置</AppButton>
@@ -641,28 +588,6 @@ onMounted(async () => {
         </section>
 
         <div id="browse-results" class="scroll-mt-20 space-y-5">
-          <div class="hidden md:flex">
-            <div class="inline-flex rounded-xl bg-surface p-1 ring-1 ring-border-subtle">
-              <button
-                v-for="t in tabs"
-                :key="t.key"
-                :class="[
-                  'inline-flex items-center gap-1.5 rounded-lg px-4 py-1.5 text-sm font-semibold transition-all',
-                  activeTab === t.key
-                    ? 'bg-brand-gradient text-white shadow-glow'
-                    : 'text-ink-secondary hover:text-ink-primary',
-                ]"
-                @click="goTab(t.key)"
-              >
-                {{ t.label }}
-                <span
-                  v-if="t.badge !== undefined"
-                  :class="['text-xs', activeTab === t.key ? 'text-white/80' : 'text-ink-muted']"
-                >{{ t.badge }}</span>
-              </button>
-            </div>
-          </div>
-
           <div class="relative md:hidden">
             <svg class="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-ink-muted" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-4.35-4.35M17 11a6 6 0 11-12 0 6 6 0 0112 0z" />
@@ -675,13 +600,14 @@ onMounted(async () => {
             />
           </div>
 
-          <div class="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+          <!-- 移动端：标题 + 模型 + 主操作（桌面端已并入顶部工具栏） -->
+          <div class="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between md:hidden">
             <div class="min-w-0">
               <h2 class="text-2xl font-semibold tracking-tight text-ink-primary">{{ activeTabMeta.title }}</h2>
               <p class="mt-1 text-sm text-ink-muted">{{ activeTabMeta.status }}</p>
             </div>
             <div class="flex flex-wrap items-center gap-2">
-              <AppButton class="md:hidden" size="md" variant="secondary" @click="modelPickerOpen = true">
+              <AppButton size="md" variant="secondary" @click="modelPickerOpen = true">
                 <span class="max-w-[12rem] truncate">{{ activeModelTitle }}</span>
               </AppButton>
               <AppButton
@@ -716,7 +642,7 @@ onMounted(async () => {
                 'px-3 py-1.5 rounded-lg text-sm font-medium transition-all',
                 charFilter === f.key
                   ? 'bg-brand-500/20 text-brand-200 ring-1 ring-brand-500/40'
-                  : 'text-ink-secondary hover:text-ink-primary hover:bg-white/5',
+                  : 'text-ink-secondary hover:text-ink-primary hover:bg-ink-primary/5',
               ]"
               @click="charFilter = f.key"
             >{{ f.label }}</button>
@@ -724,22 +650,28 @@ onMounted(async () => {
           <div class="flex-1" />
           <select
             v-model="charSort"
-            class="rounded-lg bg-surface px-2.5 py-1.5 text-sm text-ink-secondary ring-1 ring-border-subtle transition-colors hover:text-ink-primary focus:outline-none focus:ring-2 focus:ring-brand-500/40"
+            class="rounded-lg bg-surface px-2.5 py-1.5 text-sm font-medium text-ink-secondary ring-1 ring-border-subtle transition-colors hover:text-ink-primary focus:outline-none focus:ring-2 focus:ring-brand-500/40"
             title="排序方式"
           >
             <option v-for="o in charSortOptions" :key="o.key" :value="o.key">排序 · {{ o.label }}</option>
           </select>
-          <label class="flex items-center gap-1.5 text-xs text-ink-muted cursor-pointer select-none">
-            <input v-model="noImage" type="checkbox" class="accent-brand-500" />
-            无图模式
-          </label>
+          <button
+            :class="[
+              'px-3 py-1.5 rounded-lg text-sm font-medium transition-all',
+              noImage
+                ? 'bg-brand-500/20 text-brand-200 ring-1 ring-brand-500/40'
+                : 'text-ink-secondary hover:text-ink-primary hover:bg-ink-primary/5 ring-1 ring-border-subtle',
+            ]"
+            @click="noImage = !noImage"
+          >无图模式</button>
         </div>
 
-        <div v-if="popularTags.length && charFilter === 'all'" class="flex flex-wrap gap-2 mb-5">
+        <!-- 标签单行横滑，避免标签多时把内容推下去 -->
+        <div v-if="popularTags.length && charFilter === 'all'" class="-mx-1 mb-5 flex gap-2 overflow-x-auto px-1 pb-1">
           <button
             v-for="t in popularTags"
             :key="t.tag"
-            class="text-sm px-3.5 py-1.5 rounded-full bg-surface text-ink-secondary ring-1 ring-border-subtle hover:text-ink-primary hover:ring-brand-500/40 transition-all font-medium"
+            class="shrink-0 text-sm px-3.5 py-1.5 rounded-full bg-surface text-ink-secondary ring-1 ring-border-subtle hover:text-ink-primary hover:ring-brand-500/40 transition-all font-medium"
             @click="openTag(t.tag)"
           >
             #{{ t.tag }} <span class="text-ink-muted ml-0.5">{{ t.count }}</span>
@@ -909,6 +841,7 @@ onMounted(async () => {
           </button>
         </div>
       </section>
+      </div>
       </div>
       </div>
 

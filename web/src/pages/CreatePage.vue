@@ -30,14 +30,14 @@ const activeKind = ref<CreateKind>(normalizeKind(route.query.kind))
 
 const modeCards = [
   {
-    key: 'advanced' as const,
-    title: '高级创作',
-    description: '直接进入完整表单，自己控制全部字段、世界书、模型和 MOD。',
-  },
-  {
     key: 'simple' as const,
     title: '简易创作',
     description: '一句想法开始，AI 追问几个选项，再生成可手改的初稿。',
+  },
+  {
+    key: 'advanced' as const,
+    title: '高级创作',
+    description: '直接进入完整表单，自己控制全部字段、世界书、模型和 MOD。',
   },
 ]
 
@@ -131,71 +131,7 @@ onMounted(async () => {
 </script>
 
 <template>
-  <div class="min-h-screen bg-bg md:flex">
-    <aside class="hidden h-screen w-64 shrink-0 flex-col overflow-y-auto border-r border-border-subtle bg-surface/70 px-5 py-6 md:flex sticky top-0">
-      <button class="flex items-center gap-3 text-left" @click="router.push('/browse')">
-        <div class="flex h-11 w-11 items-center justify-center rounded-xl bg-brand-gradient text-lg font-bold text-white shadow-glow">
-          A
-        </div>
-        <div class="leading-tight">
-          <h1 class="text-xl font-semibold tracking-tight text-ink-primary">AIBAR</h1>
-          <p class="text-xs text-ink-muted">选角色，开聊</p>
-        </div>
-      </button>
-
-      <nav class="mt-10 space-y-1">
-        <button
-          class="w-full rounded-xl px-4 py-3 text-left text-sm font-semibold text-ink-secondary transition-all hover:bg-white/5 hover:text-ink-primary"
-          @click="router.push('/browse')"
-        >
-          探索
-        </button>
-        <button
-          class="w-full rounded-xl bg-brand-500/15 px-4 py-3 text-left text-sm font-semibold text-brand-200 ring-1 ring-brand-500/35"
-          @click="router.push('/create')"
-        >
-          创作
-        </button>
-        <button
-          class="w-full rounded-xl px-4 py-3 text-left text-sm font-semibold text-ink-secondary transition-all hover:bg-white/5 hover:text-ink-primary"
-          @click="router.push('/hub')"
-        >
-          社区 Hub
-        </button>
-      </nav>
-
-      <div class="mt-auto border-t border-border-subtle pt-4">
-        <p class="px-3 text-[11px] font-semibold uppercase tracking-[0.16em] text-ink-muted">资料库</p>
-        <div class="mt-2 space-y-1">
-          <button class="w-full rounded-lg px-3 py-2 text-left text-sm text-ink-secondary hover:bg-white/5 hover:text-ink-primary" @click="router.push('/characters')">
-            角色库
-          </button>
-          <button class="w-full rounded-lg px-3 py-2 text-left text-sm text-ink-secondary hover:bg-white/5 hover:text-ink-primary" @click="router.push('/hub')">
-            社区导入
-          </button>
-          <button class="w-full rounded-lg px-3 py-2 text-left text-sm text-ink-secondary hover:bg-white/5 hover:text-ink-primary" @click="router.push({ path: '/settings', query: { tab: 'world' } })">
-            世界书
-          </button>
-          <button class="w-full rounded-lg px-3 py-2 text-left text-sm text-ink-secondary hover:bg-white/5 hover:text-ink-primary" @click="router.push({ path: '/settings', query: { tab: 'mods' } })">
-            提示词 MOD
-          </button>
-        </div>
-
-        <p class="mt-4 px-3 text-[11px] font-semibold uppercase tracking-[0.16em] text-ink-muted">设置</p>
-        <div class="mt-2 space-y-1">
-          <button class="w-full rounded-lg px-3 py-2 text-left text-sm text-ink-secondary hover:bg-white/5 hover:text-ink-primary" @click="router.push({ path: '/settings', query: { tab: 'model' } })">
-            模型连接
-          </button>
-          <button class="w-full rounded-lg px-3 py-2 text-left text-sm text-ink-secondary hover:bg-white/5 hover:text-ink-primary" @click="router.push({ path: '/settings', query: { tab: 'presets' } })">
-            生成参数
-          </button>
-          <button class="w-full rounded-lg px-3 py-2 text-left text-sm text-ink-secondary hover:bg-white/5 hover:text-ink-primary" @click="router.push({ path: '/settings', query: { tab: 'personas' } })">
-            我的身份
-          </button>
-        </div>
-      </div>
-    </aside>
-
+  <div class="min-h-screen bg-bg">
     <header class="sticky top-0 z-20 border-b border-border-subtle bg-bg/85 backdrop-blur md:hidden">
       <div class="flex items-center justify-between gap-3 px-5 py-4">
         <button class="flex items-center gap-3 text-left" @click="router.push('/browse')">
@@ -207,65 +143,72 @@ onMounted(async () => {
             <p class="text-xs text-ink-muted">创作</p>
           </div>
         </button>
-        <div class="flex items-center gap-1">
-          <AppButton size="sm" variant="ghost" @click="router.push('/browse')">探索</AppButton>
-          <AppButton size="sm" variant="ghost" @click="router.push('/hub')">Hub</AppButton>
-        </div>
       </div>
     </header>
 
     <main class="w-full flex-1 px-5 py-5 md:px-8 lg:px-10">
       <div class="mx-auto max-w-6xl space-y-6 animate-fade-in-up">
-        <header class="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-          <div>
-            <h2 class="text-2xl font-semibold tracking-tight text-ink-primary">创作</h2>
-            <p class="mt-1 text-sm text-ink-muted">{{ activePlan.description }}</p>
-          </div>
-          <div class="flex items-center gap-2">
-            <AppButton size="md" variant="secondary" @click="router.push('/hub')">导入资源</AppButton>
-            <AppButton size="md" variant="gradient" @click="createTarget">
+        <header class="flex items-center justify-between gap-3">
+          <h2 class="text-2xl font-semibold tracking-tight text-ink-primary">创作</h2>
+          <AppButton size="md" variant="secondary" @click="router.push('/hub')">导入资源</AppButton>
+        </header>
+
+        <!-- 创建向导：类型 + 方式 + 说明 + 主操作集中在一张卡里 -->
+        <section class="rounded-2xl bg-surface p-5 ring-1 ring-border-subtle md:p-6">
+          <div class="flex flex-col gap-5 md:flex-row md:items-center md:justify-between">
+            <div class="min-w-0 space-y-4">
+              <div class="flex flex-wrap gap-x-8 gap-y-4">
+                <div>
+                  <p class="mb-1.5 text-[11px] font-semibold uppercase tracking-wider text-ink-muted">创作什么</p>
+                  <div class="inline-flex rounded-xl bg-surface-sunken p-1 ring-1 ring-border-subtle">
+                    <button
+                      v-for="kind in kindTabs"
+                      :key="kind.key"
+                      class="rounded-lg px-4 py-1.5 text-sm font-semibold transition-all"
+                      :class="activeKind === kind.key
+                        ? 'bg-brand-gradient text-white shadow-glow'
+                        : 'text-ink-secondary hover:text-ink-primary'"
+                      @click="activeKind = kind.key"
+                    >
+                      {{ kind.label }}
+                    </button>
+                  </div>
+                </div>
+                <div>
+                  <p class="mb-1.5 text-[11px] font-semibold uppercase tracking-wider text-ink-muted">怎么开始</p>
+                  <div class="inline-flex rounded-xl bg-surface-sunken p-1 ring-1 ring-border-subtle">
+                    <button
+                      v-for="mode in modeCards"
+                      :key="mode.key"
+                      class="rounded-lg px-4 py-1.5 text-sm font-semibold transition-all"
+                      :class="activeMode === mode.key
+                        ? 'bg-brand-gradient text-white shadow-glow'
+                        : 'text-ink-secondary hover:text-ink-primary'"
+                      :title="mode.description"
+                      @click="activeMode = mode.key"
+                    >
+                      {{ mode.title }}
+                    </button>
+                  </div>
+                </div>
+              </div>
+              <p class="text-sm leading-relaxed text-ink-secondary">{{ activePlan.description }}</p>
+            </div>
+            <AppButton class="shrink-0" size="lg" variant="gradient" @click="createTarget">
               {{ activePlan.actionLabel }}
             </AppButton>
           </div>
-        </header>
-
-        <section class="grid gap-4 lg:grid-cols-2">
-          <button
-            v-for="mode in modeCards"
-            :key="mode.key"
-            class="min-h-[150px] rounded-2xl p-6 text-left ring-1 transition-all duration-200"
-            :class="activeMode === mode.key
-              ? 'bg-brand-500/15 ring-brand-500/40 shadow-glow'
-              : 'bg-surface ring-border-subtle hover:-translate-y-0.5 hover:ring-brand-500/35 hover:shadow-glow'"
-            @click="activeMode = mode.key"
-          >
-            <span
-              class="inline-flex h-8 w-8 items-center justify-center rounded-full text-lg font-semibold"
-              :class="activeMode === mode.key ? 'bg-brand-gradient text-white' : 'bg-surface-sunken text-brand-300 ring-1 ring-border-subtle'"
-            >
-              +
-            </span>
-            <h3 class="mt-5 text-xl font-semibold text-ink-primary">{{ mode.title }}</h3>
-            <p class="mt-2 max-w-xl text-sm leading-relaxed text-ink-secondary">{{ mode.description }}</p>
-          </button>
         </section>
 
         <section class="space-y-5">
           <div class="flex flex-wrap items-center justify-between gap-3">
-            <div class="flex items-center gap-2">
-              <button
-                v-for="kind in kindTabs"
-                :key="kind.key"
-                class="rounded-lg px-4 py-2 text-sm font-semibold transition-all"
-                :class="activeKind === kind.key
-                  ? 'bg-brand-500/20 text-brand-200 ring-1 ring-brand-500/40'
-                  : 'text-ink-secondary hover:bg-white/5 hover:text-ink-primary'"
-                @click="activeKind = kind.key"
-              >
-                {{ kind.label }}
-              </button>
-            </div>
-            <p class="text-sm font-medium text-ink-muted">{{ activePlan.title }}</p>
+            <h3 class="flex items-center gap-2 text-sm font-semibold text-ink-primary">
+              <span class="h-1.5 w-1.5 rounded-full bg-brand-gradient" />
+              已有{{ activeKind === 'story' ? '故事开局' : '角色卡' }}
+              <span class="text-xs font-normal text-ink-muted">
+                {{ activeKind === 'story' ? sortedStories.length : sortedCharacters.length }}
+              </span>
+            </h3>
           </div>
 
           <div v-if="activeKind === 'story'">
@@ -286,6 +229,7 @@ onMounted(async () => {
                     v-if="storyThumbnail(story)"
                     :src="storyThumbnail(story)"
                     class="h-20 w-14 shrink-0 rounded-lg object-cover ring-1 ring-border-subtle"
+                    loading="lazy"
                   />
                   <div v-else class="flex h-20 w-14 shrink-0 items-center justify-center rounded-lg bg-surface-sunken text-lg font-semibold text-brand-300 ring-1 ring-border-subtle">
                     S
@@ -320,6 +264,7 @@ onMounted(async () => {
                     v-if="character.avatar && character.avatar !== 'none'"
                     :src="`/thumbnail?type=avatar&file=${encodeURIComponent(character.avatar)}`"
                     class="h-20 w-14 shrink-0 rounded-lg object-cover ring-1 ring-border-subtle"
+                    loading="lazy"
                   />
                   <div v-else class="flex h-20 w-14 shrink-0 items-center justify-center rounded-lg bg-surface-sunken text-lg font-semibold text-brand-300 ring-1 ring-border-subtle">
                     C

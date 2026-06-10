@@ -16,7 +16,7 @@ export function buildChatCompletionPayload(
     model: config.model,
     temperature: preset?.temperature ?? config.temperature,
     max_tokens: preset?.maxTokens ?? config.maxTokens,
-    stream: false,
+    // stream 由发送方决定：apiStream 注入 stream:true，非流式请求缺省即为 false
     top_p: preset?.topP ?? config.topP,
     presence_penalty: preset?.presencePenalty ?? config.presencePenalty,
     frequency_penalty: preset?.frequencyPenalty ?? config.frequencyPenalty,

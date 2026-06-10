@@ -359,8 +359,8 @@ const memoryStatusLabel = computed(() => {
 })
 const memoryStatusClass = computed(() => {
   if (chat.memoryUpdating) return 'bg-brand-500/15 text-brand-300'
-  if (chat.memorySummary) return 'bg-emerald-500/15 text-emerald-300'
-  return chat.messages.length > 1 ? 'bg-amber-500/15 text-amber-300' : 'bg-white/5 text-ink-muted'
+  if (chat.memorySummary) return 'bg-emerald-500/15 text-emerald-600'
+  return chat.messages.length > 1 ? 'bg-amber-500/15 text-amber-600' : 'bg-ink-primary/5 text-ink-muted'
 })
 const memoryEmptyText = computed(() =>
   chat.messages.length > 1 ? '下次发送时整理历史' : '暂无记忆',
@@ -434,9 +434,9 @@ function profileStatusClass(profile: ModelProfile): string {
   const label = profileStatusLabel(profile)
   if (label === '通畅') return 'bg-lime-500/15 text-lime-300'
   if (label === '测试中') return 'bg-brand-500/15 text-brand-300'
-  if (label === '异常') return 'bg-red-500/15 text-red-300'
-  if (label === '可测') return 'bg-emerald-500/15 text-emerald-300'
-  return 'bg-amber-500/15 text-amber-300'
+  if (label === '异常') return 'bg-red-500/15 text-red-600'
+  if (label === '可测') return 'bg-emerald-500/15 text-emerald-600'
+  return 'bg-amber-500/15 text-amber-600'
 }
 
 async function selectModelProfile(profile: ModelProfile) {
@@ -516,7 +516,7 @@ watch(() => route.fullPath, initChat)
             <p class="mt-0.5 text-xs text-ink-muted">切换只影响当前聊天，不会改其他存档。</p>
           </div>
           <button
-            class="rounded-lg p-2 text-ink-muted hover:bg-white/5 hover:text-ink-primary"
+            class="rounded-lg p-2 text-ink-muted hover:bg-ink-primary/5 hover:text-ink-primary"
             @click="modelPickerOpen = false"
           >
             <svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -542,7 +542,7 @@ watch(() => route.fullPath, initChat)
             <button
               v-for="profile in filteredProfiles"
               :key="profile.id"
-              class="group w-full border-l-2 px-3 py-4 text-left transition-colors hover:bg-white/5"
+              class="group w-full border-l-2 px-3 py-4 text-left transition-colors hover:bg-ink-primary/5"
               :class="chat.selectedProfileId === profile.id ? 'border-brand-400 bg-brand-500/5' : 'border-border-subtle'"
               @click="selectModelProfile(profile)"
             >
@@ -553,7 +553,7 @@ watch(() => route.fullPath, initChat)
                     <span v-if="chat.selectedProfileId === profile.id" class="rounded bg-brand-500/15 px-1.5 py-0.5 text-[10px] text-brand-300">当前模型</span>
                     <span
                       v-if="models.activeProfileId === profile.id"
-                      class="rounded bg-emerald-500/15 px-1.5 py-0.5 text-[10px] text-emerald-300"
+                      class="rounded bg-emerald-500/15 px-1.5 py-0.5 text-[10px] text-emerald-600"
                     >
                       默认
                     </span>
@@ -570,7 +570,7 @@ watch(() => route.fullPath, initChat)
                   </div>
                   <p
                     v-if="modelTestResults[profile.id] && !modelTestResults[profile.id].ok"
-                    class="mt-2 text-xs text-red-300"
+                    class="mt-2 text-xs text-red-600"
                   >
                     {{ modelTestResults[profile.id].message }}
                   </p>
@@ -687,7 +687,7 @@ watch(() => route.fullPath, initChat)
                 <div class="mt-2.5 flex flex-wrap gap-3 text-xs">
                   <button class="text-ink-secondary hover:text-ink-primary transition-colors" @click="makeDefault(entry)">设默认</button>
                   <button class="text-ink-secondary hover:text-ink-primary transition-colors" @click="renameEntry(entry)">重命名</button>
-                  <button class="text-red-400 hover:text-red-300 transition-colors" @click="deleteEntry(entry)">删除</button>
+                  <button class="text-red-500 hover:text-red-600 transition-colors" @click="deleteEntry(entry)">删除</button>
                 </div>
               </div>
             </AppCard>
@@ -844,7 +844,7 @@ watch(() => route.fullPath, initChat)
               <span
                 :class="[
                   'text-[11px]',
-                  !chatTtsProviderEnabled ? 'text-amber-300' : 'text-ink-muted',
+                  !chatTtsProviderEnabled ? 'text-amber-600' : 'text-ink-muted',
                 ]"
               >
                 <template v-if="!chatTtsProviderEnabled">当前渠道未启用</template>

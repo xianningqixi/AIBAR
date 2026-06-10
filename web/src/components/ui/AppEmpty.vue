@@ -24,8 +24,8 @@ defineProps<{
         </svg>
       </slot>
     </div>
-    <h3 v-if="title" class="text-sm font-medium text-ink-secondary mb-1">{{ title }}</h3>
-    <p v-if="description" class="text-xs text-ink-muted max-w-sm">{{ description }}</p>
+    <h3 v-if="title" class="text-base font-semibold text-ink-primary mb-1">{{ title }}</h3>
+    <p v-if="description" class="text-sm text-ink-muted max-w-sm">{{ description }}</p>
     <div v-if="$slots.actions" class="mt-5 flex items-center gap-2">
       <slot name="actions" />
     </div>

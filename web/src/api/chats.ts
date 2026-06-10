@@ -1,24 +1,37 @@
 import { apiPost, apiPostForm } from './client'
 import type { ChatMessage, ChatEntry } from './types'
 
+type ServerChatMessage = {
+  chat_metadata?: Record<string, unknown>
+  mes?: string
+  is_user?: boolean
+  role?: string
+  send_date?: string
+  date?: string
+  swipes?: string[]
+  swipe_id?: number
+  name?: string
+  extra?: { aibar?: { images?: ChatMessage['images'] } }
+}
+
 export async function fetchChat(
   chName: string,
   fileName: string,
   avatarUrl: string,
 ): Promise<{ metadata: Record<string, unknown>; messages: ChatMessage[] }> {
-  const data = await apiPost('/api/chats/get', {
+  const data = await apiPost<ServerChatMessage[]>('/api/chats/get', {
     ch_name: chName,
     file_name: fileName,
     avatar_url: avatarUrl,
   })
   const arr = Array.isArray(data) ? data : []
-  const header = arr.find((m: any) => m?.chat_metadata)
+  const header = arr.find((m) => m?.chat_metadata)
   const metadata: Record<string, unknown> = {
     simple_ui: true,
     ...(header?.chat_metadata || {}),
   }
   const messages: ChatMessage[] = arr
-    .filter((m: any) => m && !m.chat_metadata && m.mes)
+    .filter((m) => m && !m.chat_metadata && m.mes)
     .map(mapServerMessage)
 
   return { metadata, messages }
@@ -49,11 +62,11 @@ export async function saveChat(
 }
 
 export async function fetchRecentChats(max = 500): Promise<ChatEntry[]> {
-  const result = await apiPost('/api/chats/recent', { max, metadata: true, pinned: [] })
+  const result = await apiPost<ChatEntry[]>('/api/chats/recent', { max, metadata: true, pinned: [] })
   return Array.isArray(result)
     ? result
-        .filter((s: any) => s && s.file_name)
-        .map((s: any) => ({
+        .filter((s) => s && s.file_name)
+        .map((s) => ({
           ...s,
           file_id: s.file_id || String(s.file_name).replace(/\.jsonl$/i, ''),
         }))
@@ -126,7 +139,7 @@ export async function importChat(
   )
 }
 
-function mapServerMessage(m: any): ChatMessage {
+function mapServerMessage(m: ServerChatMessage): ChatMessage {
   const isUser = m.is_user === true || m.role === 'user'
   const images = Array.isArray(m.extra?.aibar?.images) ? m.extra.aibar.images : []
   return {

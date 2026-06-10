@@ -34,7 +34,7 @@ defineEmits<{
           v-if="tab.badge !== undefined && tab.badge !== null && tab.badge !== ''"
           :class="[
             'text-[10px] px-1.5 py-0.5 rounded-full leading-none',
-            modelValue === tab.key ? 'bg-brand-500/15 text-brand-400' : 'bg-white/5 text-ink-muted',
+            modelValue === tab.key ? 'bg-brand-500/15 text-brand-400' : 'bg-ink-primary/5 text-ink-muted',
           ]"
         >
           {{ tab.badge }}

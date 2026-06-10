@@ -6,11 +6,11 @@ export default {
   theme: {
     extend: {
       colors: {
-        bg: '#0a0c16',
+        bg: '#f3f5fa',
         surface: {
-          DEFAULT: '#161a28',
-          elevated: '#1f2334',
-          sunken: '#10131c',
+          DEFAULT: '#ffffff',
+          elevated: '#ffffff',
+          sunken: '#edf0f7',
           50: '#f8fafc',
           100: '#f1f5f9',
           200: '#e2e8f0',
@@ -21,28 +21,29 @@ export default {
           950: '#020617',
         },
         border: {
-          subtle: 'rgba(255,255,255,0.07)',
-          DEFAULT: 'rgba(255,255,255,0.12)',
-          strong: 'rgba(255,255,255,0.20)',
+          subtle: 'rgba(22,30,60,0.08)',
+          DEFAULT: 'rgba(22,30,60,0.14)',
+          strong: 'rgba(22,30,60,0.22)',
         },
         ink: {
-          primary: '#eef0f5',
-          secondary: '#a5acbb',
-          muted: '#737a8a',
+          primary: '#1d2438',
+          secondary: '#4a5470',
+          muted: '#7a849c',
         },
+        // 亮色主题：100-300 作为正文强调色需要在白底上可读，因此取深紫
         brand: {
-          100: '#ede9fe',
-          200: '#ddd6fe',
-          300: '#c4b5fd',
-          400: '#a78bfa',
+          100: '#5b21b6',
+          200: '#6d28d9',
+          300: '#7c3aed',
+          400: '#8b5cf6',
           500: '#8b5cf6',
           600: '#7c3aed',
           700: '#6d28d9',
         },
         accent: {
-          200: '#fbcfe8',
-          300: '#f9a8d4',
-          400: '#f472b6',
+          200: '#be185d',
+          300: '#db2777',
+          400: '#ec4899',
           500: '#ec4899',
           600: '#db2777',
           700: '#be185d',
@@ -53,16 +54,16 @@ export default {
         accent: '#ec4899',
       },
       boxShadow: {
-        elevated: '0 10px 30px -10px rgba(0, 0, 0, 0.6), 0 4px 12px -4px rgba(0, 0, 0, 0.4)',
-        glow: '0 0 0 1px rgba(139, 92, 246, 0.25), 0 8px 28px -8px rgba(139, 92, 246, 0.35)',
-        'glow-lg': '0 0 0 1px rgba(139, 92, 246, 0.30), 0 14px 44px -10px rgba(139, 92, 246, 0.50), 0 4px 16px -6px rgba(236, 72, 153, 0.30)',
-        'glow-accent': '0 0 0 1px rgba(236, 72, 153, 0.25), 0 8px 28px -8px rgba(236, 72, 153, 0.35)',
+        elevated: '0 10px 30px -10px rgba(23, 30, 60, 0.16), 0 4px 12px -4px rgba(23, 30, 60, 0.08)',
+        glow: '0 0 0 1px rgba(139, 92, 246, 0.18), 0 8px 24px -8px rgba(139, 92, 246, 0.30)',
+        'glow-lg': '0 0 0 1px rgba(139, 92, 246, 0.22), 0 14px 40px -10px rgba(139, 92, 246, 0.35), 0 4px 16px -6px rgba(236, 72, 153, 0.20)',
+        'glow-accent': '0 0 0 1px rgba(236, 72, 153, 0.18), 0 8px 24px -8px rgba(236, 72, 153, 0.30)',
       },
       backgroundImage: {
         'brand-gradient': 'linear-gradient(135deg, #8b5cf6 0%, #ec4899 100%)',
-        'brand-soft': 'linear-gradient(135deg, rgba(139,92,246,0.18) 0%, rgba(236,72,153,0.12) 50%, rgba(139,92,246,0.04) 100%)',
-        'hero-radial': 'radial-gradient(120% 80% at 0% 0%, rgba(139,92,246,0.20) 0%, transparent 55%), radial-gradient(80% 60% at 100% 0%, rgba(236,72,153,0.14) 0%, transparent 60%)',
-        'shimmer': 'linear-gradient(100deg, transparent 20%, rgba(255,255,255,0.06) 40%, rgba(255,255,255,0.10) 50%, rgba(255,255,255,0.06) 60%, transparent 80%)',
+        'brand-soft': 'linear-gradient(135deg, rgba(139,92,246,0.12) 0%, rgba(236,72,153,0.08) 50%, rgba(139,92,246,0.03) 100%)',
+        'hero-radial': 'radial-gradient(120% 80% at 0% 0%, rgba(139,92,246,0.12) 0%, transparent 55%), radial-gradient(80% 60% at 100% 0%, rgba(236,72,153,0.09) 0%, transparent 60%)',
+        'shimmer': 'linear-gradient(100deg, transparent 20%, rgba(23,30,60,0.04) 40%, rgba(23,30,60,0.07) 50%, rgba(23,30,60,0.04) 60%, transparent 80%)',
       },
       keyframes: {
         'fade-in-up': {

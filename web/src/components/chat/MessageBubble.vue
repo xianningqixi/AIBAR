@@ -90,7 +90,7 @@ async function togglePlay() {
     <div class="mt-0.5 shrink-0">
       <div
         v-if="isUser"
-        class="flex h-8 w-8 items-center justify-center rounded-full bg-gradient-to-br from-accent-500/80 to-brand-500/80 text-white ring-1 ring-white/15 shadow-sm"
+        class="flex h-8 w-8 items-center justify-center rounded-full bg-gradient-to-br from-accent-500/80 to-brand-500/80 text-white ring-1 ring-border shadow-sm"
       >
         <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
@@ -101,6 +101,7 @@ async function togglePlay() {
         :src="avatarUrl"
         class="h-8 w-8 rounded-full object-cover ring-1 ring-brand-500/40 shadow-sm"
         alt=""
+        loading="lazy"
       />
       <div
         v-else
@@ -115,7 +116,7 @@ async function togglePlay() {
     <div :class="['flex min-w-0 flex-col', isUser ? 'items-end' : 'items-start']">
       <div
         :class="[
-          'max-w-[min(82%,42rem)] rounded-2xl px-4 py-2.5 text-sm leading-relaxed shadow-sm',
+          'max-w-[min(88%,48rem)] rounded-2xl px-4 py-2.5 text-sm leading-relaxed shadow-sm',
           isUser
             ? 'bg-gradient-to-br from-brand-500/25 to-accent-500/15 text-ink-primary border border-brand-500/30 rounded-br-md'
             : 'bg-surface-elevated/90 text-ink-primary border border-border-subtle rounded-bl-md backdrop-blur-sm',
@@ -148,7 +149,7 @@ async function togglePlay() {
           />
           <div class="flex gap-2 justify-end">
             <button
-              class="px-2.5 py-1 text-xs rounded-md bg-white/5 text-ink-secondary hover:text-ink-primary hover:bg-white/10 transition-colors"
+              class="px-2.5 py-1 text-xs rounded-md bg-ink-primary/5 text-ink-secondary hover:text-ink-primary hover:bg-ink-primary/10 transition-colors"
               @click="editing = false"
             >
               取消
@@ -170,10 +171,10 @@ async function togglePlay() {
             :href="image.url"
             target="_blank"
             rel="noreferrer"
-            class="block overflow-hidden rounded-lg border border-white/10 bg-surface-sunken transition-transform hover:scale-[1.02]"
+            class="block overflow-hidden rounded-lg border border-border bg-surface-sunken transition-transform hover:scale-[1.02]"
             :title="image.prompt || '生成图片'"
           >
-            <img :src="image.url" class="h-36 w-full object-cover" alt="" />
+            <img :src="image.url" class="h-36 w-full object-cover" alt="" loading="lazy" />
           </a>
         </div>
       </div>
@@ -204,7 +205,7 @@ async function togglePlay() {
           <svg v-else class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M11 5L6 9H2v6h4l5 4V5z" /><path stroke-linecap="round" stroke-linejoin="round" d="M15.54 8.46a5 5 0 010 7.07M19.07 4.93a10 10 0 010 14.14" /></svg>
         </button>
 
-        <button class="action-btn" :class="copied ? 'text-emerald-400' : ''" :title="copied ? '已复制' : '复制'" @click="copyToClipboard(message.content)">
+        <button class="action-btn" :class="copied ? 'text-emerald-600' : ''" :title="copied ? '已复制' : '复制'" @click="copyToClipboard(message.content)">
           <svg v-if="copied" class="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7" /></svg>
           <svg v-else class="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" /></svg>
         </button>
@@ -225,7 +226,7 @@ async function togglePlay() {
           <svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
         </button>
 
-        <button class="action-btn hover:text-red-400" title="删除" @click="$emit('delete', index)">
+        <button class="action-btn hover:text-red-500" title="删除" @click="$emit('delete', index)">
           <svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
         </button>
       </div>
@@ -235,6 +236,6 @@ async function togglePlay() {
 
 <style scoped>
 .action-btn {
-  @apply inline-flex h-7 w-7 items-center justify-center rounded-lg transition-colors hover:bg-white/[0.08] hover:text-ink-primary;
+  @apply inline-flex h-7 w-7 items-center justify-center rounded-lg transition-colors hover:bg-ink-primary/[0.06] hover:text-ink-primary;
 }
 </style>

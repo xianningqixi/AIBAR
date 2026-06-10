@@ -1,5 +1,3 @@
-import { ref } from 'vue'
-
 let csrfToken = ''
 
 export async function bootCsrf(): Promise<string> {
@@ -31,51 +29,53 @@ function headers(extra?: Record<string, string>): Record<string, string> {
   }
 }
 
-export async function apiPost<T = unknown>(url: string, body: unknown = {}): Promise<T> {
-  const r = await fetch(url, {
-    method: 'POST',
-    headers: headers({ 'Content-Type': 'application/json' }),
-    credentials: 'same-origin',
-    body: JSON.stringify(body),
-  })
+async function doFetch(url: string, init: RequestInit): Promise<Response> {
+  const r = await fetch(url, { credentials: 'same-origin', ...init })
   if (!r.ok) throw new ApiError(r.status, await r.text())
+  return r
+}
+
+function postJson(
+  url: string,
+  body: unknown,
+  init?: { accept?: string; signal?: AbortSignal },
+): Promise<Response> {
+  return doFetch(url, {
+    method: 'POST',
+    headers: headers({
+      'Content-Type': 'application/json',
+      ...(init?.accept ? { Accept: init.accept } : {}),
+    }),
+    body: JSON.stringify(body),
+    signal: init?.signal,
+  })
+}
+
+async function parseByContentType<T>(r: Response): Promise<T> {
   const ct = r.headers.get('content-type') || ''
-  return ct.includes('json') ? r.json() : (await r.text()) as T
+  return ct.includes('json') ? r.json() : ((await r.text()) as T)
+}
+
+export async function apiPost<T = unknown>(url: string, body: unknown = {}): Promise<T> {
+  return parseByContentType<T>(await postJson(url, body))
 }
 
 export async function apiPostText(url: string, body: unknown = {}): Promise<string> {
-  const r = await fetch(url, {
-    method: 'POST',
-    headers: headers({ 'Content-Type': 'application/json' }),
-    credentials: 'same-origin',
-    body: JSON.stringify(body),
-  })
-  if (!r.ok) throw new ApiError(r.status, await r.text())
-  return r.text()
+  return (await postJson(url, body)).text()
 }
 
 export async function apiPostBlob(url: string, body: unknown = {}): Promise<Blob> {
-  const r = await fetch(url, {
-    method: 'POST',
-    headers: headers({ 'Content-Type': 'application/json' }),
-    credentials: 'same-origin',
-    body: JSON.stringify(body),
-  })
-  if (!r.ok) throw new ApiError(r.status, await r.text())
-  return r.blob()
+  return (await postJson(url, body)).blob()
 }
 
 export async function apiPostForm<T = unknown>(url: string, formData: FormData): Promise<T> {
-  const r = await fetch(url, {
+  const r = await doFetch(url, {
     method: 'POST',
     headers: headers(),
-    credentials: 'same-origin',
     body: formData,
     cache: 'no-cache',
   })
-  if (!r.ok) throw new ApiError(r.status, await r.text())
-  const ct = r.headers.get('content-type') || ''
-  return ct.includes('json') ? r.json() : (await r.text()) as T
+  return parseByContentType<T>(r)
 }
 
 export async function* apiStream(
@@ -83,19 +83,14 @@ export async function* apiStream(
   body: unknown,
   signal?: AbortSignal,
 ): AsyncGenerator<Record<string, unknown>> {
-  const r = await fetch(url, {
-    method: 'POST',
-    headers: headers({
-      'Content-Type': 'application/json',
-      Accept: 'text/event-stream',
-    }),
-    credentials: 'same-origin',
-    body: JSON.stringify({ ...(body as Record<string, unknown>), stream: true }),
-    signal,
-  })
-  if (!r.ok) throw new ApiError(r.status, await r.text())
+  const r = await postJson(
+    url,
+    { ...(body as Record<string, unknown>), stream: true },
+    { accept: 'text/event-stream', signal },
+  )
+  if (!r.body) throw new ApiError(r.status, 'Empty stream response body')
 
-  const reader = r.body!.pipeThrough(new TextDecoderStream()).getReader()
+  const reader = r.body.pipeThrough(new TextDecoderStream()).getReader()
   let buf = ''
   while (true) {
     const { value, done } = await reader.read()
@@ -112,7 +107,7 @@ export async function* apiStream(
         try {
           yield JSON.parse(data)
         } catch {
-          //
+          console.warn('Skipped malformed SSE frame:', data.slice(0, 200))
         }
       }
     }

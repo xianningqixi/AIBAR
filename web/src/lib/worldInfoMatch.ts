@@ -18,7 +18,8 @@ export async function loadWorldInfoFile(name: string): Promise<WorldInfoFile | n
     const data = await getWorldInfo(name)
     cache.set(name, data)
     return data
-  } catch {
+  } catch (e) {
+    console.warn(`World info "${name}" load failed:`, e)
     return null
   }
 }

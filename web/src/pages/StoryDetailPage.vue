@@ -310,7 +310,7 @@ onMounted(loadData)
                 <span class="w-1.5 h-1.5 rounded-full bg-brand-gradient" />
                 {{ character.name }}
               </button>
-              <span v-else class="inline-flex items-center gap-1.5 text-sm text-red-300">
+              <span v-else class="inline-flex items-center gap-1.5 text-sm text-red-600">
                 <span class="w-1.5 h-1.5 rounded-full bg-red-400" />
                 绑定角色不存在
               </span>
@@ -457,7 +457,7 @@ onMounted(loadData)
           <h4 class="text-xs font-semibold text-ink-muted uppercase tracking-wider">输出</h4>
           <div
             v-if="testModel.error"
-            class="text-xs whitespace-pre-wrap bg-red-500/10 text-red-300 ring-1 ring-red-500/20 p-3 rounded-md"
+            class="text-xs whitespace-pre-wrap bg-red-500/10 text-red-600 ring-1 ring-red-500/20 p-3 rounded-md"
           >
             {{ testModel.error }}
           </div>

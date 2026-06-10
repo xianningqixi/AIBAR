@@ -75,7 +75,7 @@ const description = props.character.description || props.character.data?.descrip
         <span
           v-for="tag in character.tags.slice(0, 3)"
           :key="tag"
-          class="px-1.5 py-0.5 text-[10px] rounded bg-white/5 text-ink-muted"
+          class="px-1.5 py-0.5 text-[10px] rounded bg-ink-primary/5 text-ink-muted"
         >
           {{ tag }}
         </span>

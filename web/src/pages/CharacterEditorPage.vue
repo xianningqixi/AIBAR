@@ -501,7 +501,7 @@ onMounted(async () => {
           </div>
         </div>
 
-        <div v-if="draft.error" class="text-xs whitespace-pre-wrap bg-red-500/10 text-red-300 ring-1 ring-red-500/20 p-3 rounded-md">
+        <div v-if="draft.error" class="text-xs whitespace-pre-wrap bg-red-500/10 text-red-600 ring-1 ring-red-500/20 p-3 rounded-md">
           {{ draft.error }}
         </div>
       </AppCard>
@@ -661,7 +661,7 @@ onMounted(async () => {
               <h4 class="text-xs font-semibold text-ink-muted uppercase tracking-wider">输出</h4>
               <div
                 v-if="test.error"
-                class="text-xs whitespace-pre-wrap bg-red-500/10 text-red-300 ring-1 ring-red-500/20 p-3 rounded-md"
+                class="text-xs whitespace-pre-wrap bg-red-500/10 text-red-600 ring-1 ring-red-500/20 p-3 rounded-md"
               >
                 {{ test.error }}
               </div>

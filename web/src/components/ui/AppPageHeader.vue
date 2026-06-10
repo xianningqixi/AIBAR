@@ -39,7 +39,7 @@ function goBack() {
   >
     <button
       v-if="showBack"
-      class="inline-flex items-center gap-1.5 text-ink-secondary hover:text-ink-primary px-2 py-1.5 -ml-2 rounded-lg transition-colors hover:bg-white/5"
+      class="inline-flex items-center gap-1.5 text-ink-secondary hover:text-ink-primary px-2 py-1.5 -ml-2 rounded-lg transition-colors hover:bg-ink-primary/5"
       aria-label="返回"
       @click="goBack"
     >

@@ -11,7 +11,7 @@ function explainGenerateError(error: unknown, payload?: Record<string, unknown>)
 
   let message = raw
   try {
-    const parsed = JSON.parse(raw) as any
+    const parsed = JSON.parse(raw) as { error?: { message?: string }; message?: string }
     message = parsed?.error?.message || parsed?.message || raw
   } catch {
     // Plain text errors are common for network failures.
@@ -34,10 +34,20 @@ function explainGenerateError(error: unknown, payload?: Record<string, unknown>)
   return message || '模型生成失败，请检查模型连接配置'
 }
 
+type ChatCompletionResponse = {
+  choices?: Array<{
+    message?: { content?: string }
+    text?: string
+    delta?: { content?: string; reasoning?: string; reasoning_content?: string }
+  }>
+  content?: string
+  response?: string
+}
+
 export async function generateReply(payload: Record<string, unknown>): Promise<string> {
-  let data: Record<string, unknown>
+  let data: ChatCompletionResponse
   try {
-    data = await apiPost<Record<string, unknown>>(
+    data = await apiPost<ChatCompletionResponse>(
       '/api/backends/chat-completions/generate',
       payload,
     )
@@ -45,10 +55,10 @@ export async function generateReply(payload: Record<string, unknown>): Promise<s
     throw new Error(explainGenerateError(error, payload))
   }
   const reply =
-    (data?.choices as any)?.[0]?.message?.content ||
-    (data?.choices as any)?.[0]?.text ||
-    (data as any)?.content ||
-    (data as any)?.response ||
+    data?.choices?.[0]?.message?.content ||
+    data?.choices?.[0]?.text ||
+    data?.content ||
+    data?.response ||
     ''
   return String(reply || '')
 }
@@ -68,7 +78,10 @@ export async function testConnection(
     body.reverse_proxy = profile.endpoint
   }
   try {
-    const r = await apiPost<any>('/api/backends/chat-completions/status', body)
+    const r = await apiPost<{ data?: unknown[]; error?: unknown; message?: unknown }>(
+      '/api/backends/chat-completions/status',
+      body,
+    )
     const models = Array.isArray(r?.data) ? r.data.length : undefined
     if (r?.error) {
       const message =
@@ -80,8 +93,8 @@ export async function testConnection(
       return { ok: false, message }
     }
     return { ok: true, message: '连接正常', models }
-  } catch (e: any) {
-    return { ok: false, message: e?.message || '连接失败' }
+  } catch (e) {
+    return { ok: false, message: e instanceof Error ? e.message : '连接失败' }
   }
 }
 
@@ -94,7 +107,7 @@ export async function* generateReplyStream(
     payload,
     signal,
   )) {
-    const delta = (evt as any)?.choices?.[0]?.delta
+    const delta = (evt as ChatCompletionResponse)?.choices?.[0]?.delta
     if (delta) {
       yield {
         content: delta.content || undefined,

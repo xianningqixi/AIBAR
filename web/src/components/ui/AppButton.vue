@@ -14,15 +14,15 @@ defineProps<{
     :class="[
       'inline-flex items-center justify-center gap-1.5 font-medium whitespace-nowrap transition-all duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-2 focus-visible:ring-offset-bg disabled:opacity-40 disabled:cursor-not-allowed select-none',
       variant === 'icon'
-        ? 'rounded-full p-1.5 text-ink-secondary hover:text-ink-primary hover:bg-white/5'
+        ? 'rounded-full p-1.5 text-ink-secondary hover:text-ink-primary hover:bg-ink-primary/5'
         : 'rounded-lg',
       variant !== 'icon' && (size === 'sm' ? 'px-3 py-1.5 text-xs' : size === 'lg' ? 'px-5 py-2.5 text-sm' : 'px-4 py-2 text-sm'),
       variant === 'secondary'
         ? 'bg-surface border border-border text-ink-primary hover:bg-surface-elevated hover:border-border-strong active:bg-surface-sunken'
         : variant === 'ghost'
-          ? 'text-ink-secondary hover:text-ink-primary hover:bg-white/5 active:bg-white/10'
+          ? 'text-ink-secondary hover:text-ink-primary hover:bg-ink-primary/5 active:bg-ink-primary/10'
           : variant === 'danger'
-            ? 'bg-red-500/10 text-red-300 border border-red-500/25 hover:bg-red-500/15 hover:border-red-500/40 active:bg-red-500/20'
+            ? 'bg-red-500/10 text-red-600 border border-red-500/25 hover:bg-red-500/15 hover:border-red-500/40 active:bg-red-500/20'
             : variant === 'icon'
               ? ''
               : variant === 'gradient'

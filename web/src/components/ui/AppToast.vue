@@ -19,11 +19,11 @@ function typeClasses(type: string) {
 function typeIcon(type: string) {
   switch (type) {
     case 'success':
-      return 'text-emerald-400'
+      return 'text-emerald-600'
     case 'error':
-      return 'text-red-400'
+      return 'text-red-500'
     case 'warning':
-      return 'text-amber-400'
+      return 'text-amber-600'
     default:
       return 'text-brand-400'
   }

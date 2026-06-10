@@ -89,10 +89,10 @@ function selectDraft(option: ReplyDraftOption) {
 
 <template>
   <div class="border-t border-border-subtle bg-bg/85 px-3 pb-3 pt-2.5 backdrop-blur">
-    <div class="mx-auto max-w-3xl">
+    <div class="mx-auto max-w-4xl">
       <div
         v-if="draftPanelOpen"
-        class="fixed inset-x-3 bottom-20 z-40 mx-auto max-h-[48vh] max-w-3xl overflow-hidden rounded-xl border border-brand-500/30 bg-surface-elevated shadow-2xl ring-1 ring-brand-500/15"
+        class="fixed inset-x-3 bottom-20 z-40 mx-auto max-h-[48vh] max-w-4xl overflow-hidden rounded-xl border border-brand-500/30 bg-surface-elevated shadow-2xl ring-1 ring-brand-500/15"
       >
         <div class="flex flex-wrap items-center justify-between gap-2 border-b border-border-subtle px-3 py-2.5">
           <div class="min-w-0">
@@ -108,7 +108,7 @@ function selectDraft(option: ReplyDraftOption) {
               {{ draftLoading ? '生成中…' : '换一批' }}
             </button>
             <button
-              class="rounded-lg px-2.5 py-1.5 text-xs text-ink-muted transition-colors hover:bg-white/5 hover:text-ink-primary"
+              class="rounded-lg px-2.5 py-1.5 text-xs text-ink-muted transition-colors hover:bg-ink-primary/5 hover:text-ink-primary"
               @click="$emit('clearDrafts')"
             >
               收起
@@ -120,7 +120,7 @@ function selectDraft(option: ReplyDraftOption) {
           正在拆出 5 个剧情方向…
         </div>
 
-        <div v-else-if="draftError" class="m-3 rounded-lg bg-red-500/10 px-3 py-2 text-xs text-red-300 ring-1 ring-red-500/20">
+        <div v-else-if="draftError" class="m-3 rounded-lg bg-red-500/10 px-3 py-2 text-xs text-red-600 ring-1 ring-red-500/20">
           {{ draftError }}
         </div>
 
@@ -173,7 +173,7 @@ function selectDraft(option: ReplyDraftOption) {
         </button>
         <button
           v-if="isStreaming"
-          class="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-red-500/30 bg-red-500/15 text-red-300 transition-colors hover:bg-red-500/25"
+          class="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-red-500/30 bg-red-500/15 text-red-600 transition-colors hover:bg-red-500/25"
           @click="handleSend"
           title="停止生成 (Esc)"
         >
