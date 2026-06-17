@@ -25,18 +25,27 @@ const TTS_SAMPLE_TEXT = '你好，我是 AIBAR 的语音测试。'
 let testAudio: HTMLAudioElement | null = null
 
 const ttsProviderOrder = new Map(TTS_PROVIDERS.map((provider, index) => [provider.id, index]))
-const playableTtsProviders = computed(() => TTS_PROVIDERS
-  .filter((provider) => provider.playable)
+const enabledTtsProviders = computed(() => TTS_PROVIDERS
+  .filter((provider) => provider.playable && tts.settings[provider.id].enabled)
   .sort((a, b) => {
-    const rank = (provider: TtsProvider) => {
-      if (tts.settings.defaultProvider === provider) return 0
-      return tts.settings[provider].enabled ? 1 : 2
-    }
+    const rank = (provider: TtsProvider) => tts.settings.defaultProvider === provider ? 0 : 1
     return rank(a.id) - rank(b.id) || (ttsProviderOrder.get(a.id) ?? 0) - (ttsProviderOrder.get(b.id) ?? 0)
   }))
 const selectedTtsProvider = ref<TtsProvider>('mimo')
+const visibleTtsProviders = computed(() => {
+  const selected = TTS_PROVIDERS.find((provider) => provider.id === selectedTtsProvider.value && provider.playable)
+  const visible = [...enabledTtsProviders.value]
+  if (selected && !visible.some((provider) => provider.id === selected.id)) {
+    visible.push(selected)
+  }
+  return visible
+})
 const selectedTtsProviderMeta = computed(() => (
-  playableTtsProviders.value.find((provider) => provider.id === selectedTtsProvider.value) || playableTtsProviders.value[0]
+  visibleTtsProviders.value.find((provider) => provider.id === selectedTtsProvider.value)
+    || enabledTtsProviders.value[0]
+    || TTS_PROVIDERS.find((provider) => provider.id === 'mimo')
+    || TTS_PROVIDERS.find((provider) => provider.playable)
+    || TTS_PROVIDERS[0]
 ))
 const ttsVoiceSearch = ref('')
 const ttsVoiceDraft = reactive({ name: '', voice: '', note: '' })
@@ -58,7 +67,7 @@ function setDefaultTtsProvider(provider: TtsProvider) {
 function ttsProviderStatusLabel(provider: TtsProvider): string {
   if (tts.settings.defaultProvider === provider) return '默认'
   if (tts.settings[provider].enabled) return '已启用'
-  return '未启用'
+  return '待启用'
 }
 
 function secretDraftKey(provider: TtsProvider, secretKey: string): string {
@@ -258,6 +267,7 @@ async function saveTtsSecret(provider: TtsProvider, secret: ProviderSecret) {
 
 onMounted(async () => {
   await tts.load()
+  selectedTtsProvider.value = enabledTtsProviders.value[0]?.id || 'mimo'
 })
 </script>
 
@@ -276,10 +286,17 @@ onMounted(async () => {
             class="!w-56"
             @update:model-value="(v) => setDefaultTtsProvider(v as TtsProvider)"
           >
-            <option v-for="provider in playableTtsProviders" :key="provider.id" :value="provider.id">
+            <option
+              v-for="provider in enabledTtsProviders"
+              :key="provider.id"
+              :value="provider.id"
+            >
               {{ provider.label }}
             </option>
           </AppSelect>
+          <span v-if="!enabledTtsProviders.length" class="text-[11px] text-amber-600">
+            先启用一个渠道
+          </span>
         </div>
       </div>
     </AppCard>
@@ -289,13 +306,13 @@ onMounted(async () => {
         <div class="px-4 py-3 border-b border-border-subtle flex items-center justify-between">
           <div>
             <h2 class="text-sm font-semibold text-ink-primary">TTS 渠道</h2>
-            <p class="text-[11px] text-ink-muted mt-0.5">选择一个渠道后在右侧配置。</p>
+            <p class="text-[11px] text-ink-muted mt-0.5">只显示已启用渠道和当前配置中的渠道。</p>
           </div>
-          <span class="text-[11px] text-ink-muted">{{ playableTtsProviders.length }} 个</span>
+          <span class="text-[11px] text-ink-muted">{{ visibleTtsProviders.length }} 个</span>
         </div>
         <div class="max-h-[420px] overflow-y-auto divide-y divide-border-subtle">
           <button
-            v-for="provider in playableTtsProviders"
+            v-for="provider in visibleTtsProviders"
             :key="provider.id"
             type="button"
             :class="[

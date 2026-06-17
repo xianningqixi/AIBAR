@@ -361,9 +361,16 @@ export const TTS_PROVIDERS: ProviderMeta[] = [
     id: 'mimo',
     stName: '小米 MiMo',
     label: '小米 MiMo',
-    description: '已开发的小米 MiMo TTS 通道,使用音频输出 chat completions。',
+    description: '小米 MiMo V2.5 TTS,使用音频输出 chat completions。',
     secretKeys: [{ key: 'api_key_mimo', label: 'MiMo API Key' }],
     playable: true,
+    extraFields: [
+      {
+        key: 'style_prompt',
+        label: '风格提示',
+        placeholder: '可选：用自然语言描述音色、情绪、语速或角色感。',
+      },
+    ],
   },
 ]
 
@@ -428,7 +435,7 @@ export const PROVIDER_MODELS: Record<TtsProvider, string[]> = {
   vits: [],
   xttsv2: [],
   volcengine: [],
-  mimo: ['mimo-v2.5-tts'],
+  mimo: ['mimo-v2.5-tts', 'mimo-v2.5-tts-voicedesign', 'mimo-v2.5-tts-voiceclone'],
 }
 
 export const PROVIDER_VOICES: Record<TtsProvider, string[]> = {
@@ -485,6 +492,11 @@ function numberExtra(opts: SynthesizeOptions, key: string, fallback: number): nu
   const raw = opts.extra?.[key]
   const num = typeof raw === 'number' ? raw : Number(raw)
   return Number.isFinite(num) ? num : fallback
+}
+
+function stringExtra(opts: SynthesizeOptions, key: string): string {
+  const raw = opts.extra?.[key]
+  return typeof raw === 'string' ? raw.trim() : ''
 }
 
 function unsupported(provider: TtsProvider): never {
@@ -582,6 +594,7 @@ export async function synthesizeSpeech(opts: SynthesizeOptions): Promise<Blob> {
           text: opts.text,
           model: opts.model || 'mimo-v2.5-tts',
           voice: opts.voice || '冰糖',
+          style_prompt: stringExtra(opts, 'style_prompt'),
           format: 'wav',
         })
       case 'alltalk':

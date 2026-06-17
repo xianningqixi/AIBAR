@@ -26,13 +26,19 @@ function normalizeVoice(provider: TtsProvider, voice: string, fallback: string):
   return voice || fallback
 }
 
+function normalizeModel(provider: TtsProvider, model: string, fallback: string): string {
+  if (provider === 'mimo' && model === 'mimo-v2-tts') return 'mimo-v2.5-tts'
+  return model || fallback
+}
+
 function normalizeProvider(provider: TtsProvider, input: unknown, fallback: TtsProviderConfig): TtsProviderConfig {
   if (!input || typeof input !== 'object') return { ...fallback }
   const obj = input as Record<string, unknown>
   const voice = typeof obj.voice === 'string' ? obj.voice : ''
+  const model = typeof obj.model === 'string' ? obj.model : ''
   return {
     enabled: typeof obj.enabled === 'boolean' ? obj.enabled : fallback.enabled,
-    model: typeof obj.model === 'string' && obj.model ? obj.model : fallback.model,
+    model: normalizeModel(provider, model, fallback.model),
     voice: normalizeVoice(provider, voice, fallback.voice),
     endpoint: typeof obj.endpoint === 'string' ? obj.endpoint : fallback.endpoint,
     extra: obj.extra && typeof obj.extra === 'object'

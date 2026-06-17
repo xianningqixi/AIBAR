@@ -330,7 +330,9 @@ const globalModIds = computed(() =>
   modsStore.mods.filter((m) => m.enabled).map((m) => m.id),
 )
 
-const playableTtsProviders = computed(() => TTS_PROVIDERS.filter((provider) => provider.playable))
+const playableTtsProviders = computed(() => TTS_PROVIDERS.filter((provider) => (
+  provider.playable && tts.settings[provider.id].enabled
+)))
 const currentCharacterAvatar = computed(() => chat.character?.avatar || character.value?.avatar || '')
 const currentCharacterVoice = computed(() => {
   const avatar = currentCharacterAvatar.value
@@ -380,13 +382,14 @@ function setChatTtsProvider(provider: string) {
   const avatar = currentCharacterAvatar.value
   if (!avatar) return
   const nextProvider = provider as TtsProvider
+  if (!tts.settings[nextProvider]?.enabled) {
+    ui.addToast('该 TTS 渠道未启用，请先到设置里启用', 'warning')
+    return
+  }
   const nextVoice = tts.settings[nextProvider].voice || PROVIDER_VOICES[nextProvider]?.[0] || ''
   if (!nextVoice) {
     ui.addToast('该渠道没有可用音色，请先到设置里创建音色', 'warning')
     return
-  }
-  if (!tts.settings[nextProvider].enabled) {
-    tts.updateProvider(nextProvider, { enabled: true })
   }
   tts.setCharacterVoice(avatar, { provider: nextProvider, voice: nextVoice })
   ui.addToast('当前角色音色渠道已更新', 'success')
@@ -396,7 +399,8 @@ function setChatTtsVoice(voice: string) {
   const avatar = currentCharacterAvatar.value
   if (!avatar || !voice.trim()) return
   if (!tts.settings[chatTtsProvider.value].enabled) {
-    tts.updateProvider(chatTtsProvider.value, { enabled: true })
+    ui.addToast('当前 TTS 渠道未启用，请先到设置里启用', 'warning')
+    return
   }
   tts.setCharacterVoice(avatar, { provider: chatTtsProvider.value, voice: voice.trim() })
   ui.addToast('当前角色音色已更新', 'success')
