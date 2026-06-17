@@ -13,6 +13,7 @@ import {
 } from '@/api/characters'
 import { listStories } from '@/api/stories'
 import { createChatFromCharacter, createChatFromStory } from '@/lib/storyStart'
+import { characterGreetings, saveStoryFromCharacterGreeting } from '@/lib/storyFromCharacter'
 import { stripJsonlName } from '@/lib/format'
 import type { Character, ChatEntry, StoryCard } from '@/api/types'
 import AppButton from '@/components/ui/AppButton.vue'
@@ -35,6 +36,7 @@ const chatList = ref<ChatEntry[]>([])
 const startModIds = ref<string[]>([])
 const loading = ref(false)
 const startingWithMods = ref(false)
+const savingGreetingIndex = ref<number | null>(null)
 
 const tags = computed(() => {
   return character.value?.tags?.length
@@ -43,12 +45,7 @@ const tags = computed(() => {
 })
 
 const greetings = computed(() => {
-  const list: string[] = []
-  if (character.value?.data?.first_mes) list.push(character.value.data.first_mes)
-  for (const g of character.value?.data?.alternate_greetings || []) {
-    if (g.trim()) list.push(g)
-  }
-  return list
+  return characterGreetings(character.value)
 })
 
 async function loadData() {
@@ -135,6 +132,21 @@ async function startCharacterWithMods() {
     ui.addToast(`创建聊天失败：${e.message}`, 'error')
   } finally {
     startingWithMods.value = false
+  }
+}
+
+async function saveGreetingAsStory(greeting: string, index: number) {
+  if (!character.value) return
+  savingGreetingIndex.value = index
+  try {
+    const story = await saveStoryFromCharacterGreeting(character.value, greeting, index)
+    stories.value = [story, ...stories.value.filter((item) => item.id !== story.id)]
+    ui.addToast('已从开场白生成故事卡', 'success')
+    router.push(`/story/${encodeURIComponent(story.id)}`)
+  } catch (e: any) {
+    ui.addToast(`生成故事卡失败：${e.message}`, 'error')
+  } finally {
+    savingGreetingIndex.value = null
   }
 }
 
@@ -334,7 +346,17 @@ onMounted(loadData)
             :key="i"
             class="text-sm text-ink-secondary whitespace-pre-wrap leading-relaxed bg-surface-sunken p-3 rounded-md ring-1 ring-border-subtle"
           >
-            <span class="text-[11px] text-brand-300 bg-brand-500/10 ring-1 ring-brand-500/20 px-1.5 py-0.5 rounded mr-2">#{{ i + 1 }}</span>
+            <div class="mb-2 flex flex-wrap items-center justify-between gap-2">
+              <span class="text-[11px] text-brand-300 bg-brand-500/10 ring-1 ring-brand-500/20 px-1.5 py-0.5 rounded">#{{ i + 1 }}</span>
+              <AppButton
+                size="sm"
+                variant="secondary"
+                :disabled="savingGreetingIndex === i"
+                @click="saveGreetingAsStory(g, i)"
+              >
+                {{ savingGreetingIndex === i ? '保存中…' : '存为故事' }}
+              </AppButton>
+            </div>
             {{ g }}
           </div>
         </div>

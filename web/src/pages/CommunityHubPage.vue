@@ -4,13 +4,16 @@ import { useRouter } from 'vue-router'
 import { useCharactersStore } from '@/stores/characters'
 import { useUiStore } from '@/stores/ui'
 import { downloadCommunityContent } from '@/api/community'
-import { importCharacter } from '@/api/characters'
+import { fetchCharacter, importCharacter } from '@/api/characters'
+import { characterGreetings, saveStoryFromCharacterGreeting } from '@/lib/storyFromCharacter'
 import AppButton from '@/components/ui/AppButton.vue'
 import AppPageHeader from '@/components/ui/AppPageHeader.vue'
 
 interface ImportResult {
   title: string
   detail: string
+  avatar?: string
+  storyId?: string
 }
 
 const router = useRouter()
@@ -107,13 +110,38 @@ async function importFromUrl() {
     const file = new File([content.blob], ensureFileName(content.fileName, 'discord-character.png'), {
       type: content.mimeType || content.blob.type || 'image/png',
     })
-    await importCharacter(file)
+    const imported = await importCharacter(file)
+    const importedAvatar = imported.file_name ? `${imported.file_name}.png` : ''
+    let storyId = ''
+    let title = file.name
+    let detail = '已写入 ST 角色库，可以直接进入角色管理或开始聊天。'
+
+    if (importedAvatar) {
+      try {
+        const character = await fetchCharacter(importedAvatar)
+        title = character.name || title
+        const greeting = characterGreetings(character)[0]
+        if (greeting) {
+          const story = await saveStoryFromCharacterGreeting(character, greeting, 0)
+          storyId = story.id
+          detail = '已写入 ST 角色库，并已从角色卡开场白生成故事卡。'
+        } else {
+          detail = '已写入 ST 角色库；这张卡没有开场白，所以没有生成故事卡。'
+        }
+      } catch (error) {
+        console.warn('Failed to create story from imported character:', error)
+        detail = '角色卡已导入；自动生成故事卡失败，可以在角色详情页手动生成。'
+      }
+    }
+
     await chars.load()
     lastResult.value = {
-      title: file.name,
-      detail: '已写入 ST 角色库，可以直接进入角色管理或开始聊天。',
+      title,
+      detail,
+      avatar: importedAvatar,
+      storyId,
     }
-    ui.addToast(`已导入角色卡：${file.name}`, 'success')
+    ui.addToast(storyId ? `已导入角色卡并生成故事卡：${title}` : `已导入角色卡：${title}`, 'success')
   } catch (e: any) {
     normalizedFromPreview.value = false
     ui.addToast(`导入失败：${importErrorMessage(e)}`, 'error')
@@ -181,9 +209,27 @@ async function importFromUrl() {
               <h3 class="mt-2 text-lg font-semibold text-ink-primary">{{ lastResult.title }}</h3>
               <p class="mt-2 text-sm leading-relaxed text-ink-secondary">{{ lastResult.detail }}</p>
             </div>
-            <AppButton size="md" variant="secondary" class="self-start" @click="router.push('/characters')">
-              查看角色库
-            </AppButton>
+            <div class="flex flex-wrap gap-2">
+              <AppButton
+                v-if="lastResult.storyId"
+                size="md"
+                variant="gradient"
+                @click="router.push(`/story/${encodeURIComponent(lastResult.storyId || '')}`)"
+              >
+                查看故事卡
+              </AppButton>
+              <AppButton
+                v-if="lastResult.avatar"
+                size="md"
+                variant="secondary"
+                @click="router.push(`/character/${encodeURIComponent(lastResult.avatar || '')}`)"
+              >
+                查看角色
+              </AppButton>
+              <AppButton size="md" variant="secondary" @click="router.push('/characters')">
+                角色库
+              </AppButton>
+            </div>
           </div>
           <div v-else class="flex h-full min-h-[170px] flex-col justify-center">
             <p class="text-xs font-semibold uppercase tracking-[0.18em] text-ink-muted">Ready</p>
