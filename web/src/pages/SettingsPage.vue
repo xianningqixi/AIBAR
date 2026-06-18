@@ -13,6 +13,7 @@ import PresetsTab from '@/components/settings/PresetsTab.vue'
 import PersonasTab from '@/components/settings/PersonasTab.vue'
 import ImageTab from '@/components/settings/ImageTab.vue'
 import TtsTab from '@/components/settings/TtsTab.vue'
+import TelegramBotTab from '@/components/settings/TelegramBotTab.vue'
 import AboutTab from '@/components/settings/AboutTab.vue'
 import { imageHistory, loadImageHistory } from '@/components/settings/shared'
 
@@ -26,7 +27,7 @@ const router = useRouter()
 
 function initialTab(): string {
   const raw = String(route.query.tab || '')
-  if (['model', 'presets', 'personas', 'image', 'tts', 'about'].includes(raw)) return raw
+  if (['model', 'presets', 'personas', 'image', 'tts', 'telegram', 'about'].includes(raw)) return raw
   return 'model'
 }
 
@@ -45,6 +46,7 @@ const tabs = [
   { key: 'personas', label: '我的身份' },
   { key: 'image', label: '图像生成' },
   { key: 'tts', label: '语音 (TTS)' },
+  { key: 'telegram', label: 'Telegram Bot' },
   { key: 'about', label: '关于' },
 ]
 
@@ -54,6 +56,7 @@ const tabComponents: Record<string, Component> = {
   personas: PersonasTab,
   image: ImageTab,
   tts: TtsTab,
+  telegram: TelegramBotTab,
   about: AboutTab,
 }
 
@@ -89,10 +92,10 @@ watch(() => [route.path, route.query.tab], syncTabFromRoute)
           <div>
             <p class="text-[11px] uppercase tracking-[0.2em] text-brand-300/80 mb-2">配置中心</p>
             <h2 class="text-xl md:text-2xl font-semibold text-ink-primary">
-              管理 <span class="text-brand-300">模型 · 参数 · 图像 · 语音</span>
+              管理 <span class="text-brand-300">模型 · 参数 · 图像 · 语音 · Telegram</span>
             </h2>
             <p class="mt-1.5 text-xs md:text-sm text-ink-secondary max-w-xl">
-              模型连接、生成参数、身份、图像和语音在这里配置。世界书和提示词 MOD 已移到左侧资料库单独管理。
+              模型连接、生成参数、身份、图像、语音和外部入口在这里配置。世界书和提示词 MOD 已移到左侧资料库单独管理。
             </p>
           </div>
           <div class="grid grid-cols-2 gap-2.5 md:min-w-[420px] md:grid-cols-4">
