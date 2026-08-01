@@ -157,7 +157,7 @@ function deleteEntry() {
           @click="selectedKey = item.key"
         >
           <div class="font-medium truncate">{{ entryDisplay(item.entry) }}</div>
-          <div class="text-[10px] text-ink-muted mt-0.5 truncate">
+          <div class="text-[11px] text-ink-muted mt-0.5 truncate">
             <span v-if="item.entry.constant">[常驻]</span>
             <span v-else>{{ entryKeysText(item.entry) || '(无关键词)' }}</span>
           </div>

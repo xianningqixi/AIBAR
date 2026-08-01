@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useCharactersStore } from '@/stores/characters'
 import { useUiStore } from '@/stores/ui'
@@ -11,12 +11,13 @@ import {
   mergeAttributes,
 } from '@/api/characters'
 import type { Character } from '@/api/types'
+import { getApiErrorMessage } from '@/api/client'
 import AppButton from '@/components/ui/AppButton.vue'
 import AppCard from '@/components/ui/AppCard.vue'
-import AppInput from '@/components/ui/AppInput.vue'
 import AppPageHeader from '@/components/ui/AppPageHeader.vue'
 import AppEmpty from '@/components/ui/AppEmpty.vue'
 import AppSpinner from '@/components/ui/AppSpinner.vue'
+import SearchInput from '@/components/ui/SearchInput.vue'
 
 const router = useRouter()
 const route = useRoute()
@@ -24,6 +25,24 @@ const chars = useCharactersStore()
 const ui = useUiStore()
 
 const filter = ref(typeof route.query.q === 'string' ? route.query.q : '')
+
+// 行内溢出菜单：一次只展开一行，按 avatar 记录
+const openMenu = ref('')
+
+function toggleMenu(avatar: string) {
+  openMenu.value = openMenu.value === avatar ? '' : avatar
+}
+
+function runMenuAction(action: () => void) {
+  openMenu.value = ''
+  action()
+}
+
+function onMenuKeydown(e: KeyboardEvent) {
+  if (e.key === 'Escape') openMenu.value = ''
+}
+
+const favoriteCount = computed(() => chars.characters.filter((c) => c.fav === 'true').length)
 
 const filtered = computed(() => {
   const q = filter.value.trim().toLowerCase()
@@ -44,8 +63,8 @@ async function removeCharacter(avatar: string, name: string) {
     await deleteCharacter(avatar)
     ui.addToast('角色已删除', 'success')
     await chars.load()
-  } catch (e: any) {
-    ui.addToast(`删除失败：${e.message}`, 'error')
+  } catch (e: unknown) {
+    ui.addToast(`删除失败：${getApiErrorMessage(e)}`, 'error')
   }
 }
 
@@ -58,8 +77,8 @@ async function exportCard(avatar: string, format: 'png' | 'json') {
     link.download = avatar.replace(/\.png$/i, `.${format}`)
     link.click()
     URL.revokeObjectURL(url)
-  } catch (e: any) {
-    ui.addToast(`导出失败：${e.message}`, 'error')
+  } catch (e: unknown) {
+    ui.addToast(`导出失败：${getApiErrorMessage(e)}`, 'error')
   }
 }
 
@@ -75,8 +94,8 @@ async function importCards() {
       try {
         await importCharacter(file)
         ui.addToast(`已导入：${file.name}`, 'success')
-      } catch (e: any) {
-        ui.addToast(`导入失败：${e.message}`, 'error')
+      } catch (e: unknown) {
+        ui.addToast(`导入失败：${getApiErrorMessage(e)}`, 'error')
       }
     }
     await chars.load()
@@ -108,8 +127,8 @@ async function duplicate(character: Character) {
     await createCharacter(next)
     ui.addToast('已创建副本', 'success')
     await chars.load()
-  } catch (e: any) {
-    ui.addToast(`复制失败：${e.message}`, 'error')
+  } catch (e: unknown) {
+    ui.addToast(`复制失败：${getApiErrorMessage(e)}`, 'error')
   }
 }
 
@@ -124,16 +143,16 @@ async function quickTagEdit(character: Character) {
   try {
     await chars.updateTags(character, arr)
     ui.addToast('标签已更新', 'success')
-  } catch (e: any) {
-    ui.addToast(`保存失败：${e.message}`, 'error')
+  } catch (e: unknown) {
+    ui.addToast(`保存失败：${getApiErrorMessage(e)}`, 'error')
   }
 }
 
 async function toggleFav(character: Character) {
   try {
     await chars.toggleFav(character)
-  } catch (e: any) {
-    ui.addToast(`收藏失败：${e.message}`, 'error')
+  } catch (e: unknown) {
+    ui.addToast(`收藏失败：${getApiErrorMessage(e)}`, 'error')
   }
 }
 
@@ -142,20 +161,25 @@ async function setAsCurrent(character: Character) {
     await mergeAttributes(character.avatar, {})
     ui.addToast(`已切到「${character.name}」`, 'success')
     router.push(`/chat/${encodeURIComponent(character.avatar)}`)
-  } catch (e: any) {
-    ui.addToast(`失败：${e.message}`, 'error')
+  } catch (e: unknown) {
+    ui.addToast(`失败：${getApiErrorMessage(e)}`, 'error')
   }
 }
 
 onMounted(async () => {
+  window.addEventListener('keydown', onMenuKeydown)
   if (!chars.characters.length) {
     await chars.load()
   }
 })
+
+onBeforeUnmount(() => {
+  window.removeEventListener('keydown', onMenuKeydown)
+})
 </script>
 
 <template>
-  <div class="min-h-screen bg-bg">
+  <div class="min-h-[100dvh] bg-bg">
     <AppPageHeader title="角色管理" :subtitle="`${chars.characters.length} 个角色`" back-to="/browse" mobile-only-back>
       <template #actions>
         <AppButton variant="secondary" size="sm" @click="importCards">导入</AppButton>
@@ -164,45 +188,19 @@ onMounted(async () => {
       </template>
     </AppPageHeader>
 
-    <main class="max-w-6xl mx-auto px-5 py-6 space-y-4 animate-fade-in-up">
-      <section class="relative overflow-hidden rounded-2xl ring-1 ring-border-subtle bg-hero-radial">
-        <div class="absolute -top-12 -right-12 w-56 h-56 rounded-full bg-brand-500/20 blur-3xl pointer-events-none" />
-        <div class="absolute -bottom-16 -left-8 w-56 h-56 rounded-full bg-accent-500/15 blur-3xl pointer-events-none" />
-        <div class="relative grid md:grid-cols-[1fr_auto] gap-5 items-end p-5 md:p-7">
-          <div>
-            <p class="text-[11px] uppercase tracking-[0.2em] text-brand-300/80 mb-2">角色库</p>
-            <h2 class="text-xl md:text-2xl font-semibold text-ink-primary">
-              管理你的 <span class="text-brand-300">{{ chars.characters.length }}</span> 个角色卡
-            </h2>
-            <p class="mt-1.5 text-xs md:text-sm text-ink-secondary">
-              导入 PNG / JSON / YAML / charx,所有数据写入 ST 原生角色目录,与原版 UI 兼容。
-            </p>
-          </div>
-          <div class="grid grid-cols-3 gap-2.5 md:min-w-[280px]">
-            <div class="rounded-xl bg-surface/70 backdrop-blur ring-1 ring-border-subtle p-3 text-center">
-              <p class="text-[10px] uppercase tracking-wider text-ink-muted">总数</p>
-              <p class="mt-1 text-xl font-semibold text-ink-primary tabular-nums">{{ chars.characters.length }}</p>
-            </div>
-            <div class="rounded-xl bg-surface/70 backdrop-blur ring-1 ring-border-subtle p-3 text-center">
-              <p class="text-[10px] uppercase tracking-wider text-ink-muted">收藏</p>
-              <p class="mt-1 text-xl font-semibold text-accent-300 tabular-nums">{{ chars.characters.filter((c) => c.fav === 'true').length }}</p>
-            </div>
-            <div class="rounded-xl bg-surface/70 backdrop-blur ring-1 ring-border-subtle p-3 text-center">
-              <p class="text-[10px] uppercase tracking-wider text-ink-muted">命中</p>
-              <p class="mt-1 text-xl font-semibold text-brand-300 tabular-nums">{{ filtered.length }}</p>
-            </div>
-          </div>
-        </div>
-      </section>
+    <main class="mx-auto max-w-6xl space-y-6 px-5 py-6 animate-fade-in-up md:px-8 lg:px-10">
+      <!-- 不再重复一个大 hero：标题交给 AppPageHeader，这里只留一条紧凑统计 -->
+      <div class="flex flex-wrap items-center gap-x-6 gap-y-1">
+        <span class="text-sm text-ink-secondary">总数 <span class="ml-1 font-semibold tabular-nums text-ink-primary">{{ chars.characters.length }}</span></span>
+        <span class="text-sm text-ink-secondary">收藏 <span class="ml-1 font-semibold tabular-nums text-accent-300">{{ favoriteCount }}</span></span>
+        <p class="text-xs text-ink-muted">导入 PNG / JSON / YAML / charx，数据写入 ST 原生角色目录。</p>
+      </div>
 
-      <div class="max-w-md">
-        <AppInput v-model="filter" placeholder="过滤名称 / 描述 / 标签">
-          <template #prefix>
-            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-            </svg>
-          </template>
-        </AppInput>
+      <div class="flex flex-wrap items-center gap-3">
+        <div class="min-w-0 max-w-md flex-1">
+          <SearchInput v-model="filter" placeholder="过滤名称 / 描述 / 标签" />
+        </div>
+        <p class="shrink-0 text-sm text-ink-muted">共 {{ filtered.length }} 个角色</p>
       </div>
 
       <div v-if="chars.loading" class="flex justify-center py-16">
@@ -256,7 +254,7 @@ onMounted(async () => {
                   :title="character.fav === 'true' ? '取消收藏' : '加入收藏'"
                   @click="toggleFav(character)"
                 >{{ character.fav === 'true' ? '★' : '☆' }}</button>
-                <span class="text-[10px] text-ink-muted shrink-0">{{ character.chat_size || 0 }} 条聊天</span>
+                <span class="text-[11px] text-ink-muted shrink-0">{{ character.chat_size || 0 }} 条聊天</span>
               </div>
               <p class="mt-0.5 text-xs text-ink-muted line-clamp-2 leading-relaxed">
                 {{ character.description || character.data?.description || '无描述' }}
@@ -265,31 +263,68 @@ onMounted(async () => {
                 <span
                   v-for="tag in (character.tags || character.data?.tags || []).slice(0, 6)"
                   :key="tag"
-                  class="text-[10px] px-1.5 py-0.5 rounded bg-brand-500/10 text-brand-300"
+                  class="text-[11px] px-1.5 py-0.5 rounded bg-brand-500/10 text-brand-300"
                 >{{ tag }}</span>
                 <button
-                  class="text-[10px] px-1.5 py-0.5 rounded ring-1 ring-border-subtle text-ink-muted hover:text-ink-secondary"
+                  class="text-[11px] px-1.5 py-0.5 rounded ring-1 ring-border-subtle text-ink-muted hover:text-ink-secondary"
                   @click="quickTagEdit(character)"
                 >编辑</button>
               </div>
               <button
                 v-else
-                class="mt-1.5 text-[10px] text-ink-muted hover:text-ink-secondary"
+                class="mt-1.5 text-[11px] text-ink-muted hover:text-ink-secondary"
                 @click="quickTagEdit(character)"
               >+ 添加标签</button>
             </div>
           </div>
-          <div class="flex flex-wrap items-center gap-1.5 text-xs">
+          <!-- 常用两项常驻，其余收进溢出菜单，行高不再被按钮换行撑开 -->
+          <div class="relative flex shrink-0 items-center gap-1.5 text-xs">
             <AppButton size="sm" variant="ghost" @click="router.push(`/character/${encodeURIComponent(character.avatar)}`)">详情</AppButton>
-            <AppButton size="sm" variant="ghost" @click="setAsCurrent(character)">设为当前</AppButton>
             <AppButton size="sm" variant="ghost" @click="router.push(`/character/${encodeURIComponent(character.avatar)}/edit`)">编辑</AppButton>
-            <AppButton size="sm" variant="ghost" @click="duplicate(character)">复制</AppButton>
-            <AppButton size="sm" variant="ghost" @click="exportCard(character.avatar, 'png')">PNG</AppButton>
-            <AppButton size="sm" variant="ghost" @click="exportCard(character.avatar, 'json')">JSON</AppButton>
-            <AppButton size="sm" variant="danger" @click="removeCharacter(character.avatar, character.name)">删除</AppButton>
+            <button
+              class="inline-flex h-7 w-7 items-center justify-center rounded-lg text-ink-secondary transition-colors hover:bg-ink-primary/5 hover:text-ink-primary"
+              :class="openMenu === character.avatar ? 'bg-ink-primary/5 text-ink-primary' : ''"
+              aria-haspopup="menu"
+              :aria-expanded="openMenu === character.avatar"
+              aria-label="更多操作"
+              @click="toggleMenu(character.avatar)"
+            >
+              <svg class="h-4 w-4" fill="currentColor" viewBox="0 0 24 24">
+                <circle cx="12" cy="5" r="1.75" />
+                <circle cx="12" cy="12" r="1.75" />
+                <circle cx="12" cy="19" r="1.75" />
+              </svg>
+            </button>
+            <template v-if="openMenu === character.avatar">
+              <!-- 透明遮罩负责「点击外部关闭」 -->
+              <div class="fixed inset-0 z-30" @click="openMenu = ''" />
+              <div
+                role="menu"
+                class="absolute right-0 top-full z-40 mt-1 w-36 overflow-hidden rounded-lg border border-border bg-surface-elevated py-1 shadow-elevated"
+              >
+                <button role="menuitem" class="row-menu-item" @click="runMenuAction(() => setAsCurrent(character))">设为当前</button>
+                <button role="menuitem" class="row-menu-item" @click="runMenuAction(() => duplicate(character))">复制副本</button>
+                <button role="menuitem" class="row-menu-item" @click="runMenuAction(() => exportCard(character.avatar, 'png'))">导出 PNG</button>
+                <button role="menuitem" class="row-menu-item" @click="runMenuAction(() => exportCard(character.avatar, 'json'))">导出 JSON</button>
+                <div class="my-1 h-px bg-border-subtle" />
+                <button
+                  role="menuitem"
+                  class="row-menu-item text-red-500 hover:text-red-600"
+                  @click="runMenuAction(() => removeCharacter(character.avatar, character.name))"
+                >
+                  删除角色
+                </button>
+              </div>
+            </template>
           </div>
         </div>
       </AppCard>
     </main>
   </div>
 </template>
+
+<style scoped>
+.row-menu-item {
+  @apply block w-full px-3 py-2 text-left text-xs text-ink-secondary transition-colors hover:bg-ink-primary/5 hover:text-ink-primary;
+}
+</style>

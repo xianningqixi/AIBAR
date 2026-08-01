@@ -151,6 +151,36 @@ export const providerConfigs: Record<string, ProviderConfig> = {
   },
 }
 
+// Keep this list aligned with the sources accepted by the shared-model backend.
+// Providers outside this list may exist in SillyTavern, but are not safe to
+// expose through AIBAR's shared credential flow.
+export const sharedModelProviderSources = [
+  'custom',
+  'openai',
+  'openrouter',
+  'makersuite',
+  'deepseek',
+  'mistralai',
+  'groq',
+  'xai',
+  'moonshot',
+  'siliconflow',
+  'cohere',
+  'perplexity',
+  'chutes',
+  'electronhub',
+  'nanogpt',
+  'aimlapi',
+  'fireworks',
+  'zai',
+  'pollinations',
+  'minimax',
+] as const
+
+export function isSharedModelProviderSource(source: string): boolean {
+  return (sharedModelProviderSources as readonly string[]).includes(source)
+}
+
 export function getProviderLabel(source: string): string {
   return providerConfigs[source]?.label || source
 }

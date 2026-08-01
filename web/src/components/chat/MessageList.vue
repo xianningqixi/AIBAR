@@ -13,6 +13,7 @@ const props = defineProps<{
   streaming?: string
   isStreaming?: boolean
   characterAvatar?: string
+  mediaActions?: boolean
 }>()
 
 const { render } = useMarkdown()
@@ -102,15 +103,19 @@ onMounted(() => nextTick(() => scrollToBottom()))
       </template>
 
       <template v-else-if="messages.length === 0 && !isStreaming">
-        <AppEmpty
-          icon="chat"
-          title="开始一段对话"
-          description="说点什么吧 — Shift+Enter 可以换行。"
-        />
+        <!-- 空态垂直居中：与消息区共用同一列宽 -->
+        <div class="flex h-full items-center justify-center">
+          <AppEmpty
+            icon="chat"
+            title="开始一段对话"
+            description="说点什么吧 — Shift+Enter 可以换行。"
+          />
+        </div>
       </template>
 
       <template v-else>
-        <div class="mx-auto max-w-4xl">
+        <!-- 消息列的左右留白只在这里给一次，气泡自身不再带 px -->
+        <div class="mx-auto max-w-4xl px-4">
           <MessageBubble
             v-for="(msg, idx) in messages"
             :key="idx"
@@ -119,6 +124,8 @@ onMounted(() => nextTick(() => scrollToBottom()))
             :show-actions="true"
             :is-last-assistant="idx === lastAssistantIndex"
             :character-avatar="characterAvatar"
+            :media-actions="mediaActions"
+            :actions-locked="isStreaming"
             @edit="(msgIdx: number, content: string) => $emit('edit', msgIdx, content)"
             @delete="$emit('delete', idx)"
             @regenerate="$emit('regenerate')"
@@ -127,7 +134,7 @@ onMounted(() => nextTick(() => scrollToBottom()))
             @generate-image="$emit('generateImage', idx)"
           />
 
-          <div v-if="isStreaming" class="flex gap-2.5 px-4 py-2 animate-fade-in">
+          <div v-if="isStreaming" class="flex gap-2.5 py-2 animate-fade-in">
             <div class="mt-0.5 shrink-0">
               <img
                 v-if="streamingAvatarUrl"
@@ -145,7 +152,7 @@ onMounted(() => nextTick(() => scrollToBottom()))
             <div class="max-w-[min(88%,48rem)] rounded-2xl rounded-bl-md border border-border-subtle bg-surface-elevated/90 px-4 py-2.5 text-sm leading-relaxed text-ink-primary shadow-sm backdrop-blur-sm">
               <div
                 v-if="streamingHtml"
-                class="prose prose-invert prose-sm max-w-none break-words"
+                class="prose max-w-none break-words"
                 v-html="streamingHtml"
               />
               <span v-else class="inline-flex items-center gap-1 py-1">

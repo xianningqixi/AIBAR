@@ -9,15 +9,13 @@ export interface ReplyDraftOption {
 }
 
 const REPLY_CONTEXT_MESSAGES = 32
-const REPLY_DRAFT_PRESET = {
-  id: 'aibar-reply-draft',
-  name: 'Reply Draft',
+// 拟回复用的采样覆盖：直接叠加到 profile 上，这样才会真正进入请求体
+const REPLY_DRAFT_OVERRIDES = {
   temperature: 0.85,
   topP: 0.95,
   maxTokens: 1800,
   presencePenalty: 0.2,
   frequencyPenalty: 0.1,
-  systemPrompt: '',
 }
 
 function asString(value: unknown): string {
@@ -98,13 +96,12 @@ export function buildReplyDraftPayload(
   ].filter(Boolean).join('\n')
 
   return buildChatCompletionPayload(
-    profile,
+    { ...profile, ...REPLY_DRAFT_OVERRIDES },
     [
       { role: 'system', content: systemPrompt },
       { role: 'user', content: userPrompt },
     ],
     character,
-    REPLY_DRAFT_PRESET,
     options.userName,
   )
 }

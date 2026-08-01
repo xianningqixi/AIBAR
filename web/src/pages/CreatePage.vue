@@ -6,6 +6,7 @@ import { useUiStore } from '@/stores/ui'
 import { listStories } from '@/api/stories'
 import type { Character, StoryCard } from '@/api/types'
 import AppButton from '@/components/ui/AppButton.vue'
+import AppPageHeader from '@/components/ui/AppPageHeader.vue'
 
 type CreateMode = 'simple' | 'advanced'
 type CreateKind = 'story' | 'character'
@@ -131,35 +132,27 @@ onMounted(async () => {
 </script>
 
 <template>
-  <div class="min-h-screen bg-bg">
-    <header class="sticky top-0 z-20 border-b border-border-subtle bg-bg/85 backdrop-blur md:hidden">
-      <div class="flex items-center justify-between gap-3 px-5 py-4">
-        <button class="flex items-center gap-3 text-left" @click="router.push('/browse')">
-          <div class="flex h-10 w-10 items-center justify-center rounded-xl bg-brand-gradient font-bold text-white shadow-glow">
-            A
-          </div>
-          <div>
-            <h1 class="text-lg font-semibold text-ink-primary">AIBAR</h1>
-            <p class="text-xs text-ink-muted">创作</p>
-          </div>
-        </button>
-      </div>
-    </header>
+  <div class="min-h-[100dvh] bg-bg">
+    <AppPageHeader
+      title="创作"
+      subtitle="从一句想法开始，做成角色卡或故事开局"
+      back-to="/browse"
+      mobile-only-back
+    >
+      <template #actions>
+        <AppButton size="sm" variant="secondary" @click="router.push('/hub')">导入资源</AppButton>
+      </template>
+    </AppPageHeader>
 
-    <main class="w-full flex-1 px-5 py-5 md:px-8 lg:px-10">
+    <main class="w-full flex-1 px-5 py-6 md:px-8 lg:px-10">
       <div class="mx-auto max-w-6xl space-y-6 animate-fade-in-up">
-        <header class="flex items-center justify-between gap-3">
-          <h2 class="text-2xl font-semibold tracking-tight text-ink-primary">创作</h2>
-          <AppButton size="md" variant="secondary" @click="router.push('/hub')">导入资源</AppButton>
-        </header>
-
         <!-- 创建向导：类型 + 方式 + 说明 + 主操作集中在一张卡里 -->
         <section class="rounded-2xl bg-surface p-5 ring-1 ring-border-subtle md:p-6">
           <div class="flex flex-col gap-5 md:flex-row md:items-center md:justify-between">
             <div class="min-w-0 space-y-4">
               <div class="flex flex-wrap gap-x-8 gap-y-4">
                 <div>
-                  <p class="mb-1.5 text-[11px] font-semibold uppercase tracking-wider text-ink-muted">创作什么</p>
+                  <p class="mb-1.5 text-[11px] font-semibold text-ink-muted">创作什么</p>
                   <div class="inline-flex rounded-xl bg-surface-sunken p-1 ring-1 ring-border-subtle">
                     <button
                       v-for="kind in kindTabs"
@@ -175,7 +168,7 @@ onMounted(async () => {
                   </div>
                 </div>
                 <div>
-                  <p class="mb-1.5 text-[11px] font-semibold uppercase tracking-wider text-ink-muted">怎么开始</p>
+                  <p class="mb-1.5 text-[11px] font-semibold text-ink-muted">怎么开始</p>
                   <div class="inline-flex rounded-xl bg-surface-sunken p-1 ring-1 ring-border-subtle">
                     <button
                       v-for="mode in modeCards"
@@ -221,10 +214,10 @@ onMounted(async () => {
               <button
                 v-for="story in sortedStories"
                 :key="story.id"
-                class="rounded-2xl bg-surface p-5 text-left ring-1 ring-border-subtle transition-all duration-200 hover:-translate-y-0.5 hover:ring-brand-500/40 hover:shadow-glow"
+                class="flex h-full flex-col rounded-2xl bg-surface p-5 text-left ring-1 ring-border-subtle transition-all duration-200 hover:-translate-y-0.5 hover:ring-brand-500/40 hover:shadow-glow"
                 @click="openStory(story)"
               >
-                <div class="flex gap-4">
+                <div class="flex flex-1 gap-4">
                   <img
                     v-if="storyThumbnail(story)"
                     :src="storyThumbnail(story)"
@@ -234,10 +227,10 @@ onMounted(async () => {
                   <div v-else class="flex h-20 w-14 shrink-0 items-center justify-center rounded-lg bg-surface-sunken text-lg font-semibold text-brand-300 ring-1 ring-border-subtle">
                     S
                   </div>
-                  <div class="min-w-0 flex-1">
+                  <div class="flex min-w-0 flex-1 flex-col">
                     <h4 class="truncate text-base font-semibold text-ink-primary">{{ story.title }}</h4>
                     <p class="mt-1 truncate text-sm text-ink-muted">{{ getStoryCharacter(story)?.name || '角色已缺失' }}</p>
-                    <p class="mt-2 line-clamp-2 min-h-[2.75rem] text-sm leading-relaxed text-ink-secondary">
+                    <p class="mt-auto line-clamp-2 min-h-[2.75rem] pt-2 text-sm leading-relaxed text-ink-secondary">
                       {{ story.summary || story.scenario || '这个故事开局还没有简介。' }}
                     </p>
                   </div>
@@ -256,10 +249,10 @@ onMounted(async () => {
               <button
                 v-for="character in sortedCharacters"
                 :key="character.avatar"
-                class="rounded-2xl bg-surface p-5 text-left ring-1 ring-border-subtle transition-all duration-200 hover:-translate-y-0.5 hover:ring-brand-500/40 hover:shadow-glow"
+                class="flex h-full flex-col rounded-2xl bg-surface p-5 text-left ring-1 ring-border-subtle transition-all duration-200 hover:-translate-y-0.5 hover:ring-brand-500/40 hover:shadow-glow"
                 @click="openCharacter(character)"
               >
-                <div class="flex gap-4">
+                <div class="flex flex-1 gap-4">
                   <img
                     v-if="character.avatar && character.avatar !== 'none'"
                     :src="`/thumbnail?type=avatar&file=${encodeURIComponent(character.avatar)}`"
@@ -269,10 +262,10 @@ onMounted(async () => {
                   <div v-else class="flex h-20 w-14 shrink-0 items-center justify-center rounded-lg bg-surface-sunken text-lg font-semibold text-brand-300 ring-1 ring-border-subtle">
                     C
                   </div>
-                  <div class="min-w-0 flex-1">
+                  <div class="flex min-w-0 flex-1 flex-col">
                     <h4 class="truncate text-base font-semibold text-ink-primary">{{ character.name }}</h4>
                     <p class="mt-1 text-sm text-ink-muted">{{ character.chat_size ? `${character.chat_size} 条聊天` : '未开始' }}</p>
-                    <p class="mt-2 line-clamp-2 min-h-[2.75rem] text-sm leading-relaxed text-ink-secondary">
+                    <p class="mt-auto line-clamp-2 min-h-[2.75rem] pt-2 text-sm leading-relaxed text-ink-secondary">
                       {{ getCharacterDescription(character) }}
                     </p>
                   </div>

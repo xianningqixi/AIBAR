@@ -1,39 +1,51 @@
 import type { Character, ChatMessage, ModelProfile, Preset } from '@/api/types'
 import type { ModItem } from '@/stores/mods'
-import { providerConfigs } from './providers'
 import { normalizeText, trimText } from './format'
 
+const HISTORY_CHAR_BUDGET = 48_000
+const HISTORY_MESSAGE_LIMIT = 120
+
+export function selectRecentMessages(
+  sourceMessages: ChatMessage[],
+  charBudget = HISTORY_CHAR_BUDGET,
+): Array<{ role: 'assistant' | 'user'; content: string }> {
+  const selected: Array<{ role: 'assistant' | 'user'; content: string }> = []
+  let used = 0
+  for (let index = sourceMessages.length - 1; index >= 0 && selected.length < HISTORY_MESSAGE_LIMIT; index -= 1) {
+    const message = sourceMessages[index]
+    const content = String(message.content || '')
+    const cost = content.length + 16
+    if (selected.length && used + cost > charBudget) break
+    selected.push({
+      role: message.role === 'assistant' ? 'assistant' : 'user',
+      content: selected.length ? content : content.slice(-charBudget),
+    })
+    used += Math.min(cost, charBudget)
+  }
+  return selected.reverse()
+}
+
+// 采样参数一律来自 ModelProfile：需要临时覆盖的调用方请展开 profile 后再传入
 export function buildChatCompletionPayload(
   config: ModelProfile,
   messages: Array<{ role: string; content: string }>,
   character: Character,
-  preset?: Preset | null,
   userName = 'User',
 ): Record<string, unknown> {
   const payload: Record<string, unknown> = {
     type: 'normal',
+    aibar_model_id: config.id,
     messages,
     model: config.model,
-    temperature: preset?.temperature ?? config.temperature,
-    max_tokens: preset?.maxTokens ?? config.maxTokens,
+    temperature: config.temperature,
+    max_tokens: config.maxTokens,
     // stream 由发送方决定：apiStream 注入 stream:true，非流式请求缺省即为 false
-    top_p: preset?.topP ?? config.topP,
-    presence_penalty: preset?.presencePenalty ?? config.presencePenalty,
-    frequency_penalty: preset?.frequencyPenalty ?? config.frequencyPenalty,
+    top_p: config.topP,
+    presence_penalty: config.presencePenalty,
+    frequency_penalty: config.frequencyPenalty,
     chat_completion_source: config.source,
     user_name: userName,
     char_name: character.name || 'Character',
-  }
-
-  if (config.secretId) {
-    payload.secret_id = config.secretId
-  }
-
-  const provider = providerConfigs[config.source]
-  if (config.source === 'custom') {
-    payload.custom_url = config.endpoint
-  } else if (provider?.endpointKey === 'reverse_proxy' && config.endpoint) {
-    payload.reverse_proxy = config.endpoint
   }
 
   return payload
@@ -108,10 +120,7 @@ export function buildGeneratePayload(
   personaDescription = '',
   memorySummary = '',
 ): Record<string, unknown> {
-  const recentMessages = sourceMessages.slice(-24).map((m) => ({
-    role: m.role === 'assistant' ? 'assistant' : 'user',
-    content: m.content,
-  }))
+  const recentMessages = selectRecentMessages(sourceMessages)
 
   const userSuffix = mods
     .filter((m) => m.enabled && m.position === 'user_suffix')
@@ -141,5 +150,5 @@ export function buildGeneratePayload(
   )
   const messages = [{ role: 'system', content: systemPrompt }, ...recentMessages]
 
-  return buildChatCompletionPayload(config, messages, character, preset, userName)
+  return buildChatCompletionPayload(config, messages, character, userName)
 }

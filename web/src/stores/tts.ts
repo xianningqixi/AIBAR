@@ -103,36 +103,50 @@ export const useTtsStore = defineStore('tts', () => {
   const isLoadingAudio = ref(false)
   let currentAudio: HTMLAudioElement | null = null
   let persistTimer: ReturnType<typeof setTimeout> | null = null
+  let storeVersion = 0
+  let playbackVersion = 0
+  let loadPromise: Promise<void> | null = null
 
   const enabled = computed(() => settings.value.enabled)
   const defaultProvider = computed(() => settings.value.defaultProvider)
 
   async function load() {
+    if (loadPromise) return loadPromise
     if (loaded.value) return
-    try {
-      const stored = await loadAibarSettings<{ simple_ui_tts?: TtsSettings }>()
-      settings.value = normalizeSettings(stored.simple_ui_tts)
-    } catch (e) {
-      console.warn('Load TTS settings failed', e)
-    } finally {
-      loaded.value = true
-    }
+    const version = storeVersion
+    const promise = (async () => {
+      try {
+        const stored = await loadAibarSettings<{ simple_ui_tts?: TtsSettings }>()
+        if (version === storeVersion) settings.value = normalizeSettings(stored.simple_ui_tts)
+      } catch (e) {
+        if (version === storeVersion) console.warn('Load TTS settings failed', e)
+      } finally {
+        if (version === storeVersion) {
+          loaded.value = true
+          loadPromise = null
+        }
+      }
+    })()
+    loadPromise = promise
+    return promise
   }
 
   function schedulePersist() {
     if (!loaded.value) return
     if (persistTimer) clearTimeout(persistTimer)
+    const version = storeVersion
     persistTimer = setTimeout(() => {
       persistTimer = null
-      void persistNow()
+      if (version === storeVersion) void persistNow(version)
     }, 300)
   }
 
-  async function persistNow() {
+  async function persistNow(version = storeVersion) {
+    if (version !== storeVersion) return
     try {
       await saveAibarSettings({ simple_ui_tts: settings.value })
     } catch (e) {
-      console.warn('Persist TTS settings failed', e)
+      if (version === storeVersion) console.warn('Persist TTS settings failed', e)
     }
   }
 
@@ -213,6 +227,7 @@ export const useTtsStore = defineStore('tts', () => {
   }
 
   function stopPlayback() {
+    playbackVersion += 1
     if (currentAudio) {
       currentAudio.pause()
       currentAudio.src = ''
@@ -230,6 +245,8 @@ export const useTtsStore = defineStore('tts', () => {
       return
     }
     stopPlayback()
+    const version = storeVersion
+    const requestId = playbackVersion
     const effective = getEffectiveVoice(avatarOverride)
     if (!effective) {
       throw new Error('当前 TTS 渠道未启用或没有可用音色，请到设置 → 语音配置')
@@ -245,6 +262,7 @@ export const useTtsStore = defineStore('tts', () => {
         endpoint: effective.endpoint,
         extra: settings.value[effective.provider].extra,
       })
+      if (version !== storeVersion || requestId !== playbackVersion) return
       const url = URL.createObjectURL(blob)
       const audio = new Audio(url)
       currentAudio = audio
@@ -268,11 +286,25 @@ export const useTtsStore = defineStore('tts', () => {
       })
       await audio.play()
     } catch (e) {
+      if (version !== storeVersion || requestId !== playbackVersion) return
       isLoadingAudio.value = false
       isPlaying.value = false
       currentMessageKey.value = ''
       throw e
     }
+  }
+
+  function reset() {
+    storeVersion += 1
+    if (persistTimer) clearTimeout(persistTimer)
+    persistTimer = null
+    loadPromise = null
+    stopPlayback()
+    settings.value = normalizeSettings({})
+    loaded.value = false
+    currentMessageKey.value = ''
+    isPlaying.value = false
+    isLoadingAudio.value = false
   }
 
   return {
@@ -293,5 +325,6 @@ export const useTtsStore = defineStore('tts', () => {
     getEffectiveVoice,
     play,
     stopPlayback,
+    reset,
   }
 })

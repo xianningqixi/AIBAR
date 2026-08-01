@@ -216,7 +216,7 @@ export async function generateImage(settings: ImageGenSettings, request: ImageGe
           reverse_proxy: settings.openaiBaseUrl.trim() || undefined,
         })
       } catch (error) {
-        throw new Error(openAiImageErrorMessage(error))
+        throw new Error(openAiImageErrorMessage(error), { cause: error })
       }
       const image = data?.data?.[0]?.b64_json
       if (!image) throw new Error('OpenAI 没有返回 base64 图片')

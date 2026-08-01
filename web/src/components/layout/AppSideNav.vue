@@ -1,9 +1,14 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useRoute, useRouter, type RouteLocationRaw } from 'vue-router'
+import { useSessionStore } from '@/stores/session'
+import { useBillingStore } from '@/stores/billing'
+import { formatPoints } from '@/lib/points'
 
 const route = useRoute()
 const router = useRouter()
+const session = useSessionStore()
+const billing = useBillingStore()
 
 const mainNav: Array<{ key: string; label: string; to: string; names: string[]; icon: string }> = [
   {
@@ -22,9 +27,9 @@ const mainNav: Array<{ key: string; label: string; to: string; names: string[]; 
   },
   {
     key: 'hub',
-    label: '社区 Hub',
+    label: '社区作品',
     to: '/hub',
-    names: ['communityHub'],
+    names: ['communityHub', 'communityWork', 'publish'],
     icon: 'M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z',
   },
 ]
@@ -55,13 +60,13 @@ const settingsActive = computed(() => route.name === 'settings')
 </script>
 
 <template>
-  <aside class="hidden md:flex h-screen w-64 shrink-0 flex-col overflow-y-auto border-r border-border-subtle bg-surface/70 px-5 py-6 sticky top-0">
+  <aside class="hidden md:flex h-[100dvh] w-64 shrink-0 flex-col overflow-y-auto border-r border-border-subtle bg-surface/70 px-5 py-6 sticky top-0">
     <button class="flex items-center gap-3 text-left" @click="router.push('/browse')">
       <div class="flex h-11 w-11 items-center justify-center rounded-xl bg-brand-gradient text-lg font-bold text-white shadow-glow">
         A
       </div>
       <div class="leading-tight">
-        <h1 class="text-xl font-semibold tracking-tight text-ink-primary">AIBAR</h1>
+        <h1 class="text-xl font-semibold text-ink-primary">AIBAR</h1>
         <p class="text-xs text-ink-muted">选角色，开聊</p>
       </div>
     </button>
@@ -71,7 +76,7 @@ const settingsActive = computed(() => route.name === 'settings')
         v-for="item in mainNav"
         :key="item.key"
         :class="[
-          'w-full flex items-center gap-3 rounded-xl px-4 py-3 text-left text-sm font-semibold transition-all',
+          'w-full flex items-center gap-3 rounded-lg px-3 py-2.5 text-left text-sm font-semibold transition-all',
           activeMain === item.key
             ? 'bg-brand-500/15 text-brand-200 ring-1 ring-brand-500/35'
             : 'text-ink-secondary hover:bg-ink-primary/5 hover:text-ink-primary',
@@ -87,20 +92,20 @@ const settingsActive = computed(() => route.name === 'settings')
 
     <div class="mt-auto space-y-4 border-t border-border-subtle pt-4">
       <div>
-        <p class="px-3 text-[11px] font-semibold uppercase tracking-[0.16em] text-ink-muted">资料库</p>
+        <p class="px-3 text-[11px] font-semibold text-ink-muted">资料库</p>
         <div class="mt-1.5 space-y-0.5">
           <button
             v-for="item in libraryNav"
             :key="item.label"
             :class="[
-              'flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left text-sm transition-colors',
+              'flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left text-sm transition-colors',
               item.isActive()
                 ? 'bg-brand-500/10 text-brand-200'
                 : 'text-ink-secondary hover:bg-ink-primary/5 hover:text-ink-primary',
             ]"
             @click="router.push(item.to)"
           >
-            <svg class="h-[18px] w-[18px] shrink-0 opacity-70" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <svg class="h-5 w-5 shrink-0 opacity-70" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" :d="item.icon" />
             </svg>
             {{ item.label }}
@@ -109,21 +114,38 @@ const settingsActive = computed(() => route.name === 'settings')
       </div>
 
       <button
+        class="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left transition-colors hover:bg-ink-primary/5"
+        :class="route.name === 'account' || route.name === 'admin' ? 'bg-brand-500/10 text-brand-300' : 'text-ink-secondary'"
+        @click="router.push('/account')"
+      >
+        <span class="flex h-5 w-5 shrink-0 items-center justify-center rounded bg-brand-gradient text-[10px] font-semibold text-white">
+          {{ session.user?.name?.slice(0, 1) || 'A' }}
+        </span>
+        <span class="min-w-0 flex-1">
+          <span class="block truncate text-sm font-semibold">{{ session.user?.name || '我的账号' }}</span>
+          <span class="block truncate text-[11px] text-ink-muted">@{{ session.user?.handle }} · {{ formatPoints(billing.available) }} 积分</span>
+        </span>
+        <span v-if="session.isAdmin" class="rounded bg-brand-500/10 px-1.5 py-0.5 text-xs font-semibold text-brand-300">管理</span>
+      </button>
+
+      <button
         :class="[
-          'flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm font-semibold transition-colors',
+          'flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left text-sm font-semibold transition-colors',
           settingsActive
             ? 'bg-brand-500/10 text-brand-200 ring-1 ring-brand-500/35'
             : 'text-ink-secondary ring-1 ring-border-subtle hover:bg-ink-primary/5 hover:text-ink-primary',
         ]"
         @click="router.push('/settings')"
       >
-        <svg class="h-[18px] w-[18px] shrink-0 opacity-70" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <svg class="h-5 w-5 shrink-0 opacity-70" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
         </svg>
         <span class="flex-1">
           设置
-          <span class="mt-0.5 block text-[11px] font-normal text-ink-muted">模型 · 参数 · 图像 · 语音 · 身份</span>
+          <span class="mt-0.5 block text-[11px] font-normal text-ink-muted">
+            {{ session.isAdmin ? '模型 · 提示词 · 图像 · 语音 · 身份' : '提示词 · 身份' }}
+          </span>
         </span>
         <svg class="h-4 w-4 shrink-0 opacity-50" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" />

@@ -1,6 +1,4 @@
-export const DEFAULT_TELEGRAM_BOT_ADMIN_URL = 'http://127.0.0.1:8787'
-export const TELEGRAM_BOT_ADMIN_URL_KEY = 'aibar-telegram-bot-admin-url'
-export const TELEGRAM_BOT_ADMIN_TOKEN_KEY = 'aibar-telegram-bot-admin-token'
+import { apiPost } from './client'
 
 export interface TelegramBotInfo {
   id: number
@@ -18,6 +16,8 @@ export interface TelegramBotStatus {
     tokenPreview: string
     allowedUserIds: string[]
     stBaseUrl: string
+    stUserHandle: string
+    stPasswordConfigured: boolean
     modelProfileId: string
     maxCompletionTokens: number
     pollTimeoutSeconds: number
@@ -47,7 +47,9 @@ export interface TelegramBotConfigInput {
   token?: string
   clearToken?: boolean
   allowedUserIds?: string
-  stBaseUrl?: string
+  stUserHandle?: string
+  stUserPassword?: string
+  clearStUserPassword?: boolean
   modelProfileId?: string
   maxCompletionTokens?: number
   pollTimeoutSeconds?: number
@@ -77,94 +79,52 @@ export interface FullDebugResult {
 }
 
 interface AdminRequestOptions {
-  baseUrl: string
   adminToken?: string
 }
 
-export function normalizeTelegramBotAdminUrl(value: string): string {
-  return (value || DEFAULT_TELEGRAM_BOT_ADMIN_URL).trim().replace(/\/+$/, '')
-}
-
-export function getStoredTelegramBotAdminUrl(): string {
-  return normalizeTelegramBotAdminUrl(localStorage.getItem(TELEGRAM_BOT_ADMIN_URL_KEY) || DEFAULT_TELEGRAM_BOT_ADMIN_URL)
-}
-
-async function adminRequest<T>(
-  options: AdminRequestOptions,
-  path: string,
-  init: RequestInit = {},
-): Promise<T> {
-  const headers: Record<string, string> = {
-    ...(init.body ? { 'Content-Type': 'application/json' } : {}),
-    ...(options.adminToken ? { 'X-AIBAR-Admin-Token': options.adminToken } : {}),
+function proxyBody(options: AdminRequestOptions, body: object = {}): Record<string, unknown> {
+  return {
+    ...body,
+    ...(options.adminToken ? { adminToken: options.adminToken } : {}),
   }
-  const response = await fetch(`${normalizeTelegramBotAdminUrl(options.baseUrl)}${path}`, {
-    ...init,
-    headers: {
-      ...headers,
-      ...(init.headers || {}),
-    },
-  })
-  const text = await response.text()
-  let data: any = null
-  try {
-    data = text ? JSON.parse(text) : null
-  } catch {
-    data = text
-  }
-  if (!response.ok) {
-    throw new Error(data?.message || `Telegram Bot Admin ${response.status}`)
-  }
-  return data as T
 }
 
 export function getTelegramBotStatus(options: AdminRequestOptions): Promise<TelegramBotStatus> {
-  return adminRequest<TelegramBotStatus>(options, '/api/status')
+  return apiPost<TelegramBotStatus>('/api/aibar/telegram/status', proxyBody(options))
 }
 
 export function saveTelegramBotConfig(
   options: AdminRequestOptions,
   input: TelegramBotConfigInput,
 ): Promise<TelegramBotStatus> {
-  return adminRequest<TelegramBotStatus>(options, '/api/config', {
-    method: 'POST',
-    body: JSON.stringify(input),
-  })
+  return apiPost<TelegramBotStatus>('/api/aibar/telegram/config', proxyBody(options, input))
 }
 
 export function restartTelegramBotPolling(options: AdminRequestOptions): Promise<TelegramBotStatus> {
-  return adminRequest<TelegramBotStatus>(options, '/api/polling/restart', {
-    method: 'POST',
-    body: '{}',
-  })
+  return apiPost<TelegramBotStatus>('/api/aibar/telegram/polling/restart', proxyBody(options))
 }
 
 export function debugTelegramBot(
   options: AdminRequestOptions,
   input: { token?: string } = {},
 ): Promise<TelegramDebugResult> {
-  return adminRequest<TelegramDebugResult>(options, '/api/debug/telegram', {
-    method: 'POST',
-    body: JSON.stringify(input),
-  })
+  return apiPost<TelegramDebugResult>('/api/aibar/telegram/debug/telegram', proxyBody(options, input))
 }
 
 export function debugTelegramSt(
   options: AdminRequestOptions,
-  input: { stBaseUrl?: string } = {},
+  input: { stUserHandle?: string; stUserPassword?: string } = {},
 ): Promise<StDebugResult> {
-  return adminRequest<StDebugResult>(options, '/api/debug/st', {
-    method: 'POST',
-    body: JSON.stringify(input),
-  })
+  return apiPost<StDebugResult>('/api/aibar/telegram/debug/st', proxyBody(options, input))
 }
 
 export function debugTelegramFull(
   options: AdminRequestOptions,
-  input: { token?: string; stBaseUrl?: string } = {},
+  input: {
+    token?: string
+    stUserHandle?: string
+    stUserPassword?: string
+  } = {},
 ): Promise<FullDebugResult> {
-  return adminRequest<FullDebugResult>(options, '/api/debug/full', {
-    method: 'POST',
-    body: JSON.stringify(input),
-  })
+  return apiPost<FullDebugResult>('/api/aibar/telegram/debug/full', proxyBody(options, input))
 }

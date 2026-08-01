@@ -14,17 +14,30 @@ type ServerChatMessage = {
   extra?: { aibar?: { images?: ChatMessage['images'] } }
 }
 
+// 后端 /api/chats/get 的 strict 契约（SillyTavern/src/endpoints/chats.js）：
+// - 数组：聊天内容；文件不存在或为空时是 []（全新聊天）
+// - 空对象 {}：角色聊天目录尚不存在（同样是全新聊天）
+// - HTTP 500 {error}：文件读取或 JSONL 解析失败
+// 任何其他形状都视为异常，绝不能当成空聊天，否则下一次保存会覆盖掉损坏但仍可挽救的存档。
+function normalizeStrictChatData(data: unknown): ServerChatMessage[] {
+  if (Array.isArray(data)) return data as ServerChatMessage[]
+  if (data && typeof data === 'object' && Object.keys(data).length === 0) return []
+  throw new Error('聊天数据格式异常，已停止加载以保护原始存档')
+}
+
 export async function fetchChat(
   chName: string,
   fileName: string,
   avatarUrl: string,
 ): Promise<{ metadata: Record<string, unknown>; messages: ChatMessage[] }> {
-  const data = await apiPost<ServerChatMessage[]>('/api/chats/get', {
+  // strict：让后端在读不动 / 解析失败时返回 500，而不是伪装成空聊天
+  const data = await apiPost<unknown>('/api/chats/get', {
     ch_name: chName,
     file_name: fileName,
     avatar_url: avatarUrl,
+    strict: true,
   })
-  const arr = Array.isArray(data) ? data : []
+  const arr = normalizeStrictChatData(data)
   const header = arr.find((m) => m?.chat_metadata)
   const metadata: Record<string, unknown> = {
     simple_ui: true,

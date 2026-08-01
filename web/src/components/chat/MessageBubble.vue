@@ -4,6 +4,7 @@ import type { ChatMessage } from '@/api/types'
 import { useMarkdown } from '@/composables/useMarkdown'
 import { useTtsStore } from '@/stores/tts'
 import { useUiStore } from '@/stores/ui'
+import { getApiErrorMessage } from '@/api/client'
 
 const props = defineProps<{
   message: ChatMessage
@@ -11,6 +12,9 @@ const props = defineProps<{
   showActions?: boolean
   isLastAssistant?: boolean
   characterAvatar?: string
+  mediaActions?: boolean
+  // 生成中：所有按下标改写消息的操作都要锁住
+  actionsLocked?: boolean
 }>()
 
 defineEmits<{
@@ -36,7 +40,7 @@ const hasReasoning = computed(() => !isUser.value && Boolean(props.message.reaso
 const messageKey = computed(() => `${props.characterAvatar || ''}#${props.index}`)
 const ttsActive = computed(() => tts.currentMessageKey === messageKey.value)
 const ttsBusy = computed(() => ttsActive.value && (tts.isLoadingAudio || tts.isPlaying))
-const canReadAloud = computed(() => props.message.role !== 'system' && Boolean(props.message.content.trim()))
+const canReadAloud = computed(() => props.mediaActions && props.message.role !== 'system' && Boolean(props.message.content.trim()))
 
 const avatarUrl = computed(() => {
   if (isUser.value) return ''
@@ -50,6 +54,7 @@ const hasSwipes = computed(
 )
 
 function startEditing() {
+  if (props.actionsLocked) return
   editContent.value = props.message.content
   editing.value = true
 }
@@ -73,8 +78,8 @@ async function togglePlay() {
   }
   try {
     await tts.play(props.message.content, messageKey.value, avatar)
-  } catch (e: any) {
-    ui.addToast(`播放失败：${e.message || '请检查配置'}`, 'error')
+  } catch (e: unknown) {
+    ui.addToast(`播放失败：${getApiErrorMessage(e, '请检查配置')}`, 'error')
   }
 }
 </script>
@@ -82,7 +87,7 @@ async function togglePlay() {
 <template>
   <div
     :class="[
-      'group flex gap-2.5 px-4 py-2 animate-fade-in-up',
+      'group flex gap-2.5 py-2 animate-fade-in-up',
       isUser ? 'flex-row-reverse' : 'flex-row',
     ]"
   >
@@ -124,7 +129,7 @@ async function togglePlay() {
       >
         <div v-if="hasReasoning" class="mb-2">
           <button
-            class="flex items-center gap-1.5 text-[10px] uppercase tracking-wider text-ink-muted hover:text-ink-secondary transition-colors font-medium"
+            class="flex items-center gap-1.5 text-[11px] text-ink-muted hover:text-ink-secondary transition-colors font-medium"
             @click="thinkingOpen = !thinkingOpen"
           >
             <svg
@@ -162,7 +167,7 @@ async function togglePlay() {
             </button>
           </div>
         </div>
-        <div v-else class="prose prose-invert prose-sm max-w-none break-words" v-html="renderedContent" />
+        <div v-else class="prose max-w-none break-words" v-html="renderedContent" />
 
         <div v-if="message.images?.length" class="mt-3 grid grid-cols-2 gap-2">
           <a
@@ -189,11 +194,11 @@ async function togglePlay() {
       >
         <!-- Swipe 翻页 -->
         <template v-if="hasSwipes">
-          <button class="action-btn" title="上一条" @click="$emit('swipe', index, -1)">
+          <button class="action-btn" title="上一条" :disabled="actionsLocked" @click="$emit('swipe', index, -1)">
             <svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7" /></svg>
           </button>
           <span class="px-0.5 text-[11px] tabular-nums text-ink-secondary">{{ (message.swipe_id ?? 0) + 1 }}/{{ message.swipes!.length }}</span>
-          <button class="action-btn" title="下一条" @click="$emit('swipe', index, 1)">
+          <button class="action-btn" title="下一条" :disabled="actionsLocked" @click="$emit('swipe', index, 1)">
             <svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" /></svg>
           </button>
           <span class="mx-0.5 h-3 w-px bg-border-subtle" />
@@ -210,23 +215,23 @@ async function togglePlay() {
           <svg v-else class="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" /></svg>
         </button>
 
-        <button v-if="isLastAssistant && !isUser" class="action-btn" title="重新生成" @click="$emit('regenerate')">
+        <button v-if="isLastAssistant && !isUser" class="action-btn" title="重新生成" :disabled="actionsLocked" @click="$emit('regenerate')">
           <svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
         </button>
 
-        <button v-if="isLastAssistant && !isUser" class="action-btn" title="续写" @click="$emit('continue')">
+        <button v-if="isLastAssistant && !isUser" class="action-btn" title="续写" :disabled="actionsLocked" @click="$emit('continue')">
           <svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 5l7 7-7 7M5 5l7 7-7 7" /></svg>
         </button>
 
-        <button class="action-btn" title="生成配图" @click="$emit('generateImage', index)">
+        <button v-if="mediaActions" class="action-btn" title="生成配图" :disabled="actionsLocked" @click="$emit('generateImage', index)">
           <svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>
         </button>
 
-        <button class="action-btn" title="编辑" @click="startEditing">
+        <button class="action-btn" title="编辑" :disabled="actionsLocked" @click="startEditing">
           <svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
         </button>
 
-        <button class="action-btn hover:text-red-500" title="删除" @click="$emit('delete', index)">
+        <button class="action-btn hover:text-red-500" title="删除" :disabled="actionsLocked" @click="$emit('delete', index)">
           <svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
         </button>
       </div>
@@ -237,5 +242,8 @@ async function togglePlay() {
 <style scoped>
 .action-btn {
   @apply inline-flex h-7 w-7 items-center justify-center rounded-lg transition-colors hover:bg-ink-primary/[0.06] hover:text-ink-primary;
+}
+.action-btn:disabled {
+  @apply cursor-not-allowed opacity-40 hover:bg-transparent;
 }
 </style>

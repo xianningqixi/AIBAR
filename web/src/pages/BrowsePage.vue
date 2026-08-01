@@ -4,14 +4,20 @@ import { useRoute, useRouter } from 'vue-router'
 import { useCharactersStore } from '@/stores/characters'
 import { useUiStore } from '@/stores/ui'
 import { useModelProfilesStore } from '@/stores/modelProfiles'
+import { useSessionStore } from '@/stores/session'
 import type { Character, ChatEntry, ModelProfile, StoryCard } from '@/api/types'
 import AppButton from '@/components/ui/AppButton.vue'
 import AppDrawer from '@/components/ui/AppDrawer.vue'
+import AppEmpty from '@/components/ui/AppEmpty.vue'
+import AppSelect from '@/components/ui/AppSelect.vue'
+import SearchInput from '@/components/ui/SearchInput.vue'
+import { getApiErrorMessage } from '@/api/client'
 import { fetchRecentChats } from '@/api/chats'
 import { listStories } from '@/api/stories'
 import { stripJsonlName } from '@/lib/format'
 import { createChatFromCharacter } from '@/lib/storyStart'
 import { getProviderLabel } from '@/lib/providers'
+import { formatModelPricing } from '@/lib/points'
 
 type BrowseTab = 'characters' | 'stories' | 'chats'
 
@@ -20,6 +26,7 @@ const route = useRoute()
 const store = useCharactersStore()
 const ui = useUiStore()
 const models = useModelProfilesStore()
+const session = useSessionStore()
 
 const stories = ref<StoryCard[]>([])
 const chatEntries = ref<ChatEntry[]>([])
@@ -109,9 +116,7 @@ function formatRelative(value?: unknown): string {
 }
 
 function isProfileUsable(profile: ModelProfile): boolean {
-  if (!profile.model) return false
-  if (profile.source === 'custom') return Boolean(profile.endpoint)
-  return models.hasSavedApiKey(profile)
+  return Boolean(profile.id && profile.model && profile.enabled !== false)
 }
 
 const usableModelProfiles = computed(() => models.profiles.filter(isProfileUsable))
@@ -123,7 +128,9 @@ const activeModelTitle = computed(() =>
 )
 
 const activeModelSubtitle = computed(() =>
-  `${getProviderLabel(models.activeProfile.source)} · ${isProfileUsable(models.activeProfile) ? '可用' : '待配置'}`,
+  isProfileUsable(models.activeProfile)
+    ? formatModelPricing(models.activeProfile)
+    : '等待管理员提供共享模型',
 )
 
 const activeModelReady = computed(() => isProfileUsable(models.activeProfile))
@@ -181,6 +188,7 @@ function modelStatusClass(profile: ModelProfile): string {
 }
 
 function selectDefaultModel(profile: ModelProfile) {
+  if (!isProfileUsable(profile)) return
   models.setActive(profile.id)
   modelPickerOpen.value = false
   ui.addToast('默认模型已切换', 'success')
@@ -229,6 +237,11 @@ function chatThumbnail(entry: ChatEntry): string {
   return `/thumbnail?type=avatar&file=${encodeURIComponent(entry.avatar)}`
 }
 
+function characterCover(avatar: string): string {
+  if (!avatar || avatar === 'none') return ''
+  return `/characters/${encodeURIComponent(avatar)}`
+}
+
 function getChatTitle(entry: ChatEntry): string {
   return entry.file_id || stripJsonlName(entry.file_name)
 }
@@ -270,8 +283,8 @@ async function startNewChat() {
       path: `/chat/${encodeURIComponent(character.avatar)}`,
       query: { chat: fileName },
     })
-  } catch (e: any) {
-    ui.addToast(`创建聊天失败：${e.message}`, 'error')
+  } catch (e: unknown) {
+    ui.addToast(`创建聊天失败：${getApiErrorMessage(e)}`, 'error')
   } finally {
     startingNewChat.value = false
   }
@@ -289,7 +302,7 @@ function storyThumbnail(story: StoryCard): string {
   if (story.coverImage) return story.coverImage
   const character = getStoryCharacter(story)
   if (!character?.avatar || character.avatar === 'none') return ''
-  return `/thumbnail?type=avatar&file=${encodeURIComponent(character.avatar)}`
+  return characterCover(character.avatar)
 }
 
 function openStoryDetail(story: StoryCard) {
@@ -302,7 +315,8 @@ const sortedChats = computed(() =>
 
 const recentChats = computed(() => sortedChats.value.slice(0, 12))
 
-const charSort = ref<'smart' | 'recent' | 'popular' | 'name'>('smart')
+// 用 string 而非字面量联合：AppSelect 的 v-model 只回传 string
+const charSort = ref<string>('smart')
 const charSortOptions = [
   { key: 'smart' as const, label: '推荐' },
   { key: 'recent' as const, label: '最近' },
@@ -428,23 +442,22 @@ onMounted(async () => {
 </script>
 
 <template>
-  <div class="min-h-screen bg-bg">
+  <div class="min-h-[100dvh] bg-bg">
     <header class="md:hidden border-b border-border-subtle bg-bg/80 backdrop-blur-md sticky top-0 z-20">
-      <div class="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between gap-4">
+      <div class="mx-auto flex max-w-6xl items-center px-5 py-4">
         <button class="flex items-center gap-3 group" @click="goTab('characters')">
           <div class="w-11 h-11 rounded-xl bg-brand-gradient flex items-center justify-center text-white text-lg font-bold shadow-glow group-hover:shadow-glow-accent transition-shadow">
             A
           </div>
           <div class="text-left leading-tight">
-            <h1 class="text-xl font-semibold text-ink-primary tracking-tight">AIBAR</h1>
+            <h1 class="text-xl font-semibold text-ink-primary">AIBAR</h1>
             <p class="text-xs text-ink-muted">选角色，开聊，少碰配置</p>
           </div>
         </button>
-
       </div>
 
       <nav class="md:hidden border-t border-border-subtle">
-        <div class="max-w-7xl mx-auto px-5 py-2 flex items-center gap-1.5 overflow-x-auto">
+        <div class="mx-auto flex max-w-6xl items-center gap-1.5 overflow-x-auto px-5 py-2">
           <button
             v-for="t in tabs"
             :key="t.key"
@@ -494,16 +507,8 @@ onMounted(async () => {
               </button>
             </div>
 
-            <div class="relative min-w-0 flex-1">
-              <svg class="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-ink-muted" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-4.35-4.35M17 11a6 6 0 11-12 0 6 6 0 0112 0z" />
-              </svg>
-              <input
-                v-model="searchQuery"
-                type="search"
-                :placeholder="searchPlaceholder"
-                class="w-full rounded-lg bg-surface py-2 pl-9 pr-3 text-sm text-ink-primary ring-1 ring-border-subtle transition-all placeholder:text-ink-muted hover:ring-border-strong focus:outline-none focus:ring-2 focus:ring-brand-500/40 focus:shadow-glow"
-              />
+            <div class="min-w-0 flex-1">
+              <SearchInput v-model="searchQuery" :placeholder="searchPlaceholder" />
             </div>
 
             <div class="flex shrink-0 items-center gap-2">
@@ -536,17 +541,17 @@ onMounted(async () => {
         </div>
       </header>
 
-      <div class="px-5 py-5 md:px-8 lg:px-10">
+      <div class="px-5 py-6 md:px-8 lg:px-10">
         <div class="mx-auto max-w-6xl space-y-6">
         <section
           v-if="!hasUsableModel"
           class="flex flex-col gap-3 rounded-lg bg-amber-500/10 p-4 ring-1 ring-amber-400/35 sm:flex-row sm:items-center sm:justify-between"
         >
           <div>
-            <p class="text-sm font-semibold text-amber-700">模型还没连上</p>
-            <p class="mt-1 text-sm text-ink-secondary">先测通一个模型，聊天和 AI 起草才会正常工作。</p>
+            <p class="text-sm font-semibold text-amber-700">暂无可用模型</p>
+            <p class="mt-1 text-sm text-ink-secondary">{{ session.isAdmin ? '请先添加并启用一个共享模型。' : '管理员还没有提供可用的共享模型。' }}</p>
           </div>
-          <AppButton size="sm" variant="secondary" @click="router.push('/settings')">去配置</AppButton>
+          <AppButton v-if="session.isAdmin" size="sm" variant="secondary" @click="router.push({ path: '/settings', query: { tab: 'model' } })">去配置</AppButton>
         </section>
 
         <section
@@ -587,23 +592,22 @@ onMounted(async () => {
           </div>
         </section>
 
-        <div id="browse-results" class="scroll-mt-20 space-y-5">
-          <div class="relative md:hidden">
-            <svg class="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-ink-muted" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-4.35-4.35M17 11a6 6 0 11-12 0 6 6 0 0112 0z" />
-            </svg>
-            <input
-              v-model="searchQuery"
-              type="search"
-              :placeholder="searchPlaceholder"
-              class="w-full rounded-lg bg-surface py-2.5 pl-9 pr-3 text-sm text-ink-primary ring-1 ring-border-subtle transition-all placeholder:text-ink-muted focus:outline-none focus:ring-2 focus:ring-brand-500/40"
-            />
+        <!-- min-h 固定结果区高度，加载完成时不再整页跳动 -->
+        <div id="browse-results" class="min-h-[60vh] scroll-mt-20 space-y-5">
+          <div class="md:hidden">
+            <SearchInput v-model="searchQuery" :placeholder="searchPlaceholder" />
+          </div>
+
+          <!-- 桌面端的当前分页上下文（移动端由下方的大标题承担） -->
+          <div class="hidden items-baseline gap-2 md:flex">
+            <h2 class="text-lg font-semibold text-ink-primary">{{ activeTabMeta.title }}</h2>
+            <p class="text-sm text-ink-muted">{{ activeTabMeta.status }}</p>
           </div>
 
           <!-- 移动端：标题 + 模型 + 主操作（桌面端已并入顶部工具栏） -->
           <div class="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between md:hidden">
             <div class="min-w-0">
-              <h2 class="text-2xl font-semibold tracking-tight text-ink-primary">{{ activeTabMeta.title }}</h2>
+              <h2 class="text-2xl font-semibold text-ink-primary">{{ activeTabMeta.title }}</h2>
               <p class="mt-1 text-sm text-ink-muted">{{ activeTabMeta.status }}</p>
             </div>
             <div class="flex flex-wrap items-center gap-2">
@@ -620,9 +624,22 @@ onMounted(async () => {
               </AppButton>
             </div>
           </div>
-      <!-- 加载骨架 -->
-      <div v-if="loading" class="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
-        <div v-for="n in 8" :key="n" class="overflow-hidden rounded-2xl bg-surface ring-1 ring-border-subtle">
+      <!-- 加载骨架：形状跟随当前分页（聊天是三列列表卡，其余是海报网格） -->
+      <div v-if="loading && activeTab === 'chats'" class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        <div v-for="n in 6" :key="n" class="rounded-2xl bg-surface p-5 ring-1 ring-border-subtle">
+          <div class="flex gap-4">
+            <div class="skeleton h-14 w-14 shrink-0 rounded-lg" />
+            <div class="min-w-0 flex-1 space-y-2">
+              <div class="skeleton h-4 w-2/3" />
+              <div class="skeleton h-3 w-1/3" />
+              <div class="skeleton h-3 w-full" />
+            </div>
+          </div>
+          <div class="skeleton mt-3 h-3 w-1/2" />
+        </div>
+      </div>
+      <div v-else-if="loading" class="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
+        <div v-for="n in 10" :key="n" class="overflow-hidden rounded-2xl bg-surface ring-1 ring-border-subtle">
           <div class="skeleton aspect-[3/4] w-full" />
           <div class="space-y-2 p-3">
             <div class="skeleton h-3 w-3/4" />
@@ -633,34 +650,31 @@ onMounted(async () => {
 
       <!-- 角色卡列表 -->
       <section v-if="!loading && activeTab === 'characters'">
-        <div class="flex flex-wrap items-center gap-3 mb-4">
-          <div class="flex items-center gap-1">
+        <!-- 筛选行：所有控件统一 38px 高，与 AppSelect 对齐 -->
+        <div class="mb-4 flex flex-wrap items-center gap-3">
+          <div class="inline-flex h-[38px] items-center rounded-lg bg-surface p-1 ring-1 ring-border-subtle">
             <button
               v-for="f in charFilters"
               :key="f.key"
               :class="[
-                'px-3 py-1.5 rounded-lg text-sm font-medium transition-all',
+                'inline-flex h-full items-center rounded-md px-3 text-sm font-medium transition-all',
                 charFilter === f.key
-                  ? 'bg-brand-500/20 text-brand-200 ring-1 ring-brand-500/40'
-                  : 'text-ink-secondary hover:text-ink-primary hover:bg-ink-primary/5',
+                  ? 'bg-brand-500/20 text-brand-200'
+                  : 'text-ink-secondary hover:text-ink-primary',
               ]"
               @click="charFilter = f.key"
             >{{ f.label }}</button>
           </div>
           <div class="flex-1" />
-          <select
-            v-model="charSort"
-            class="rounded-lg bg-surface px-2.5 py-1.5 text-sm font-medium text-ink-secondary ring-1 ring-border-subtle transition-colors hover:text-ink-primary focus:outline-none focus:ring-2 focus:ring-brand-500/40"
-            title="排序方式"
-          >
+          <AppSelect v-model="charSort" class="w-36 shrink-0">
             <option v-for="o in charSortOptions" :key="o.key" :value="o.key">排序 · {{ o.label }}</option>
-          </select>
+          </AppSelect>
           <button
             :class="[
-              'px-3 py-1.5 rounded-lg text-sm font-medium transition-all',
+              'inline-flex h-[38px] shrink-0 items-center rounded-lg px-3 text-sm font-medium ring-1 transition-all',
               noImage
-                ? 'bg-brand-500/20 text-brand-200 ring-1 ring-brand-500/40'
-                : 'text-ink-secondary hover:text-ink-primary hover:bg-ink-primary/5 ring-1 ring-border-subtle',
+                ? 'bg-brand-500/20 text-brand-200 ring-brand-500/40'
+                : 'text-ink-secondary ring-border-subtle hover:bg-ink-primary/5 hover:text-ink-primary',
             ]"
             @click="noImage = !noImage"
           >无图模式</button>
@@ -678,32 +692,38 @@ onMounted(async () => {
           </button>
         </div>
 
-        <div v-if="!store.characters.length" class="rounded-2xl ring-1 ring-border-subtle bg-surface p-12 text-center">
-          <p class="text-5xl mb-3">🎭</p>
-          <p class="text-lg font-semibold text-ink-primary">还没有角色卡</p>
-          <p class="text-sm text-ink-muted mt-2">去创作入口创建角色，或者在角色管理里导入 PNG 角色卡。</p>
-          <div class="mt-5 flex justify-center gap-3">
+        <AppEmpty
+          v-if="!store.characters.length"
+          icon="box"
+          title="还没有角色卡"
+          description="去创作入口创建角色，或者在角色管理里导入 PNG 角色卡。"
+        >
+          <template #actions>
             <AppButton size="md" variant="secondary" @click="router.push('/characters')">导入</AppButton>
             <AppButton size="md" @click="router.push('/create?kind=character')">去创作</AppButton>
-          </div>
-        </div>
-        <div v-else-if="!filteredCharacters.length" class="rounded-2xl ring-1 ring-border-subtle bg-surface p-12 text-center">
-          <p class="text-5xl mb-3">🔍</p>
-          <p class="text-lg font-semibold text-ink-primary">没有匹配的角色</p>
-          <p class="text-sm text-ink-muted mt-2">{{ searchQuery.trim() ? '换个关键词，或重置筛选。' : '试试切换筛选条件。' }}</p>
-          <AppButton size="md" variant="secondary" class="mt-4" @click="charFilter = 'all'; searchQuery = ''">显示全部</AppButton>
-        </div>
-        <div v-else class="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
+          </template>
+        </AppEmpty>
+        <AppEmpty
+          v-else-if="!filteredCharacters.length"
+          icon="search"
+          title="没有匹配的角色"
+          :description="searchQuery.trim() ? '换个关键词，或重置筛选。' : '试试切换筛选条件。'"
+        >
+          <template #actions>
+            <AppButton size="md" variant="secondary" @click="charFilter = 'all'; searchQuery = ''">显示全部</AppButton>
+          </template>
+        </AppEmpty>
+        <div v-else class="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
           <button
             v-for="c in filteredCharacters"
             :key="c.avatar"
-            class="group flex flex-col overflow-hidden rounded-2xl bg-surface text-left shadow-sm ring-1 ring-border-subtle transition-all duration-200 hover:-translate-y-1 hover:ring-brand-500/50 hover:shadow-glow"
+            class="group flex h-full flex-col overflow-hidden rounded-2xl bg-surface text-left shadow-sm ring-1 ring-border-subtle transition-all duration-200 hover:-translate-y-1 hover:ring-brand-500/50 hover:shadow-glow"
             @click="openCharacter(c)"
           >
             <div class="relative aspect-[3/4] w-full overflow-hidden bg-gradient-to-br from-brand-500/25 to-accent-500/15">
               <img
                 v-if="!noImage && c.avatar && c.avatar !== 'none'"
-                :src="`/thumbnail?type=avatar&file=${encodeURIComponent(c.avatar)}`"
+                :src="characterCover(c.avatar)"
                 loading="lazy"
                 decoding="async"
                 alt=""
@@ -724,11 +744,12 @@ onMounted(async () => {
               <p class="line-clamp-2 min-h-[2.5rem] text-xs leading-relaxed text-ink-secondary">
                 {{ cleanDescription(c) || '这个角色还没有简介。' }}
               </p>
-              <div v-if="getCharacterTags(c).length" class="mt-2 flex flex-wrap gap-1">
+              <!-- mt-auto：标签行永远贴卡片底部，卡片底边对齐 -->
+              <div v-if="getCharacterTags(c).length" class="mt-auto flex flex-wrap gap-1 pt-2">
                 <span
                   v-for="tag in getCharacterTags(c).slice(0, 3)"
                   :key="tag"
-                  class="rounded bg-brand-500/10 px-1.5 py-0.5 text-[10px] font-medium text-brand-300"
+                  class="rounded bg-brand-500/10 px-1.5 py-0.5 text-[11px] font-medium text-brand-300"
                 >{{ tag }}</span>
               </div>
             </div>
@@ -738,26 +759,32 @@ onMounted(async () => {
 
       <!-- 故事卡列表 -->
       <section v-if="!loading && activeTab === 'stories'">
-        <div v-if="!stories.length" class="rounded-2xl ring-1 ring-border-subtle bg-surface p-12 text-center">
-          <p class="text-5xl mb-3">📖</p>
-          <p class="text-lg font-semibold text-ink-primary">还没有故事卡</p>
-          <p class="text-sm text-ink-muted mt-2 max-w-md mx-auto">故事卡是可复用开局模板 — 绑定角色、场景、开场消息和默认 MOD。创建后每次都能基于同一设定快速开新存档。</p>
-          <div class="mt-5 flex justify-center gap-3">
+        <AppEmpty
+          v-if="!stories.length"
+          icon="book"
+          title="还没有故事卡"
+          description="故事卡是可复用开局模板 — 绑定角色、场景、开场消息和默认 MOD。创建后每次都能基于同一设定快速开新存档。"
+        >
+          <template #actions>
             <AppButton size="md" @click="router.push('/create?kind=story')">去创作</AppButton>
             <AppButton size="md" variant="secondary" @click="focusTab('characters')">先挑角色</AppButton>
-          </div>
-        </div>
-        <div v-else-if="!filteredStories.length" class="rounded-2xl ring-1 ring-border-subtle bg-surface p-12 text-center">
-          <p class="text-5xl mb-3">🔍</p>
-          <p class="text-lg font-semibold text-ink-primary">没有匹配的故事卡</p>
-          <p class="text-sm text-ink-muted mt-2">换个关键词试试。</p>
-          <AppButton size="md" variant="secondary" class="mt-4" @click="searchQuery = ''">清除搜索</AppButton>
-        </div>
-        <div v-else class="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
+          </template>
+        </AppEmpty>
+        <AppEmpty
+          v-else-if="!filteredStories.length"
+          icon="search"
+          title="没有匹配的故事卡"
+          description="换个关键词试试。"
+        >
+          <template #actions>
+            <AppButton size="md" variant="secondary" @click="searchQuery = ''">清除搜索</AppButton>
+          </template>
+        </AppEmpty>
+        <div v-else class="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
           <button
             v-for="story in filteredStories"
             :key="story.id"
-            class="group flex flex-col overflow-hidden rounded-2xl bg-surface text-left shadow-sm ring-1 ring-border-subtle transition-all duration-200 hover:-translate-y-1 hover:ring-brand-500/50 hover:shadow-glow"
+            class="group flex h-full flex-col overflow-hidden rounded-2xl bg-surface text-left shadow-sm ring-1 ring-border-subtle transition-all duration-200 hover:-translate-y-1 hover:ring-brand-500/50 hover:shadow-glow"
             @click="openStoryDetail(story)"
           >
             <div class="relative aspect-[3/4] w-full overflow-hidden bg-gradient-to-br from-brand-500/25 to-accent-500/15">
@@ -771,7 +798,7 @@ onMounted(async () => {
               />
               <div v-else class="flex h-full w-full items-center justify-center text-5xl">📖</div>
               <div class="pointer-events-none absolute inset-x-0 bottom-0 h-3/5 bg-gradient-to-t from-black/90 via-black/45 to-transparent" />
-              <span class="absolute left-2 top-2 rounded-full bg-brand-gradient px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-white shadow-glow">故事</span>
+              <span class="absolute left-2 top-2 rounded-full bg-brand-gradient px-2 py-0.5 text-[11px] font-medium text-white shadow-glow">故事</span>
               <div class="absolute inset-x-0 bottom-0 p-3">
                 <h4 class="truncate text-sm font-semibold text-white [text-shadow:0_1px_3px_rgba(0,0,0,0.7)]">{{ story.title }}</h4>
                 <p class="mt-0.5 truncate text-xs text-white/80 [text-shadow:0_1px_2px_rgba(0,0,0,0.6)]">{{ getStoryCharacter(story)?.name || '角色已缺失' }}</p>
@@ -781,15 +808,16 @@ onMounted(async () => {
               <p class="line-clamp-2 min-h-[2.5rem] text-xs leading-relaxed text-ink-secondary">
                 {{ story.summary || story.scenario || '这个故事卡还没有简介。' }}
               </p>
-              <div class="mt-2 flex items-center justify-between gap-2">
+              <!-- mt-auto：标签 + 时间行贴底，卡片底边对齐 -->
+              <div class="mt-auto flex items-center justify-between gap-2 pt-2">
                 <div v-if="story.tags?.length" class="flex flex-wrap gap-1">
                   <span
                     v-for="tag in story.tags.slice(0, 2)"
                     :key="tag"
-                    class="rounded bg-brand-500/10 px-1.5 py-0.5 text-[10px] font-medium text-brand-300"
+                    class="rounded bg-brand-500/10 px-1.5 py-0.5 text-[11px] font-medium text-brand-300"
                   >{{ tag }}</span>
                 </div>
-                <span class="shrink-0 text-[10px] text-ink-muted">{{ formatDate(story.updatedAt || story.createdAt) }}</span>
+                <span class="shrink-0 text-[11px] text-ink-muted">{{ formatDate(story.updatedAt || story.createdAt) }}</span>
               </div>
             </div>
           </button>
@@ -798,22 +826,31 @@ onMounted(async () => {
 
       <!-- 聊天记录列表 -->
       <section v-if="!loading && activeTab === 'chats'">
-        <div v-if="!sortedChats.length" class="rounded-2xl ring-1 ring-border-subtle bg-surface p-12 text-center">
-          <p class="text-5xl mb-3">💬</p>
-          <p class="text-lg font-semibold text-ink-primary">还没有聊天记录</p>
-          <p class="text-sm text-ink-muted mt-2">选一张角色卡或故事卡开始第一段对话吧。</p>
-        </div>
-        <div v-else-if="!filteredChats.length" class="rounded-2xl ring-1 ring-border-subtle bg-surface p-12 text-center">
-          <p class="text-5xl mb-3">🔍</p>
-          <p class="text-lg font-semibold text-ink-primary">没有匹配的聊天</p>
-          <p class="text-sm text-ink-muted mt-2">换个关键词试试。</p>
-          <AppButton size="md" variant="secondary" class="mt-4" @click="searchQuery = ''">清除搜索</AppButton>
-        </div>
-        <div v-else class="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
+        <AppEmpty
+          v-if="!sortedChats.length"
+          icon="chat"
+          title="还没有聊天记录"
+          description="选一张角色卡或故事卡开始第一段对话吧。"
+        >
+          <template #actions>
+            <AppButton size="md" @click="focusTab('characters')">去选角色</AppButton>
+          </template>
+        </AppEmpty>
+        <AppEmpty
+          v-else-if="!filteredChats.length"
+          icon="search"
+          title="没有匹配的聊天"
+          description="换个关键词试试。"
+        >
+          <template #actions>
+            <AppButton size="md" variant="secondary" @click="searchQuery = ''">清除搜索</AppButton>
+          </template>
+        </AppEmpty>
+        <div v-else class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           <button
             v-for="entry in filteredChats"
             :key="entry.avatar ? `${entry.avatar}:${entry.file_name}` : entry.file_name"
-            class="text-left rounded-2xl shadow-sm ring-1 ring-border-subtle bg-surface p-5 transition-all duration-200 hover:-translate-y-0.5 hover:ring-brand-500/40 hover:shadow-glow"
+            class="flex h-full flex-col rounded-2xl bg-surface p-5 text-left shadow-sm ring-1 ring-border-subtle transition-all duration-200 hover:-translate-y-0.5 hover:ring-brand-500/40 hover:shadow-glow"
             @click="openChatEntry(entry)"
           >
             <div class="flex gap-4">
@@ -834,7 +871,7 @@ onMounted(async () => {
                 </p>
               </div>
             </div>
-            <div class="mt-3 flex items-center justify-between text-xs text-ink-muted">
+            <div class="mt-auto flex items-center justify-between pt-3 text-xs text-ink-muted">
               <span>{{ entry.chat_items || 0 }} 条 · {{ entry.file_size || '未知大小' }}</span>
               <span>{{ formatRelative(entry.last_mes) }}</span>
             </div>
@@ -848,13 +885,13 @@ onMounted(async () => {
       <AppDrawer v-model="modelPickerOpen" title="选择默认模型" width="24rem">
         <div class="space-y-3 p-4">
           <div class="rounded-lg bg-surface-sunken p-4 ring-1 ring-border-subtle">
-            <p class="text-xs font-semibold uppercase tracking-[0.16em] text-ink-muted">当前模型</p>
+            <p class="text-xs font-semibold text-ink-muted">当前模型</p>
             <p class="mt-2 truncate text-base font-semibold text-ink-primary">{{ activeModelTitle }}</p>
             <p class="mt-1 text-sm text-ink-muted">{{ activeModelSubtitle }}</p>
           </div>
 
           <button
-            v-for="profile in models.profiles"
+            v-for="profile in usableModelProfiles"
             :key="profile.id"
             class="w-full rounded-lg bg-surface p-4 text-left ring-1 ring-border-subtle transition-all hover:ring-brand-500/40"
             :class="profile.id === models.activeProfileId ? 'bg-brand-500/10 ring-brand-500/35' : ''"
@@ -866,6 +903,7 @@ onMounted(async () => {
                 <p class="mt-1 truncate text-xs text-ink-muted">
                   {{ getProviderLabel(profile.source) }} · {{ profile.model || '未填写模型' }}
                 </p>
+                <p class="mt-1 text-xs text-ink-muted">{{ formatModelPricing(profile) }}</p>
               </div>
               <span
                 class="shrink-0 rounded-full px-2 py-0.5 text-xs font-semibold ring-1"
@@ -880,7 +918,7 @@ onMounted(async () => {
         <template #footer>
           <div class="flex items-center justify-end gap-2">
             <AppButton size="sm" variant="ghost" @click="modelPickerOpen = false">关闭</AppButton>
-            <AppButton size="sm" variant="secondary" @click="openModelSettings">管理模型</AppButton>
+            <AppButton v-if="session.isAdmin" size="sm" variant="secondary" @click="openModelSettings">管理模型</AppButton>
           </div>
         </template>
       </AppDrawer>

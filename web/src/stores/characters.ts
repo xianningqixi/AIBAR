@@ -11,6 +11,7 @@ export const useCharactersStore = defineStore('characters', () => {
   const list = ref<Character[]>([])
   const loading = ref(false)
   const error = ref('')
+  let requestVersion = 0
 
   const characters = computed(() => list.value)
   const favorites = computed(() => list.value.filter((c) => c.fav === 'true'))
@@ -20,19 +21,23 @@ export const useCharactersStore = defineStore('characters', () => {
   }
 
   async function load() {
+    const version = ++requestVersion
     loading.value = true
     error.value = ''
     try {
-      list.value = await fetchCharacters()
+      const characters = await fetchCharacters()
+      if (version === requestVersion) list.value = characters
     } catch (e: any) {
-      error.value = e.message || 'Failed to load characters'
+      if (version === requestVersion) error.value = e.message || 'Failed to load characters'
     } finally {
-      loading.value = false
+      if (version === requestVersion) loading.value = false
     }
   }
 
   async function toggleFav(character: Character) {
+    const version = requestVersion
     const next = await toggleFavoriteApi(character)
+    if (version !== requestVersion) return
     const idx = list.value.findIndex((c) => c.avatar === character.avatar)
     if (idx !== -1) {
       list.value[idx] = {
@@ -43,12 +48,21 @@ export const useCharactersStore = defineStore('characters', () => {
   }
 
   async function updateTags(character: Character, tags: string[]) {
+    const version = requestVersion
     await mergeAttributes(character.avatar, { tags, data: { tags } })
+    if (version !== requestVersion) return
     const idx = list.value.findIndex((c) => c.avatar === character.avatar)
     if (idx !== -1) {
       list.value[idx] = { ...list.value[idx], tags }
     }
   }
 
-  return { list, loading, error, characters, favorites, findCharacter, load, toggleFav, updateTags }
+  function reset() {
+    requestVersion += 1
+    list.value = []
+    loading.value = false
+    error.value = ''
+  }
+
+  return { list, loading, error, characters, favorites, findCharacter, load, toggleFav, updateTags, reset }
 })

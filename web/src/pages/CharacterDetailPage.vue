@@ -15,6 +15,7 @@ import { listStories } from '@/api/stories'
 import { createChatFromCharacter, createChatFromStory } from '@/lib/storyStart'
 import { characterGreetings, saveStoryFromCharacterGreeting } from '@/lib/storyFromCharacter'
 import { stripJsonlName } from '@/lib/format'
+import { getApiErrorMessage } from '@/api/client'
 import type { Character, ChatEntry, StoryCard } from '@/api/types'
 import AppButton from '@/components/ui/AppButton.vue'
 import AppCard from '@/components/ui/AppCard.vue'
@@ -59,8 +60,8 @@ async function loadData() {
     ])
     stories.value = storyResult.filter((story) => story.characterAvatar === avatar.value)
     chatList.value = chatResult
-  } catch (e: any) {
-    ui.addToast(`加载失败：${e.message}`, 'error')
+  } catch (e: unknown) {
+    ui.addToast(`加载失败：${getApiErrorMessage(e)}`, 'error')
     router.push('/characters')
   } finally {
     loading.value = false
@@ -111,8 +112,8 @@ async function startStory(story: StoryCard) {
       path: `/chat/${encodeURIComponent(character.value.avatar)}`,
       query: { chat: fileName },
     })
-  } catch (e: any) {
-    ui.addToast(`开始故事失败：${e.message}`, 'error')
+  } catch (e: unknown) {
+    ui.addToast(`开始故事失败：${getApiErrorMessage(e)}`, 'error')
   }
 }
 
@@ -128,8 +129,8 @@ async function startCharacterWithMods() {
       path: `/chat/${encodeURIComponent(character.value.avatar)}`,
       query: { chat: fileName },
     })
-  } catch (e: any) {
-    ui.addToast(`创建聊天失败：${e.message}`, 'error')
+  } catch (e: unknown) {
+    ui.addToast(`创建聊天失败：${getApiErrorMessage(e)}`, 'error')
   } finally {
     startingWithMods.value = false
   }
@@ -143,8 +144,8 @@ async function saveGreetingAsStory(greeting: string, index: number) {
     stories.value = [story, ...stories.value.filter((item) => item.id !== story.id)]
     ui.addToast('已从开场白生成故事卡', 'success')
     router.push(`/story/${encodeURIComponent(story.id)}`)
-  } catch (e: any) {
-    ui.addToast(`生成故事卡失败：${e.message}`, 'error')
+  } catch (e: unknown) {
+    ui.addToast(`生成故事卡失败：${getApiErrorMessage(e)}`, 'error')
   } finally {
     savingGreetingIndex.value = null
   }
@@ -160,8 +161,8 @@ async function exportCard(format: 'png' | 'json') {
     link.download = character.value.avatar.replace(/\.png$/i, `.${format}`)
     link.click()
     URL.revokeObjectURL(url)
-  } catch (e: any) {
-    ui.addToast(`导出失败：${e.message}`, 'error')
+  } catch (e: unknown) {
+    ui.addToast(`导出失败：${getApiErrorMessage(e)}`, 'error')
   }
 }
 
@@ -172,8 +173,8 @@ async function removeCharacter() {
     await deleteCharacter(character.value.avatar)
     await chars.load()
     router.push('/characters')
-  } catch (e: any) {
-    ui.addToast(`删除失败：${e.message}`, 'error')
+  } catch (e: unknown) {
+    ui.addToast(`删除失败：${getApiErrorMessage(e)}`, 'error')
   }
 }
 
@@ -206,8 +207,8 @@ async function duplicateCharacter() {
     if (typeof result === 'string') {
       router.push(`/character/${encodeURIComponent(result)}`)
     }
-  } catch (e: any) {
-    ui.addToast(`复制失败：${e.message}`, 'error')
+  } catch (e: unknown) {
+    ui.addToast(`复制失败：${getApiErrorMessage(e)}`, 'error')
   }
 }
 
@@ -225,8 +226,8 @@ async function quickTagEdit() {
     ui.addToast('标签已更新', 'success')
     await loadData()
     await chars.load()
-  } catch (e: any) {
-    ui.addToast(`保存失败：${e.message}`, 'error')
+  } catch (e: unknown) {
+    ui.addToast(`保存失败：${getApiErrorMessage(e)}`, 'error')
   }
 }
 
@@ -234,32 +235,33 @@ onMounted(loadData)
 </script>
 
 <template>
-  <div class="min-h-screen bg-bg">
-    <AppPageHeader title="角色详情" back-to="/browse" />
+  <div class="min-h-[100dvh] bg-bg">
+    <AppPageHeader title="角色详情" back-to="/browse" width="4xl" />
 
     <div v-if="loading" class="flex justify-center py-16">
       <AppSpinner size="lg" />
     </div>
 
-    <main v-else-if="character" class="max-w-5xl mx-auto px-5 py-6 space-y-4 animate-fade-in-up">
+    <main v-else-if="character" class="mx-auto max-w-4xl space-y-6 px-5 py-6 animate-fade-in-up md:px-8 lg:px-10">
+      <!-- 详情页统一 hero：3:4 封面 + 右侧信息，与故事/社区页一致 -->
       <section class="relative overflow-hidden rounded-2xl ring-1 ring-border-subtle bg-hero-radial">
         <div
           v-if="character.avatar && character.avatar !== 'none'"
           class="absolute inset-0 bg-cover bg-center opacity-20 blur-2xl pointer-events-none"
-          :style="{ backgroundImage: `url(/thumbnail?type=avatar&file=${encodeURIComponent(character.avatar)})` }"
+          :style="{ backgroundImage: `url(/characters/${encodeURIComponent(character.avatar)})` }"
         />
         <div class="absolute -top-16 -right-12 w-72 h-72 rounded-full bg-brand-500/25 blur-3xl pointer-events-none" />
         <div class="absolute -bottom-20 -left-8 w-72 h-72 rounded-full bg-accent-500/20 blur-3xl pointer-events-none" />
-        <div class="relative p-5 md:p-7 flex flex-wrap gap-6">
+        <div class="relative flex flex-wrap items-start gap-6 p-5 md:p-7">
           <div class="relative shrink-0">
             <img
               v-if="character.avatar && character.avatar !== 'none'"
-              :src="`/thumbnail?type=avatar&file=${encodeURIComponent(character.avatar)}`"
-              class="w-32 h-32 sm:w-40 sm:h-40 rounded-2xl object-cover ring-2 ring-brand-500/40 shadow-glow"
+              :src="`/characters/${encodeURIComponent(character.avatar)}`"
+              class="aspect-[3/4] w-40 rounded-2xl object-cover ring-2 ring-brand-500/40 shadow-glow"
             />
             <div
               v-else
-              class="w-32 h-32 sm:w-40 sm:h-40 rounded-2xl bg-brand-soft ring-2 ring-brand-500/40 flex items-center justify-center text-brand-300 shadow-glow"
+              class="flex aspect-[3/4] w-40 items-center justify-center rounded-2xl bg-brand-soft text-brand-300 ring-2 ring-brand-500/40 shadow-glow"
             >
               <svg class="w-12 h-12" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
@@ -309,6 +311,7 @@ onMounted(loadData)
               </AppButton>
               <AppButton variant="secondary" @click="router.push(`/character/${encodeURIComponent(character.avatar)}/edit`)">编辑角色</AppButton>
               <AppButton variant="secondary" @click="router.push({ path: '/story/new', query: { avatar: character.avatar } })">新建故事</AppButton>
+              <AppButton variant="secondary" @click="router.push({ path: '/publish', query: { type: 'character', sourceId: character.avatar } })">发布作品</AppButton>
             </div>
           </div>
         </div>
@@ -316,7 +319,7 @@ onMounted(loadData)
 
       <div class="grid md:grid-cols-2 gap-4">
         <AppCard padding="md">
-          <h3 class="flex items-center gap-2 text-sm font-semibold text-ink-primary mb-2">
+          <h3 class="flex items-center gap-2 text-sm font-semibold text-ink-primary mb-3">
             <span class="w-1 h-4 rounded-full bg-brand-gradient" />
             性格
           </h3>
@@ -325,7 +328,7 @@ onMounted(loadData)
           </p>
         </AppCard>
         <AppCard padding="md">
-          <h3 class="flex items-center gap-2 text-sm font-semibold text-ink-primary mb-2">
+          <h3 class="flex items-center gap-2 text-sm font-semibold text-ink-primary mb-3">
             <span class="w-1 h-4 rounded-full bg-brand-gradient" />
             场景
           </h3>
@@ -363,7 +366,7 @@ onMounted(loadData)
       </AppCard>
 
       <AppCard padding="md">
-        <div class="flex flex-wrap items-start justify-between gap-3 mb-4">
+        <div class="flex flex-wrap items-start justify-between gap-3 mb-3">
           <div>
             <h3 class="flex items-center gap-2 text-sm font-semibold text-ink-primary">
               <span class="w-1 h-4 rounded-full bg-brand-gradient" />
@@ -389,7 +392,6 @@ onMounted(loadData)
             <span class="w-1 h-4 rounded-full bg-brand-gradient" />
             聊天记录 <span class="text-ink-muted font-normal">({{ chatList.length }})</span>
           </h3>
-          <AppButton size="sm" variant="secondary" @click="openChat()">+ 新聊天</AppButton>
         </div>
         <AppEmpty
           v-if="!chatList.length"
@@ -397,22 +399,23 @@ onMounted(loadData)
           title="还没有聊天记录"
           description="聊天记录会保存在 ST 本地服务器,开始对话后会出现在这里。"
         />
+        <!-- 固定列宽的网格：条数 / 时间 / 操作在所有行上对齐，窄屏再堆叠 -->
         <div v-else class="space-y-2">
           <div
             v-for="entry in chatList"
             :key="entry.file_name"
-            class="flex flex-wrap items-center gap-3 px-3 py-2.5 rounded-lg bg-surface-sunken ring-1 ring-border-subtle transition-colors hover:ring-brand-500/30"
+            class="grid grid-cols-1 items-center gap-x-3 gap-y-1.5 rounded-lg bg-surface-sunken px-3 py-2.5 ring-1 ring-border-subtle transition-colors hover:ring-brand-500/30 sm:grid-cols-[1fr_auto_auto_auto]"
           >
-            <div class="min-w-0 flex-1">
+            <div class="min-w-0">
               <button
-                class="block text-sm font-medium text-ink-primary hover:text-brand-400 truncate transition-colors"
+                class="block w-full truncate text-left text-sm font-medium text-ink-primary transition-colors hover:text-brand-400"
                 @click="openChat(entry.file_name)"
               >{{ getChatTitle(entry) }}</button>
               <p class="mt-0.5 text-xs text-ink-muted line-clamp-1">{{ entry.mes || '(暂无消息)' }}</p>
             </div>
-            <span class="text-[11px] text-ink-muted shrink-0">{{ entry.chat_items || 0 }} 条</span>
-            <span class="text-[11px] text-ink-muted shrink-0">{{ formatDate(entry.last_mes) }}</span>
-            <button class="text-xs text-brand-300 hover:text-brand-200" @click="openChat(entry.file_name)">继续</button>
+            <span class="text-[11px] tabular-nums text-ink-muted sm:text-right">{{ entry.chat_items || 0 }} 条</span>
+            <span class="text-[11px] tabular-nums text-ink-muted sm:text-right">{{ formatDate(entry.last_mes) }}</span>
+            <button class="justify-self-start text-xs text-brand-300 hover:text-brand-200 sm:justify-self-end" @click="openChat(entry.file_name)">继续</button>
           </div>
         </div>
       </AppCard>
@@ -437,17 +440,17 @@ onMounted(loadData)
           <div
             v-for="entry in stories"
             :key="entry.id"
-            class="flex flex-wrap items-center gap-3 px-3 py-2.5 rounded-lg bg-surface-sunken ring-1 ring-border-subtle transition-colors hover:ring-brand-500/30"
+            class="grid grid-cols-1 items-center gap-x-3 gap-y-1.5 rounded-lg bg-surface-sunken px-3 py-2.5 ring-1 ring-border-subtle transition-colors hover:ring-brand-500/30 sm:grid-cols-[1fr_auto_auto]"
           >
-            <div class="min-w-0 flex-1">
+            <div class="min-w-0">
               <button
-                class="block text-sm font-medium text-ink-primary hover:text-brand-400 truncate transition-colors"
+                class="block w-full truncate text-left text-sm font-medium text-ink-primary transition-colors hover:text-brand-400"
                 @click="openStoryDetail(entry)"
               >{{ entry.title }}</button>
               <p class="mt-0.5 text-xs text-ink-muted line-clamp-1">{{ entry.summary || entry.scenario || '(无简介)' }}</p>
             </div>
-            <span v-if="entry.world" class="text-[11px] text-ink-muted shrink-0">世界书 {{ entry.world }}</span>
-            <button class="text-xs text-brand-300 hover:text-brand-200" @click="startStory(entry)">开始</button>
+            <span class="truncate text-[11px] text-ink-muted sm:text-right">{{ entry.world ? `世界书 ${entry.world}` : '' }}</span>
+            <button class="justify-self-start text-xs text-brand-300 hover:text-brand-200 sm:justify-self-end" @click="startStory(entry)">开始</button>
           </div>
         </div>
       </AppCard>

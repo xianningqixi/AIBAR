@@ -88,11 +88,13 @@ function selectDraft(option: ReplyDraftOption) {
 </script>
 
 <template>
-  <div class="border-t border-border-subtle bg-bg/85 px-3 pb-3 pt-2.5 backdrop-blur">
-    <div class="mx-auto max-w-4xl">
+  <!-- px-4 与消息列 (mx-auto max-w-4xl px-4) 对齐，输入框与气泡共用同一条左右边界 -->
+  <div class="border-t border-border-subtle bg-bg/85 px-4 pb-[calc(.75rem+env(safe-area-inset-bottom))] pt-2.5 backdrop-blur md:pb-3">
+    <div class="relative mx-auto max-w-4xl">
+      <!-- AI 拟回复面板锚定在输入区上方，输入框长高时不会被遮住 -->
       <div
         v-if="draftPanelOpen"
-        class="fixed inset-x-3 bottom-20 z-40 mx-auto max-h-[48vh] max-w-4xl overflow-hidden rounded-xl border border-brand-500/30 bg-surface-elevated shadow-2xl ring-1 ring-brand-500/15"
+        class="absolute inset-x-0 bottom-full z-30 mb-2 max-h-[48dvh] overflow-hidden rounded-xl border border-brand-500/30 bg-surface-elevated shadow-2xl ring-1 ring-brand-500/15"
       >
         <div class="flex flex-wrap items-center justify-between gap-2 border-b border-border-subtle px-3 py-2.5">
           <div class="min-w-0">
@@ -193,7 +195,7 @@ function selectDraft(option: ReplyDraftOption) {
           </svg>
         </button>
       </div>
-      <p class="mt-1.5 px-1 text-center text-[10px] text-ink-muted/60">
+      <p class="mt-1.5 px-1 text-center text-[11px] text-ink-muted/60">
         <template v-if="busyLabel">{{ busyLabel }}</template>
         <template v-else-if="isStreaming">生成中 · 按 Esc 或点按钮停止</template>
         <template v-else>Enter 发送 · Shift+Enter 换行</template>

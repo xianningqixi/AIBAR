@@ -46,6 +46,8 @@ export const usePresetsStore = defineStore('presets', () => {
   const activePresetId = ref('')
   const loaded = ref(false)
   let persistTimer: ReturnType<typeof setTimeout> | null = null
+  let storeVersion = 0
+  let loadPromise: Promise<void> | null = null
 
   const activePreset = computed<Preset | null>(() => {
     return presets.value.find((p) => p.id === activePresetId.value) || null
@@ -54,39 +56,51 @@ export const usePresetsStore = defineStore('presets', () => {
   function schedulePersist() {
     if (!loaded.value) return
     if (persistTimer) clearTimeout(persistTimer)
+    const version = storeVersion
     persistTimer = setTimeout(() => {
       persistTimer = null
-      void persistNow()
+      if (version === storeVersion) void persistNow(version)
     }, 300)
   }
 
-  async function persistNow() {
+  async function persistNow(version = storeVersion) {
+    if (version !== storeVersion) return
     try {
       await saveAibarSettings({
         simple_ui_presets: presets.value,
         simple_ui_active_preset: activePresetId.value,
       })
     } catch (e) {
-      console.warn('Persist presets failed', e)
+      if (version === storeVersion) console.warn('Persist presets failed', e)
     }
   }
 
   async function load() {
+    if (loadPromise) return loadPromise
     if (loaded.value) return
-    try {
-      const stored = await loadAibarSettings<{
-        simple_ui_presets?: Preset[]
-        simple_ui_active_preset?: string
-      }>()
-      if (Array.isArray(stored.simple_ui_presets) && stored.simple_ui_presets.length) {
-        presets.value = stored.simple_ui_presets
-        activePresetId.value = stored.simple_ui_active_preset || ''
+    const version = storeVersion
+    const promise = (async () => {
+      try {
+        const stored = await loadAibarSettings<{
+          simple_ui_presets?: Preset[]
+          simple_ui_active_preset?: string
+        }>()
+        if (version !== storeVersion) return
+        if (Array.isArray(stored.simple_ui_presets) && stored.simple_ui_presets.length) {
+          presets.value = stored.simple_ui_presets
+          activePresetId.value = stored.simple_ui_active_preset || ''
+        }
+      } catch (e) {
+        if (version === storeVersion) console.warn('Load presets failed', e)
+      } finally {
+        if (version === storeVersion) {
+          loaded.value = true
+          loadPromise = null
+        }
       }
-    } catch (e) {
-      console.warn('Load presets failed', e)
-    } finally {
-      loaded.value = true
-    }
+    })()
+    loadPromise = promise
+    return promise
   }
 
   function createPreset(): Preset {
@@ -130,6 +144,16 @@ export const usePresetsStore = defineStore('presets', () => {
     schedulePersist()
   }
 
+  function reset() {
+    storeVersion += 1
+    if (persistTimer) clearTimeout(persistTimer)
+    persistTimer = null
+    loadPromise = null
+    presets.value = cloneDefaults()
+    activePresetId.value = ''
+    loaded.value = false
+  }
+
   return {
     presets,
     activePresetId,
@@ -141,5 +165,6 @@ export const usePresetsStore = defineStore('presets', () => {
     deletePreset,
     getPreset,
     setActive,
+    reset,
   }
 })

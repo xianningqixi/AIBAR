@@ -3,6 +3,7 @@ import { ref, computed } from 'vue'
 import type { ChatMessage, StreamState, Character, ImageAsset, ModelProfile } from '@/api/types'
 import { fetchChat, saveChat } from '@/api/chats'
 import { generateReply, generateReplyStream } from '@/api/generate'
+import { getApiErrorMessage } from '@/api/client'
 import { buildChatCompletionPayload, buildGeneratePayload, getCharacterChatName } from '@/lib/buildPayload'
 import { buildReplyDraftPayload, parseReplyDraftOptions, type ReplyDraftOption } from '@/lib/replyDraft'
 import { getMatchedWorldInfo } from '@/lib/worldInfoMatch'
@@ -27,20 +28,13 @@ type ChatMemoryState = {
 
 const MEMORY_TRANSCRIPT_MAX_CHARS = 120000
 const MEMORY_SUMMARY_MAX_CHARS = 1800
-const MEMORY_SUMMARY_PRESET = {
-  id: 'aibar-memory-summary',
-  name: 'Memory Summary',
-  temperature: 0.2,
-  topP: 0.85,
-  maxTokens: 1200,
-  presencePenalty: 0,
-  frequencyPenalty: 0,
-  systemPrompt: '',
-}
-
-let replyDraftRequestId = 0
-
+const MEMORY_REFRESH_MESSAGE_INTERVAL = 8
 export const useChatStore = defineStore('chat', () => {
+  let accountEpoch = 0
+  let chatEpoch = 0
+  let loadRequestId = 0
+  let generationRequestId = 0
+  let replyDraftRequestId = 0
   const messages = ref<ChatMessage[]>([])
   const metadata = ref<Record<string, unknown>>({})
   const character = ref<Character | null>(null)
@@ -50,6 +44,7 @@ export const useChatStore = defineStore('chat', () => {
   const selectedWorld = ref('')
   const selectedModIds = ref<string[]>([])
   const loading = ref(false)
+  const ready = ref(false)
   const error = ref('')
   const memoryUpdating = ref(false)
   const replyDraftLoading = ref(false)
@@ -77,7 +72,11 @@ export const useChatStore = defineStore('chat', () => {
     return presets.getPreset(selectedPresetId.value) || presets.activePreset || null
   })
 
-  function reset() {
+  function clearState() {
+    chatEpoch += 1
+    generationRequestId += 1
+    replyDraftRequestId += 1
+    streaming.value.controller?.abort()
     messages.value = []
     metadata.value = {}
     character.value = null
@@ -86,6 +85,8 @@ export const useChatStore = defineStore('chat', () => {
     selectedPresetId.value = ''
     selectedWorld.value = ''
     selectedModIds.value = []
+    loading.value = false
+    ready.value = false
     streaming.value = { active: false, controller: null, partial: { content: '' } }
     memoryUpdating.value = false
     replyDraftLoading.value = false
@@ -94,28 +95,47 @@ export const useChatStore = defineStore('chat', () => {
     error.value = ''
   }
 
+  function reset() {
+    accountEpoch += 1
+    loadRequestId += 1
+    persistRun = null
+    clearState()
+  }
+
   async function loadChat(char: Character, chatFile?: string) {
-    reset()
+    const requestId = ++loadRequestId
+    clearState()
+    const epoch = chatEpoch
     character.value = char
     loading.value = true
     error.value = ''
-    currentChatFile.value = getCharacterChatName(char, chatFile)
+    const requestedChatFile = getCharacterChatName(char, chatFile)
+    currentChatFile.value = requestedChatFile
 
     try {
-      const result = await fetchChat(char.name, currentChatFile.value, char.avatar)
+      const result = await fetchChat(char.name, requestedChatFile, char.avatar)
+      if (requestId !== loadRequestId || epoch !== chatEpoch) return
       messages.value = result.messages.map(normalizeSwipeMessage)
       metadata.value = result.metadata
+      ready.value = true
     } catch (e) {
-      console.warn('Load chat failed (may be new):', e instanceof Error ? e.message : e)
-      messages.value = []
-      metadata.value = { simple_ui: true }
+      if (requestId !== loadRequestId || epoch !== chatEpoch) return
+      const message = getApiErrorMessage(e, '聊天加载失败')
+      console.warn('Load chat failed:', message)
+      ready.value = false
+      error.value = `聊天加载失败：${message}`
     } finally {
-      loading.value = false
+      if (requestId === loadRequestId && epoch === chatEpoch) loading.value = false
     }
+
+    if (requestId !== loadRequestId || epoch !== chatEpoch || !ready.value) return
 
     const profiles = useModelProfilesStore()
     const presets = usePresetsStore()
-    selectedProfileId.value = getMetadataProfileId() || profiles.activeProfileId
+    const metadataProfile = profiles.getProfile(getMetadataProfileId())
+    selectedProfileId.value = metadataProfile?.enabled !== false
+      ? metadataProfile?.id || profiles.activeProfileId
+      : profiles.activeProfileId
     selectedPresetId.value = getMetadataPresetId() || presets.activePresetId
     selectedWorld.value = getMetadataWorld() || resolveCharacterWorld(char)
     selectedModIds.value = getMetadataModIds()
@@ -133,43 +153,61 @@ export const useChatStore = defineStore('chat', () => {
     return ''
   }
 
-  async function persist() {
-    if (!character.value) return
-    const fileName = currentChatFile.value || getCharacterChatName(character.value)
+  async function persist(account = accountEpoch, chat = chatEpoch) {
+    const currentCharacter = character.value
+    if (account !== accountEpoch || chat !== chatEpoch || !ready.value || !currentCharacter) return
+    const fileName = currentChatFile.value || getCharacterChatName(currentCharacter)
     await saveChat(
-      character.value.name,
+      currentCharacter.name,
       fileName,
-      character.value.avatar,
+      currentCharacter.avatar,
       messages.value,
       metadata.value,
     )
   }
 
-  let persistPromise: Promise<void> | null = null
-  let persistDirty = false
+  interface PersistRun {
+    accountEpoch: number
+    chatEpoch: number
+    dirty: boolean
+    promise: Promise<void>
+  }
+  let persistRun: PersistRun | null = null
 
   // 合并并发保存：写入进行中时新的请求只置脏标记，写完后补一次，避免重复 IO 与乱序覆盖
   function persistSafe(): Promise<void> {
-    if (persistPromise) {
-      persistDirty = true
-      return persistPromise
+    const account = accountEpoch
+    const chat = chatEpoch
+    if (!ready.value) return Promise.resolve()
+    if (persistRun?.accountEpoch === account && persistRun.chatEpoch === chat) {
+      persistRun.dirty = true
+      return persistRun.promise
     }
-    persistPromise = (async () => {
+    const run: PersistRun = {
+      accountEpoch: account,
+      chatEpoch: chat,
+      dirty: false,
+      promise: Promise.resolve(),
+    }
+    run.promise = (async () => {
       try {
         do {
-          persistDirty = false
-          await persist()
-        } while (persistDirty)
-        error.value = ''
+          run.dirty = false
+          if (account !== accountEpoch || chat !== chatEpoch) return
+          await persist(account, chat)
+        } while (run.dirty && account === accountEpoch && chat === chatEpoch)
+        if (account === accountEpoch && chat === chatEpoch) error.value = ''
       } catch (e) {
-        const message = e instanceof Error ? e.message : String(e)
+        if (account !== accountEpoch || chat !== chatEpoch) return
+        const message = getApiErrorMessage(e, '聊天保存失败')
         error.value = 'Save failed: ' + message
         useUiStore().addToast(`聊天保存失败：${message}`, 'error', 5000)
       } finally {
-        persistPromise = null
+        if (persistRun === run) persistRun = null
       }
     })()
-    return persistPromise
+    persistRun = run
+    return run.promise
   }
 
   function getMetadataProfileId(): string {
@@ -293,7 +331,8 @@ export const useChatStore = defineStore('chat', () => {
 
   async function setSelectedProfileId(profileId: string) {
     const profiles = useModelProfilesStore()
-    if (!profiles.getProfile(profileId)) return
+    const profile = profiles.getProfile(profileId)
+    if (!profile || profile.enabled === false) return
     selectedProfileId.value = profileId
     writeMetadataProfileId(profileId)
     await persistSafe()
@@ -313,8 +352,18 @@ export const useChatStore = defineStore('chat', () => {
 
   async function sendMessage(text: string) {
     if (!text.trim() || !character.value) return
+    if (!ready.value) {
+      useUiStore().addToast(error.value || '聊天尚未加载完成，请重试', 'error', 5000)
+      return
+    }
     if (streaming.value.active || memoryUpdating.value) return
+    if (!selectedProfile.value.id) {
+      useUiStore().addToast('当前没有可用模型，请联系管理员', 'warning')
+      return
+    }
     clearReplyDrafts()
+    const epoch = accountEpoch
+    const activeChatEpoch = chatEpoch
 
     messages.value.push({
       role: 'user',
@@ -323,7 +372,7 @@ export const useChatStore = defineStore('chat', () => {
     })
 
     await persistSafe()
-
+    if (epoch !== accountEpoch || activeChatEpoch !== chatEpoch) return
     await runGeneration({ updateMemory: true })
   }
 
@@ -368,15 +417,27 @@ export const useChatStore = defineStore('chat', () => {
     return `${cleaned.slice(0, MEMORY_SUMMARY_MAX_CHARS).trim()}...`
   }
 
+  function shouldRefreshMemory(sourceMessages: ChatMessage[]): boolean {
+    const historyCount = Math.max(0, sourceMessages.length - 1)
+    const previousCount = getMemoryState().messageCount
+    if (historyCount < 2) return false
+    if (previousCount === 0) return true
+    return historyCount - previousCount >= MEMORY_REFRESH_MESSAGE_INTERVAL
+  }
+
   async function refreshMemorySummary(
     sourceMessages: ChatMessage[],
     config: ModelProfile,
     effectiveCharacter: Character,
     userName: string,
+    shouldCommit: () => boolean = () => true,
   ): Promise<string> {
+    const epoch = accountEpoch
+    const activeChatEpoch = chatEpoch
+    const isSameChat = () => epoch === accountEpoch && activeChatEpoch === chatEpoch
     const historyMessages = sourceMessages.slice(0, Math.max(0, sourceMessages.length - 1))
     if (!historyMessages.length) {
-      writeMemoryState('', 0)
+      if (shouldCommit()) writeMemoryState('', 0)
       return ''
     }
 
@@ -385,7 +446,7 @@ export const useChatStore = defineStore('chat', () => {
       formatMemoryTranscript(historyMessages, userName, effectiveCharacter.name || '角色'),
     )
     if (!transcript) {
-      writeMemoryState('', 0)
+      if (shouldCommit()) writeMemoryState('', 0)
       return ''
     }
 
@@ -416,17 +477,36 @@ export const useChatStore = defineStore('chat', () => {
           },
         ],
         effectiveCharacter,
-        MEMORY_SUMMARY_PRESET,
         userName,
       )
+      if (!shouldCommit()) return previousMemory
       const reply = await generateReply(payload)
       const summary = normalizeMemoryReply(reply)
+      if (!shouldCommit()) return previousMemory
       writeMemoryState(summary, historyMessages.length)
       await persistSafe()
       return summary
     } finally {
-      memoryUpdating.value = false
+      // 只要还停在同一个聊天就必须解除 busy 状态，否则输入框会被永久锁死
+      if (isSameChat()) memoryUpdating.value = false
     }
+  }
+
+  // 记忆整理放在本轮回复之后异步进行，不占用用户可见的首字延迟
+  function scheduleMemoryRefresh(
+    config: ModelProfile,
+    effectiveCharacter: Character,
+    userName: string,
+    shouldCommit: () => boolean,
+  ) {
+    if (memoryUpdating.value || !shouldCommit()) return
+    const sourceMessages = [...messages.value]
+    if (!shouldRefreshMemory(sourceMessages)) return
+
+    void refreshMemorySummary(sourceMessages, config, effectiveCharacter, userName, shouldCommit)
+      .catch((e: unknown) => {
+        console.warn('Memory summary failed:', getApiErrorMessage(e, '记忆整理失败'))
+      })
   }
 
   function clearReplyDrafts() {
@@ -443,6 +523,13 @@ export const useChatStore = defineStore('chat', () => {
     replyDraftLoading.value = true
     replyDraftError.value = ''
     const requestId = ++replyDraftRequestId
+    const epoch = accountEpoch
+    const activeChatEpoch = chatEpoch
+    const isCurrentRequest = () => (
+      requestId === replyDraftRequestId
+      && epoch === accountEpoch
+      && activeChatEpoch === chatEpoch
+    )
 
     try {
       const config = selectedProfile.value
@@ -457,6 +544,7 @@ export const useChatStore = defineStore('chat', () => {
       } catch (e) {
         console.warn('World info scan failed for reply draft', e)
       }
+      if (!isCurrentRequest()) return
 
       const payload = buildReplyDraftPayload(config, effectiveCharacter, messages.value, {
         userName: personaName,
@@ -465,19 +553,20 @@ export const useChatStore = defineStore('chat', () => {
         worldInfoText,
         userNote,
       })
+      if (!isCurrentRequest()) return
       const reply = await generateReply(payload)
-      if (requestId !== replyDraftRequestId) return
+      if (!isCurrentRequest()) return
       const options = parseReplyDraftOptions(reply)
       if (!options.length) {
         throw new Error('模型没有返回可用的回复选项')
       }
       replyDraftOptions.value = options
-    } catch (e) {
-      if (requestId !== replyDraftRequestId) return
-      replyDraftError.value = e instanceof Error && e.message ? e.message : '拟回复失败'
+    } catch (e: unknown) {
+      if (!isCurrentRequest()) return
+      replyDraftError.value = getApiErrorMessage(e, '拟回复失败')
       replyDraftOptions.value = []
     } finally {
-      if (requestId === replyDraftRequestId) {
+      if (isCurrentRequest()) {
         replyDraftLoading.value = false
       }
     }
@@ -485,6 +574,14 @@ export const useChatStore = defineStore('chat', () => {
 
   async function runGeneration(options: GenerationOptions = {}) {
     if (!character.value) return
+    const requestId = ++generationRequestId
+    const epoch = accountEpoch
+    const activeChatEpoch = chatEpoch
+    const isCurrentRequest = () => (
+      requestId === generationRequestId
+      && epoch === accountEpoch
+      && activeChatEpoch === chatEpoch
+    )
 
     const config = selectedProfile.value
     const sourceMessages = options.extraMessages?.length
@@ -493,6 +590,7 @@ export const useChatStore = defineStore('chat', () => {
 
     const modsStore = useModsStore()
     if (!modsStore.loaded) await modsStore.load()
+    if (!isCurrentRequest()) return
     const globalEnabled = modsStore.mods.filter((m) => m.enabled)
     const localMods = modsStore.getModsByIds(selectedModIds.value).map((m) => ({ ...m, enabled: true }))
     const seen = new Set<string>()
@@ -510,25 +608,15 @@ export const useChatStore = defineStore('chat', () => {
     } catch (e) {
       console.warn('World info scan failed', e)
     }
+    if (!isCurrentRequest()) return
 
     const personas = usePersonasStore()
     const personaName = personas.activePersona?.name || 'User'
     const personaDescription = personas.activePersona?.description || ''
-    let memorySummaryForPrompt = getMemoryState().summary
+    // 本轮直接使用已存下来的记忆；新的整理在回复结束后异步进行
+    const memorySummaryForPrompt = getMemoryState().summary
 
-    if (options.updateMemory) {
-      try {
-        memorySummaryForPrompt = await refreshMemorySummary(
-          sourceMessages,
-          config,
-          effectiveCharacter,
-          personaName,
-        )
-      } catch (e) {
-        console.warn('Memory summary failed', e)
-        memorySummaryForPrompt = getMemoryState().summary
-      }
-    }
+    if (!isCurrentRequest()) return
 
     const payload = buildGeneratePayload(
       config,
@@ -552,6 +640,7 @@ export const useChatStore = defineStore('chat', () => {
     let reasoningContent = ''
     try {
       for await (const evt of generateReplyStream(payload, controller.signal)) {
+        if (!isCurrentRequest()) return
         if (evt.content) {
           streaming.value.partial.content += evt.content
         }
@@ -564,12 +653,22 @@ export const useChatStore = defineStore('chat', () => {
       const content = streaming.value.partial.content.trim()
       if (content) {
         commitAssistantContent(content, options, reasoningContent)
+      } else {
+        throw new Error(
+          reasoningContent
+            ? '模型只返回了推理过程，没有返回正文。请提高最大输出长度后重试。'
+            : '模型没有返回内容。请检查模型配置后重试。',
+        )
       }
     } catch (e) {
-      const err = e instanceof Error ? e : new Error(String(e))
-      const aborted = err.name === 'AbortError'
+      if (!isCurrentRequest()) return
+      const aborted = e instanceof Error && e.name === 'AbortError'
       if (!aborted) {
-        useUiStore().addToast(`生成失败：${err.message || '请检查模型配置'}`, 'error', 5000)
+        useUiStore().addToast(
+          `生成失败：${getApiErrorMessage(e, '请检查模型配置')}`,
+          'error',
+          5000,
+        )
       }
 
       // 已收到的部分内容仍然保留；没有部分内容时恢复重新生成前的 swipes
@@ -587,8 +686,13 @@ export const useChatStore = defineStore('chat', () => {
         })
       }
     } finally {
-      streaming.value = { active: false, controller: null, partial: { content: '' } }
-      await persistSafe()
+      if (isCurrentRequest()) {
+        streaming.value = { active: false, controller: null, partial: { content: '' } }
+        await persistSafe()
+        if (options.updateMemory) {
+          scheduleMemoryRefresh(config, effectiveCharacter, personaName, isCurrentRequest)
+        }
+      }
     }
   }
 
@@ -598,9 +702,20 @@ export const useChatStore = defineStore('chat', () => {
       messages.value[options.appendToIndex]?.role === 'assistant'
     ) {
       const prev = messages.value[options.appendToIndex]
+      const nextContent = `${prev.content}\n\n${content}`
+      const swipes = Array.isArray(prev.swipes) ? [...prev.swipes] : [prev.content]
+      let swipeId = typeof prev.swipe_id === 'number' ? prev.swipe_id : swipes.indexOf(prev.content)
+      if (swipeId < 0 || swipeId >= swipes.length) {
+        swipeId = swipes.length
+        swipes.push(nextContent)
+      } else {
+        swipes[swipeId] = nextContent
+      }
       messages.value[options.appendToIndex] = {
         ...prev,
-        content: `${prev.content}\n\n${content}`,
+        content: nextContent,
+        swipes,
+        swipe_id: swipeId,
       }
       return
     }
@@ -659,7 +774,15 @@ export const useChatStore = defineStore('chat', () => {
     await runGeneration({ swipes: oldSwipes })
   }
 
+  // 流式生成期间消息下标随时可能变化，按下标改写会写错消息，一律拦下
+  function blockedByStreaming(): boolean {
+    if (!streaming.value.active) return false
+    useUiStore().addToast('生成中，请先停止再操作', 'warning')
+    return true
+  }
+
   async function applySwipe(index: number, direction: -1 | 1) {
+    if (blockedByStreaming()) return
     const msg = messages.value[index]
     if (!msg || msg.role !== 'assistant' || !msg.swipes?.length) return
 
@@ -680,6 +803,7 @@ export const useChatStore = defineStore('chat', () => {
   }
 
   async function editMessage(index: number, newContent: string) {
+    if (blockedByStreaming()) return
     if (index < 0 || index >= messages.value.length) return
     const msg = messages.value[index]
     const next: ChatMessage = { ...msg, content: newContent }
@@ -698,12 +822,14 @@ export const useChatStore = defineStore('chat', () => {
   }
 
   async function deleteMessage(index: number) {
+    if (blockedByStreaming()) return
     if (index < 0 || index >= messages.value.length) return
     messages.value.splice(index, 1)
     await persistSafe()
   }
 
   async function attachImageToMessage(index: number, asset: ImageAsset) {
+    if (blockedByStreaming()) return
     if (index < 0 || index >= messages.value.length) return
     const msg = messages.value[index]
     const images = Array.isArray(msg.images) ? [...msg.images] : []
@@ -764,6 +890,7 @@ export const useChatStore = defineStore('chat', () => {
     selectedWorld,
     selectedModIds,
     loading,
+    ready,
     error,
     memoryUpdating,
     memorySummary,

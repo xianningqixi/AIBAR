@@ -1,245 +1,296 @@
 <script setup lang="ts">
-import { ref } from 'vue'
-import { useRouter } from 'vue-router'
+import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { useCharactersStore } from '@/stores/characters'
+import { useSessionStore } from '@/stores/session'
 import { useUiStore } from '@/stores/ui'
-import { downloadCommunityContent } from '@/api/community'
+import {
+  downloadCommunityContent,
+  listCommunityWorks,
+  type CommunityWork,
+  type CommunityWorkType,
+} from '@/api/community'
 import { fetchCharacter, importCharacter } from '@/api/characters'
 import { characterGreetings, saveStoryFromCharacterGreeting } from '@/lib/storyFromCharacter'
+import DiscordImportPanel from '@/components/community/DiscordImportPanel.vue'
+import WorkCard from '@/components/community/WorkCard.vue'
 import AppButton from '@/components/ui/AppButton.vue'
+import AppEmpty from '@/components/ui/AppEmpty.vue'
 import AppPageHeader from '@/components/ui/AppPageHeader.vue'
+import AppSpinner from '@/components/ui/AppSpinner.vue'
+import AppCard from '@/components/ui/AppCard.vue'
+import AppInput from '@/components/ui/AppInput.vue'
+import SearchInput from '@/components/ui/SearchInput.vue'
+import { getApiErrorMessage } from '@/api/client'
 
-interface ImportResult {
-  title: string
-  detail: string
-  avatar?: string
-  storyId?: string
-}
+// 筛选栏统一控件尺寸：分段控件与开关胶囊同高
+const segmentedClass = 'inline-flex h-9 shrink-0 items-center rounded-lg border border-border bg-surface p-1'
+const segmentedItemClass = 'inline-flex h-7 items-center rounded-md px-3 text-xs font-medium transition-colors'
+const chipClass = 'inline-flex h-9 shrink-0 items-center rounded-lg border px-3 text-xs font-medium transition-colors'
 
+const route = useRoute()
 const router = useRouter()
 const chars = useCharactersStore()
+const session = useSessionStore()
 const ui = useUiStore()
 
-const url = ref('')
-const importing = ref(false)
-const lastResult = ref<ImportResult | null>(null)
-const normalizedFromPreview = ref(false)
+type HubSource = 'community' | 'discord'
 
-const importSteps = [
-  {
-    title: '打开资源帖',
-    detail: '先看作者标注的“最新版 / 卡本体 / 第一张是卡本体”。',
-  },
-  {
-    title: '复制 PNG 图片链接',
-    detail: '要复制图片本体地址，不是 Discord 帖子地址；JPG 通常只是预览。',
-  },
-  {
-    title: '粘贴后导入',
-    detail: '链接通常长这样：cdn.discordapp.com/attachments/.../*.png',
-  },
+const source = ref<HubSource>(route.query.source === 'discord' ? 'discord' : 'community')
+const works = ref<CommunityWork[]>([])
+const loading = ref(false)
+const loadingMore = ref(false)
+const search = ref('')
+const type = ref<'' | CommunityWorkType>('')
+const ranking = ref<'recommended' | 'recent' | 'daily' | 'weekly' | 'monthly' | 'all'>('recommended')
+const noImage = ref(false)
+const favoritesOnly = ref(false)
+const mineOnly = ref(false)
+const page = ref(1)
+const hasMore = ref(false)
+let searchTimer: ReturnType<typeof setTimeout> | null = null
+let requestSequence = 0
+
+const importUrl = ref('')
+const importing = ref(false)
+const importResult = ref('')
+
+const rankings = [
+  { value: 'recommended', label: '推荐' },
+  { value: 'recent', label: '最新' },
+  { value: 'daily', label: '日榜' },
+  { value: 'weekly', label: '周榜' },
+  { value: 'monthly', label: '月榜' },
+  { value: 'all', label: '总榜' },
+] as const
+
+const typeFilters: { value: '' | CommunityWorkType; label: string }[] = [
+  { value: '', label: '全部' },
+  { value: 'character', label: '角色' },
+  { value: 'story', label: '故事' },
+  { value: 'mod', label: '提示词' },
 ]
 
-function ensureFileName(name: string, fallback: string): string {
-  return name.trim() || fallback
-}
-
-function importErrorMessage(error: any): string {
-  if (error?.status === 500) {
-    return 'ST 后端连接 Discord CDN 失败，通常是服务端没有走代理。链接本身可能没问题，可以先在浏览器下载 PNG 后导入'
+async function loadWorks(append = false) {
+  const requestId = ++requestSequence
+  const requestedPage = append ? page.value + 1 : 1
+  if (append) {
+    loadingMore.value = true
+  } else {
+    loading.value = true
+    loadingMore.value = false
+    works.value = []
+    hasMore.value = false
   }
-  return error?.message || '请检查链接或网络'
-}
-
-function normalizeDiscordAttachmentUrl(value: string): string {
-  let parsed: URL
   try {
-    parsed = new URL(value)
-  } catch {
-    throw new Error('链接格式不正确')
+    const result = await listCommunityWorks({
+      search: search.value,
+      type: type.value,
+      ranking: ranking.value,
+      favoritesOnly: favoritesOnly.value,
+      mineOnly: mineOnly.value,
+      page: requestedPage,
+    })
+    if (requestId !== requestSequence) return
+    if (append) {
+      const existingIds = new Set(works.value.map(work => work.id))
+      works.value = [...works.value, ...result.works.filter(work => !existingIds.has(work.id))]
+    } else {
+      works.value = result.works
+    }
+    page.value = result.page
+    hasMore.value = result.hasMore
+  } catch (e: unknown) {
+    if (requestId === requestSequence) ui.addToast(`加载社区失败：${getApiErrorMessage(e)}`, 'error')
+  } finally {
+    if (requestId === requestSequence) {
+      loading.value = false
+      loadingMore.value = false
+    }
   }
+}
 
-  const isDiscordMessageLink =
-    parsed.hostname === 'discord.com' && parsed.pathname.includes('/channels/')
+function loadCommunityWorks() {
+  if (source.value === 'community') void loadWorks()
+}
 
-  if (isDiscordMessageLink) {
-    throw new Error('这是 Discord 帖子链接，不是卡体链接。请在帖子里找到“卡本体/最新版”的 PNG 图片，右键复制图片链接后再导入')
+function loadMoreWorks() {
+  if (!loading.value && !loadingMore.value && hasMore.value) void loadWorks(true)
+}
+
+function selectSource(next: HubSource) {
+  source.value = next
+  const query = { ...route.query }
+  if (next === 'discord') query.source = 'discord'
+  else delete query.source
+  void router.replace({ query })
+  if (next === 'community' && !works.value.length) void loadWorks()
+}
+
+watch(
+  () => route.query.source,
+  (value) => {
+    const next: HubSource = value === 'discord' ? 'discord' : 'community'
+    if (source.value === next) return
+    source.value = next
+    if (next === 'community' && !works.value.length) void loadWorks()
+  },
+)
+watch([type, ranking, favoritesOnly, mineOnly], loadCommunityWorks)
+watch(search, () => {
+  if (searchTimer) clearTimeout(searchTimer)
+  searchTimer = setTimeout(loadCommunityWorks, 250)
+})
+
+function normalizeDiscordUrl(value: string): string {
+  const parsed = new URL(value)
+  const validHost = parsed.hostname === 'cdn.discordapp.com' || parsed.hostname === 'media.discordapp.net'
+  if (!validHost || !parsed.pathname.includes('/attachments/') || !parsed.pathname.toLowerCase().endsWith('.png')) {
+    throw new Error('请使用 Discord 附件中的 PNG 卡体链接')
   }
-
-  const isDiscordAttachment =
-    (parsed.hostname === 'cdn.discordapp.com' || parsed.hostname === 'media.discordapp.net') &&
-    parsed.pathname.includes('/attachments/')
-
-  if (!isDiscordAttachment) {
-    throw new Error('请粘贴类脑 Discord 附件里的 PNG 卡体链接，格式类似 cdn.discordapp.com/attachments/.../*.png')
-  }
-
-  if (!parsed.pathname.toLowerCase().endsWith('.png')) {
-    throw new Error('这个链接看起来不是 PNG 角色卡。JPG/WebP 通常是预览图，请改复制卡体 PNG')
-  }
-
-  if (parsed.hostname === 'media.discordapp.net') {
-    parsed.hostname = 'cdn.discordapp.com'
-  }
-
-  for (const key of ['format', 'quality', 'width', 'height', '']) {
-    parsed.searchParams.delete(key)
-  }
-
+  parsed.hostname = 'cdn.discordapp.com'
+  for (const key of ['format', 'quality', 'width', 'height']) parsed.searchParams.delete(key)
   return parsed.toString()
 }
 
-async function importFromUrl() {
-  const rawLink = url.value.trim()
-  if (!rawLink) {
-    ui.addToast('先粘贴类脑 Discord 的 PNG 卡体链接', 'warning')
-    return
-  }
-
+async function importFromDiscord() {
+  if (!importUrl.value.trim()) return
+  const accountHandle = session.user?.handle || ''
+  const accountIsCurrent = () => accountHandle && session.user?.handle === accountHandle
   importing.value = true
+  importResult.value = ''
   try {
-    const link = normalizeDiscordAttachmentUrl(rawLink)
-    normalizedFromPreview.value = link !== rawLink
-    url.value = link
-
-    const content = await downloadCommunityContent(link)
-    if (content.type !== 'character') {
-      throw new Error('ST 没有把这个链接识别成角色卡，请确认链接是卡体 PNG')
-    }
-
-    const file = new File([content.blob], ensureFileName(content.fileName, 'discord-character.png'), {
-      type: content.mimeType || content.blob.type || 'image/png',
-    })
+    const content = await downloadCommunityContent(normalizeDiscordUrl(importUrl.value.trim()))
+    if (!accountIsCurrent()) return
+    if (content.type !== 'character') throw new Error('该 PNG 未被识别为角色卡')
+    const file = new File([content.blob], content.fileName || 'discord-character.png', { type: content.mimeType || 'image/png' })
     const imported = await importCharacter(file)
-    const importedAvatar = imported.file_name ? `${imported.file_name}.png` : ''
-    let storyId = ''
-    let title = file.name
-    let detail = '已写入 ST 角色库，可以直接进入角色管理或开始聊天。'
-
-    if (importedAvatar) {
+    if (!accountIsCurrent()) return
+    const avatar = imported.file_name ? `${imported.file_name}.png` : ''
+    const issues: string[] = []
+    let storyText = ''
+    if (avatar) {
       try {
-        const character = await fetchCharacter(importedAvatar)
-        title = character.name || title
+        const character = await fetchCharacter(avatar)
+        if (!accountIsCurrent()) return
         const greeting = characterGreetings(character)[0]
         if (greeting) {
-          const story = await saveStoryFromCharacterGreeting(character, greeting, 0)
-          storyId = story.id
-          detail = '已写入 ST 角色库，并已从角色卡开场白生成故事卡。'
-        } else {
-          detail = '已写入 ST 角色库；这张卡没有开场白，所以没有生成故事卡。'
+          await saveStoryFromCharacterGreeting(character, greeting, 0)
+          if (!accountIsCurrent()) return
+          storyText = '，并生成了故事卡'
         }
-      } catch (error) {
-        console.warn('Failed to create story from imported character:', error)
-        detail = '角色卡已导入；自动生成故事卡失败，可以在角色详情页手动生成。'
+      } catch (e: unknown) {
+        issues.push(`故事卡生成失败：${getApiErrorMessage(e, '未知错误')}`)
       }
+    } else {
+      issues.push('后端未返回角色文件名')
     }
-
-    await chars.load()
-    lastResult.value = {
-      title,
-      detail,
-      avatar: importedAvatar,
-      storyId,
+    try {
+      await chars.load()
+      if (!accountIsCurrent()) return
+      if (chars.error) issues.push(`角色列表刷新失败：${chars.error}`)
+    } catch (e: unknown) {
+      issues.push(`角色列表刷新失败：${getApiErrorMessage(e, '未知错误')}`)
     }
-    ui.addToast(storyId ? `已导入角色卡并生成故事卡：${title}` : `已导入角色卡：${title}`, 'success')
-  } catch (e: any) {
-    normalizedFromPreview.value = false
-    ui.addToast(`导入失败：${importErrorMessage(e)}`, 'error')
+    importResult.value = `角色卡已导入私人资料库${storyText}${issues.length ? `；${issues.join('；')}` : ''}`
+    ui.addToast(importResult.value, issues.length ? 'warning' : 'success', issues.length ? 5000 : 3000)
+  } catch (e: unknown) {
+    ui.addToast(`导入失败：${getApiErrorMessage(e)}`, 'error')
   } finally {
     importing.value = false
   }
 }
+
+onMounted(() => {
+  if (source.value === 'community') void loadWorks()
+})
+
+onBeforeUnmount(() => {
+  requestSequence += 1
+  if (searchTimer) clearTimeout(searchTimer)
+})
 </script>
 
 <template>
-  <div class="min-h-screen bg-bg">
-    <AppPageHeader title="社区 Hub" subtitle="类脑 Discord 角色卡导入" back-to="/browse" mobile-only-back>
+  <div class="min-h-[100dvh] bg-bg">
+    <AppPageHeader
+      :title="source === 'discord' ? 'Discord 角色卡' : '社区作品'"
+      :subtitle="source === 'discord' ? '今日热门候选与私人导入队列' : '角色卡、故事与提示词'"
+      :show-back="false"
+    >
       <template #actions>
-        <AppButton variant="secondary" size="sm" @click="router.push('/characters')">角色库</AppButton>
+        <AppButton v-if="source === 'community'" size="sm" variant="secondary" @click="router.push('/publish')">发布作品</AppButton>
       </template>
     </AppPageHeader>
 
-    <main class="mx-auto max-w-5xl space-y-5 px-5 py-6 animate-fade-in-up">
-      <section class="grid gap-4 lg:grid-cols-[1.15fr_0.85fr]">
-        <div class="rounded-xl border border-border bg-surface p-5">
-          <div>
-            <p class="text-xs font-semibold uppercase tracking-[0.18em] text-brand-300">Discord Import</p>
-            <h2 class="mt-2 text-xl font-semibold text-ink-primary">导入类脑角色卡 PNG</h2>
-            <p class="mt-1 text-sm text-ink-muted">粘贴最新版本楼层里的卡体 PNG 附件链接，不要粘贴帖子链接。</p>
-          </div>
+    <main class="mx-auto max-w-6xl px-5 py-6 md:px-8 lg:px-10">
+      <div class="mb-6 inline-flex w-full rounded-lg border border-border bg-surface p-1 md:w-auto" aria-label="资源来源">
+        <button
+          class="min-w-0 flex-1 rounded-md px-2 py-2 text-xs font-medium leading-tight md:flex-none md:px-4 md:text-sm"
+          :class="source === 'community' ? 'bg-brand-500/10 text-brand-300' : 'text-ink-secondary hover:bg-surface-sunken'"
+          :aria-pressed="source === 'community'"
+          @click="selectSource('community')"
+        ><span class="md:hidden">AIBAR</span><span class="hidden md:inline">AIBAR 社区</span></button>
+        <button
+          class="min-w-0 flex-1 rounded-md px-2 py-2 text-xs font-medium leading-tight md:flex-none md:px-4 md:text-sm"
+          :class="source === 'discord' ? 'bg-brand-500/10 text-brand-300' : 'text-ink-secondary hover:bg-surface-sunken'"
+          :aria-pressed="source === 'discord'"
+          @click="selectSource('discord')"
+        ><span class="md:hidden">Discord 热门</span><span class="hidden md:inline">Discord 今日热门</span></button>
+      </div>
 
-          <div class="mt-5 grid gap-3 md:grid-cols-3">
-            <div
-              v-for="(step, index) in importSteps"
-              :key="step.title"
-              class="rounded-lg border border-border-subtle bg-surface-sunken p-3"
-            >
-              <div class="flex items-center gap-2">
-                <span class="flex h-6 w-6 items-center justify-center rounded-full bg-brand-500/15 text-xs font-semibold text-brand-200">
-                  {{ index + 1 }}
-                </span>
-                <h3 class="text-sm font-semibold text-ink-primary">{{ step.title }}</h3>
+      <template v-if="source === 'community'">
+        <div class="space-y-6">
+          <!-- 筛选栏：搜索 + 分段控件（类型/榜单）+ 开关胶囊，控件统一 h-9 -->
+          <div class="flex flex-col gap-3 border-b border-border pb-5">
+            <div class="flex flex-col gap-3 lg:flex-row lg:items-center">
+              <SearchInput v-model="search" class="min-w-0 flex-1" placeholder="搜索标题、作者或简介" />
+              <div class="flex flex-wrap items-center gap-2">
+                <div :class="segmentedClass" role="group" aria-label="作品类型">
+                  <button v-for="item in typeFilters" :key="item.value" :class="[segmentedItemClass, type === item.value ? 'bg-brand-500/10 text-brand-300' : 'text-ink-secondary hover:bg-surface-sunken']" :aria-pressed="type === item.value" @click="type = item.value">{{ item.label }}</button>
+                </div>
+                <button :class="[chipClass, favoritesOnly ? 'border-brand-500 bg-brand-500/10 text-brand-300' : 'border-border bg-surface text-ink-secondary hover:bg-surface-sunken']" :aria-pressed="favoritesOnly" @click="favoritesOnly = !favoritesOnly">收藏</button>
+                <button :class="[chipClass, mineOnly ? 'border-brand-500 bg-brand-500/10 text-brand-300' : 'border-border bg-surface text-ink-secondary hover:bg-surface-sunken']" :aria-pressed="mineOnly" @click="mineOnly = !mineOnly">我发布的</button>
+                <button :class="[chipClass, noImage ? 'border-brand-500 bg-brand-500/10 text-brand-300' : 'border-border bg-surface text-ink-secondary hover:bg-surface-sunken']" :aria-pressed="noImage" @click="noImage = !noImage">无图模式</button>
               </div>
-              <p class="mt-2 text-xs leading-relaxed text-ink-muted">{{ step.detail }}</p>
+            </div>
+            <div class="overflow-x-auto">
+              <div :class="segmentedClass" role="group" aria-label="排序榜单">
+                <button v-for="item in rankings" :key="item.value" :class="[segmentedItemClass, ranking === item.value ? 'bg-brand-500/10 text-brand-300' : 'text-ink-secondary hover:bg-surface-sunken']" :aria-pressed="ranking === item.value" @click="ranking = item.value">{{ item.label }}</button>
+              </div>
             </div>
           </div>
 
-          <div class="mt-5 flex flex-col gap-3 sm:flex-row">
-            <input
-              v-model="url"
-              type="url"
-              placeholder="粘贴 cdn.discordapp.com/attachments/.../*.png"
-              class="min-h-[42px] flex-1 rounded-lg border border-border bg-surface-sunken px-3 text-sm text-ink-primary transition-all placeholder:text-ink-muted focus:border-brand-500/70 focus:outline-none focus:ring-2 focus:ring-brand-500/30"
-              @keydown.enter.prevent="importFromUrl"
-            />
-            <AppButton variant="gradient" size="md" :disabled="importing" @click="importFromUrl">
-              {{ importing ? '导入中…' : '导入角色卡' }}
-            </AppButton>
-          </div>
-
-          <p v-if="normalizedFromPreview" class="mt-3 text-xs text-ink-muted">
-            已自动转换为 Discord 原图链接。
-          </p>
-        </div>
-
-        <div class="rounded-xl border border-border bg-surface p-5">
-          <div v-if="lastResult" class="flex h-full flex-col justify-between gap-5">
-            <div>
-              <p class="text-xs font-semibold uppercase tracking-[0.18em] text-accent-300">Last Import</p>
-              <h3 class="mt-2 text-lg font-semibold text-ink-primary">{{ lastResult.title }}</h3>
-              <p class="mt-2 text-sm leading-relaxed text-ink-secondary">{{ lastResult.detail }}</p>
-            </div>
-            <div class="flex flex-wrap gap-2">
-              <AppButton
-                v-if="lastResult.storyId"
-                size="md"
-                variant="gradient"
-                @click="router.push(`/story/${encodeURIComponent(lastResult.storyId || '')}`)"
-              >
-                查看故事卡
-              </AppButton>
-              <AppButton
-                v-if="lastResult.avatar"
-                size="md"
-                variant="secondary"
-                @click="router.push(`/character/${encodeURIComponent(lastResult.avatar || '')}`)"
-              >
-                查看角色
-              </AppButton>
-              <AppButton size="md" variant="secondary" @click="router.push('/characters')">
-                角色库
-              </AppButton>
-            </div>
-          </div>
-          <div v-else class="flex h-full min-h-[170px] flex-col justify-center">
-            <p class="text-xs font-semibold uppercase tracking-[0.18em] text-ink-muted">Ready</p>
-            <h3 class="mt-2 text-lg font-semibold text-ink-primary">等待 Discord 卡体链接</h3>
-            <p class="mt-2 text-sm leading-relaxed text-ink-secondary">
-              JPG 和 WebP 通常是预览图；角色卡本体一般是 Discord 附件里的 PNG。
-            </p>
+          <div v-if="loading" class="py-20"><AppSpinner size="lg" /></div>
+          <AppEmpty v-else-if="!works.length" class="!py-8 md:!py-16" icon="search" title="没有匹配的作品" description="调整筛选条件，或发布第一份公共作品。">
+            <template #actions><AppButton @click="router.push('/publish')">发布作品</AppButton></template>
+          </AppEmpty>
+          <section v-else :class="noImage ? 'grid gap-4 sm:grid-cols-2 lg:grid-cols-3' : 'grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5'">
+            <button v-for="work in works" :key="work.id" class="h-full min-w-0 text-left" @click="router.push(`/work/${encodeURIComponent(work.id)}`)">
+              <WorkCard :work="work" :no-image="noImage" />
+            </button>
+          </section>
+          <div v-if="hasMore" class="flex justify-center">
+            <AppButton variant="secondary" :disabled="loadingMore" @click="loadMoreWorks">{{ loadingMore ? '加载中…' : '加载更多' }}</AppButton>
           </div>
         </div>
-      </section>
+      </template>
+
+      <template v-else>
+        <div class="space-y-6">
+          <DiscordImportPanel />
+
+          <AppCard collapsible title="手动导入 Discord PNG 链接" :default-open="false">
+            <div class="max-w-3xl space-y-4">
+              <div class="flex flex-col gap-3 md:flex-row">
+                <AppInput v-model="importUrl" type="url" placeholder="cdn.discordapp.com/attachments/.../*.png" class="min-w-0 flex-1" @keydown.enter.prevent="importFromDiscord" />
+                <AppButton variant="secondary" :disabled="importing" @click="importFromDiscord">{{ importing ? '导入中…' : '导入到私人库' }}</AppButton>
+              </div>
+              <p v-if="importResult" class="text-sm text-emerald-700">{{ importResult }}</p>
+            </div>
+          </AppCard>
+        </div>
+      </template>
     </main>
   </div>
 </template>

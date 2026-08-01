@@ -20,23 +20,16 @@ const providerLabel = computed(() => getProviderLabel(props.profile.source))
 </script>
 
 <template>
-  <div class="relative flex items-center gap-3 px-4 py-3 border-b border-border-subtle bg-bg/90 backdrop-blur">
+  <!-- 左：返回 + 头像 + 名称；右：模型 + 聊天列表 + 设置。不使用绝对定位，避免中窄屏与标题重叠 -->
+  <div class="flex items-center gap-3 px-4 py-3 border-b border-border-subtle bg-bg/90 backdrop-blur">
     <button
-      class="p-2 -ml-1 rounded-lg text-ink-secondary hover:text-ink-primary hover:bg-ink-primary/5 transition-colors"
+      class="shrink-0 p-2 -ml-1 rounded-lg text-ink-secondary hover:text-ink-primary hover:bg-ink-primary/5 transition-colors"
+      title="返回"
+      aria-label="返回"
       @click="$emit('back')"
     >
       <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7" />
-      </svg>
-    </button>
-
-    <button
-      class="p-2 rounded-lg text-ink-secondary hover:text-ink-primary hover:bg-ink-primary/5 transition-colors"
-      title="聊天列表"
-      @click="$emit('toggleSidebar')"
-    >
-      <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h10" />
       </svg>
     </button>
 
@@ -65,31 +58,34 @@ const providerLabel = computed(() => getProviderLabel(props.profile.source))
       </div>
     </div>
 
-    <button
-      class="absolute left-1/2 top-1/2 hidden -translate-x-1/2 -translate-y-1/2 items-center gap-2 rounded-xl bg-surface px-4 py-2 text-sm font-semibold text-ink-primary ring-1 ring-border-subtle shadow-sm transition-all hover:ring-brand-500/40 md:inline-flex"
-      :class="modelOpen ? 'ring-brand-500/60 bg-brand-500/10' : ''"
-      @click="$emit('toggleModelPicker')"
-    >
-      <span class="max-w-[220px] truncate">{{ profile.model || profile.name }}</span>
-      <svg class="h-4 w-4 text-ink-muted" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 9l6 6 6-6" />
-      </svg>
-    </button>
-
-    <div class="flex items-center gap-1">
+    <div class="ml-auto flex shrink-0 items-center gap-1">
       <button
-        class="inline-flex items-center gap-1.5 rounded-lg bg-surface px-3 py-2 text-xs font-medium text-ink-secondary ring-1 ring-border-subtle hover:text-ink-primary hover:ring-brand-500/40 transition-colors md:hidden"
+        class="inline-flex items-center gap-1.5 rounded-lg bg-surface px-3 py-2 text-xs font-medium text-ink-secondary ring-1 ring-border-subtle shadow-sm transition-colors hover:text-ink-primary hover:ring-brand-500/40 md:text-sm md:font-semibold md:text-ink-primary"
+        :class="modelOpen ? 'bg-brand-500/10 ring-brand-500/60' : ''"
+        title="切换模型"
         @click="$emit('toggleModelPicker')"
       >
-        <span class="max-w-[38vw] truncate">{{ profile.model || profile.name }}</span>
-        <svg class="h-3.5 w-3.5 text-ink-muted" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <span class="max-w-[34vw] truncate md:max-w-[200px]">{{ profile.model || profile.name }}</span>
+        <svg class="h-3.5 w-3.5 shrink-0 text-ink-muted md:h-4 md:w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 9l6 6 6-6" />
         </svg>
       </button>
 
       <button
         class="p-2 rounded-lg text-ink-secondary hover:text-ink-primary hover:bg-ink-primary/5 transition-colors"
+        title="聊天列表"
+        aria-label="聊天列表"
+        @click="$emit('toggleSidebar')"
+      >
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h10" />
+        </svg>
+      </button>
+
+      <button
+        class="p-2 rounded-lg text-ink-secondary hover:text-ink-primary hover:bg-ink-primary/5 transition-colors"
         title="高级设置"
+        aria-label="高级设置"
         @click="$emit('openSettings')"
       >
         <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">

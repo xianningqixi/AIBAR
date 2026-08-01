@@ -96,11 +96,17 @@ export interface ModelProfile {
   endpoint?: string
   secretId?: string
   apiKeySaved?: boolean
+  canManageCredentials?: boolean
   temperature: number
   maxTokens: number
   topP: number
   presencePenalty: number
   frequencyPenalty: number
+  inputPrice?: number
+  outputPrice?: number
+  enabled?: boolean
+  sortOrder?: number
+  updatedAt?: string
 }
 
 export interface Preset {
@@ -264,6 +270,10 @@ export interface WorldInfoEntry {
   content?: string
   constant?: boolean
   disable?: boolean
+  selective?: boolean
+  selectiveLogic?: number
+  scanDepth?: number | null
+  ignoreBudget?: boolean
   order?: number
   position?: number
   [key: string]: unknown

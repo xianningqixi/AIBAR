@@ -1,12 +1,16 @@
 <script setup lang="ts">
 import { onMounted, onBeforeUnmount, watch } from 'vue'
 
-const props = defineProps<{
+const props = withDefaults(defineProps<{
   modelValue: boolean
   side?: 'left' | 'right'
   width?: string
   title?: string
-}>()
+  // 默认 false：现有调用方自己在内容里写了 p-4，开启会双重内边距
+  padded?: boolean
+}>(), {
+  padded: false,
+})
 
 const emit = defineEmits<{
   'update:modelValue': [value: boolean]
@@ -48,6 +52,9 @@ onBeforeUnmount(() => {
     <Transition :name="(side || 'right') === 'left' ? 'drawer-left' : 'drawer-right'">
       <aside
         v-if="modelValue"
+        role="dialog"
+        aria-modal="true"
+        :aria-label="title"
         :class="[
           'fixed inset-y-0 z-50 flex flex-col overflow-hidden border-border bg-surface-elevated/95 shadow-elevated backdrop-blur-xl',
           (side || 'right') === 'left' ? 'left-0 border-r' : 'right-0 border-l',
@@ -56,13 +63,14 @@ onBeforeUnmount(() => {
       >
         <header
           v-if="title || $slots.header"
-          class="flex items-center justify-between px-4 py-3 border-b border-border-subtle shrink-0"
+          class="flex items-center justify-between px-5 py-4 border-b border-border-subtle shrink-0"
         >
           <h3 class="text-sm font-semibold text-ink-primary">
             <slot name="header">{{ title }}</slot>
           </h3>
           <button
             class="text-ink-muted hover:text-ink-primary p-1 -m-1 rounded transition-colors"
+            aria-label="关闭"
             @click="close"
           >
             <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -70,10 +78,10 @@ onBeforeUnmount(() => {
             </svg>
           </button>
         </header>
-        <div class="flex-1 overflow-y-auto">
+        <div :class="['flex-1 overflow-y-auto', padded ? 'p-5' : '']">
           <slot />
         </div>
-        <footer v-if="$slots.footer" class="px-4 py-3 border-t border-border-subtle shrink-0">
+        <footer v-if="$slots.footer" class="px-5 py-3 border-t border-border-subtle shrink-0">
           <slot name="footer" />
         </footer>
       </aside>

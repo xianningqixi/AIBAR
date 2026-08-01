@@ -51,46 +51,74 @@ export const useModsStore = defineStore('mods', () => {
   const mods = ref<ModItem[]>(cloneBuiltins())
   const loaded = ref(false)
   let persistTimer: ReturnType<typeof setTimeout> | null = null
+  let storeVersion = 0
+  let loadPromise: Promise<void> | null = null
 
   const enabledGlobalMods = computed(() => mods.value.filter((m) => m.enabled))
 
   function schedulePersist() {
     if (!loaded.value) return
     if (persistTimer) clearTimeout(persistTimer)
+    const version = storeVersion
     persistTimer = setTimeout(() => {
       persistTimer = null
-      void persistNow()
+      if (version === storeVersion) void persistNow(version)
     }, 300)
   }
 
-  async function persistNow() {
+  async function persistNow(version = storeVersion) {
+    if (version !== storeVersion) return
     try {
-      await saveAibarSettings({ simple_ui_mods: mods.value })
+      await saveMods(version)
     } catch (e) {
-      console.warn('Persist mods failed', e)
+      if (version === storeVersion) console.warn('Persist mods failed', e)
     }
   }
 
-  async function load() {
-    if (loaded.value) return
-    try {
-      const stored = await loadAibarSettings<{ simple_ui_mods?: ModItem[] }>()
-      if (Array.isArray(stored.simple_ui_mods) && stored.simple_ui_mods.length) {
-        const byId = new Map(stored.simple_ui_mods.map((m) => [m.id, m]))
-        const merged: ModItem[] = []
-        for (const builtin of BUILTIN_MODS) {
-          const persisted = byId.get(builtin.id)
-          merged.push(persisted ? { ...builtin, ...persisted, builtin: true } : { ...builtin })
-          byId.delete(builtin.id)
-        }
-        for (const extra of byId.values()) merged.push(extra)
-        mods.value = merged
-      }
-    } catch (e) {
-      console.warn('Load mods failed', e)
-    } finally {
-      loaded.value = true
+  async function saveMods(version = storeVersion) {
+    if (version !== storeVersion) return
+    await saveAibarSettings({ simple_ui_mods: mods.value })
+  }
+
+  async function flushPersist() {
+    const version = storeVersion
+    if (persistTimer) {
+      clearTimeout(persistTimer)
+      persistTimer = null
     }
+    await saveMods(version)
+  }
+
+  async function load() {
+    if (loadPromise) return loadPromise
+    if (loaded.value) return
+    const version = storeVersion
+    const promise = (async () => {
+      try {
+        const stored = await loadAibarSettings<{ simple_ui_mods?: ModItem[] }>()
+        if (version !== storeVersion) return
+        if (Array.isArray(stored.simple_ui_mods) && stored.simple_ui_mods.length) {
+          const byId = new Map(stored.simple_ui_mods.map((m) => [m.id, m]))
+          const merged: ModItem[] = []
+          for (const builtin of BUILTIN_MODS) {
+            const persisted = byId.get(builtin.id)
+            merged.push(persisted ? { ...builtin, ...persisted, builtin: true } : { ...builtin })
+            byId.delete(builtin.id)
+          }
+          for (const extra of byId.values()) merged.push(extra)
+          mods.value = merged
+        }
+      } catch (e) {
+        if (version === storeVersion) console.warn('Load mods failed', e)
+      } finally {
+        if (version === storeVersion) {
+          loaded.value = true
+          loadPromise = null
+        }
+      }
+    })()
+    loadPromise = promise
+    return promise
   }
 
   function createMod(): ModItem {
@@ -134,15 +162,38 @@ export const useModsStore = defineStore('mods', () => {
     return ids.map((id) => mods.value.find((m) => m.id === id)).filter(Boolean) as ModItem[]
   }
 
+  function mergeImportedMod(imported: ModItem, preserveState = false) {
+    const normalized: ModItem = {
+      ...imported,
+      enabled: preserveState ? imported.enabled : false,
+      builtin: preserveState ? imported.builtin : false,
+    }
+    const index = mods.value.findIndex((mod) => mod.id === normalized.id)
+    if (index === -1) mods.value.push(normalized)
+    else mods.value[index] = normalized
+  }
+
+  function reset() {
+    storeVersion += 1
+    if (persistTimer) clearTimeout(persistTimer)
+    persistTimer = null
+    loadPromise = null
+    mods.value = cloneBuiltins()
+    loaded.value = false
+  }
+
   return {
     mods,
     loaded,
     enabledGlobalMods,
     load,
+    flushPersist,
     createMod,
     updateMod,
     deleteMod,
     getMod,
     getModsByIds,
+    mergeImportedMod,
+    reset,
   }
 })

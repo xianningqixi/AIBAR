@@ -31,7 +31,7 @@ function typeIcon(type: string) {
 </script>
 
 <template>
-  <div class="fixed bottom-4 right-4 z-50 flex flex-col gap-2 pointer-events-none">
+  <div class="pointer-events-none fixed bottom-[calc(4.5rem+env(safe-area-inset-bottom))] right-4 z-40 flex max-w-[calc(100vw-2rem)] flex-col gap-2 md:bottom-4 md:z-50">
     <TransitionGroup name="toast">
       <div
         v-for="toast in ui.toasts"

@@ -1,18 +1,23 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref, watch } from 'vue'
+import { computed, reactive, ref, watch } from 'vue'
 import { useModelProfilesStore } from '@/stores/modelProfiles'
+import { useSessionStore } from '@/stores/session'
 import { useUiStore } from '@/stores/ui'
 import AppButton from '@/components/ui/AppButton.vue'
 import AppInput from '@/components/ui/AppInput.vue'
 import AppSelect from '@/components/ui/AppSelect.vue'
 import AppCard from '@/components/ui/AppCard.vue'
 import AppFormField from '@/components/ui/AppFormField.vue'
+import AppEmpty from '@/components/ui/AppEmpty.vue'
 import { providerConfigs } from '@/lib/providers'
 import { testConnection } from '@/api/generate'
+import { getApiErrorMessage } from '@/api/client'
 import type { ModelProfile } from '@/api/types'
 
 const models = useModelProfilesStore()
+const session = useSessionStore()
 const ui = useUiStore()
+let viewEpoch = 0
 
 const apiKeyDrafts = ref<Record<string, string>>({})
 const selectedProfileId = ref('')
@@ -54,13 +59,39 @@ const setupDraft = reactive({
   model: '',
   apiKey: '',
   maxTokens: 4096,
+  inputPrice: 0,
+  outputPrice: 0,
+  enabled: true,
   testing: false,
 })
 const setupResult = ref<TestResult | null>(null)
 
 const setupNeedsEndpoint = computed(() => setupDraft.source === 'custom')
+const canManageSelectedCredentials = computed(() => selectedProfile.value?.canManageCredentials !== false)
 
 const currentDefaultProfile = computed(() => models.getProfile(models.activeProfileId))
+
+function isCurrentView(epoch: number, handle: string) {
+  return epoch === viewEpoch && handle === (session.user?.handle || '') && session.isAdmin
+}
+
+function clearLocalState() {
+  apiKeyDrafts.value = {}
+  selectedProfileId.value = ''
+  for (const key of Object.keys(testResults)) delete testResults[key]
+  for (const key of Object.keys(testing)) delete testing[key]
+  setupDraft.apiKey = ''
+  setupDraft.testing = false
+  setupResult.value = null
+  hydrateSetupFromProfile(null)
+}
+
+async function initializeForCurrentAccount(epoch: number, handle: string) {
+  await models.loadSecrets()
+  if (!isCurrentView(epoch, handle)) return
+  selectedProfileId.value = models.activeProfileId || models.profiles[0]?.id || ''
+  hydrateSetupFromProfile(selectedProfile.value)
+}
 
 function hydrateSetupFromProfile(profile: ModelProfile | null) {
   const cfg = profile ? providerConfigs[profile.source] : providerConfigs.custom
@@ -69,11 +100,15 @@ function hydrateSetupFromProfile(profile: ModelProfile | null) {
   setupDraft.endpoint = profile?.endpoint || cfg?.defaultEndpoint || ''
   setupDraft.model = profile?.model || cfg?.defaultModel || ''
   setupDraft.maxTokens = profile?.maxTokens || 4096
+  setupDraft.inputPrice = profile?.inputPrice || 0
+  setupDraft.outputPrice = profile?.outputPrice || 0
+  setupDraft.enabled = profile?.enabled !== false
   setupDraft.apiKey = ''
   setupResult.value = profile ? testResults[profile.id] || null : null
 }
 
 function chooseSetupSource(source: string) {
+  if (!canManageSelectedCredentials.value) return
   const cfg = providerConfigs[source] || providerConfigs.custom
   setupDraft.source = source
   setupDraft.name = cfg.label
@@ -83,6 +118,9 @@ function chooseSetupSource(source: string) {
 }
 
 async function saveSetupProfile() {
+  const epoch = viewEpoch
+  const handle = session.user?.handle || ''
+  if (!isCurrentView(epoch, handle)) return
   const cfg = providerConfigs[setupDraft.source] || providerConfigs.custom
   const model = setupDraft.model.trim()
   const endpoint = setupDraft.endpoint.trim()
@@ -90,7 +128,7 @@ async function saveSetupProfile() {
     ui.addToast('请填写模型名', 'warning')
     return
   }
-  if (setupNeedsEndpoint.value && !endpoint) {
+  if (canManageSelectedCredentials.value && setupNeedsEndpoint.value && !endpoint) {
     ui.addToast('请填写兼容接口端点，通常以 /v1 结尾', 'warning')
     return
   }
@@ -113,17 +151,26 @@ async function saveSetupProfile() {
     topP: profile.topP ?? 1,
     presencePenalty: profile.presencePenalty ?? 0,
     frequencyPenalty: profile.frequencyPenalty ?? 0,
+    inputPrice: Number(setupDraft.inputPrice) || 0,
+    outputPrice: Number(setupDraft.outputPrice) || 0,
+    enabled: setupDraft.enabled,
   })
 
   try {
     if (setupDraft.apiKey.trim()) {
       await models.saveApiKey(profile.id, setupDraft.apiKey)
+      if (!isCurrentView(epoch, handle)) return
       setupDraft.apiKey = ''
+    } else {
+      await models.saveProfile(profile.id)
+      if (!isCurrentView(epoch, handle)) return
     }
     const updated = models.getProfile(profile.id)
     if (!updated) throw new Error('Profile 保存后未找到')
     selectedProfileId.value = updated.id
+    if (!isCurrentView(epoch, handle)) return
     const result = await testConnection(updated)
+    if (!isCurrentView(epoch, handle)) return
     testResults[updated.id] = result
     setupResult.value = result
     if (result.ok) {
@@ -132,17 +179,21 @@ async function saveSetupProfile() {
     } else {
       ui.addToast(`已保存，但连接测试失败：${result.message}`, 'error')
     }
-  } catch (e: any) {
-    const result = { ok: false, message: e?.message || '连接失败' }
+  } catch (e: unknown) {
+    if (!isCurrentView(epoch, handle)) return
+    const result = { ok: false, message: getApiErrorMessage(e, '连接失败') }
     testResults[profile.id] = result
     setupResult.value = result
     ui.addToast(`连接测试失败：${result.message}`, 'error')
   } finally {
-    setupDraft.testing = false
+    if (isCurrentView(epoch, handle)) setupDraft.testing = false
   }
 }
 
 async function saveKey(profileId: string) {
+  const epoch = viewEpoch
+  const handle = session.user?.handle || ''
+  if (!isCurrentView(epoch, handle)) return
   const value = apiKeyDrafts.value[profileId]
   if (!value?.trim()) {
     ui.addToast('请输入 API Key', 'warning')
@@ -150,24 +201,33 @@ async function saveKey(profileId: string) {
   }
   try {
     await models.saveApiKey(profileId, value)
+    if (!isCurrentView(epoch, handle)) return
     apiKeyDrafts.value = { ...apiKeyDrafts.value, [profileId]: '' }
     ui.addToast('API Key 已写入 ST secrets', 'success')
-  } catch (e: any) {
-    ui.addToast(`保存失败：${e.message}`, 'error')
+  } catch (e: unknown) {
+    if (!isCurrentView(epoch, handle)) return
+    ui.addToast(`保存失败：${getApiErrorMessage(e)}`, 'error')
   }
 }
 
 async function runTest(profile: ModelProfile) {
+  const epoch = viewEpoch
+  const handle = session.user?.handle || ''
+  if (!isCurrentView(epoch, handle)) return
   testing[profile.id] = true
   delete testResults[profile.id]
   try {
-    const r = await testConnection(profile)
+    const saved = await models.saveProfile(profile.id)
+    if (!isCurrentView(epoch, handle)) return
+    const r = await testConnection(saved)
+    if (!isCurrentView(epoch, handle)) return
     testResults[profile.id] = r
     ui.addToast(r.ok ? `连接正常${r.models ? ` · ${r.models} 个模型` : ''}` : `连接失败：${r.message}`, r.ok ? 'success' : 'error')
-  } catch (e: any) {
-    testResults[profile.id] = { ok: false, message: e?.message || '未知错误' }
+  } catch (e: unknown) {
+    if (!isCurrentView(epoch, handle)) return
+    testResults[profile.id] = { ok: false, message: getApiErrorMessage(e, '未知错误') }
   } finally {
-    testing[profile.id] = false
+    if (isCurrentView(epoch, handle)) testing[profile.id] = false
   }
 }
 
@@ -176,9 +236,19 @@ function addProfile(source = 'custom') {
   selectedProfileId.value = profile.id
 }
 
-function deleteProfile(profile: ModelProfile) {
-  models.deleteProfile(profile.id)
-  selectedProfileId.value = models.activeProfileId || models.profiles[0]?.id || ''
+async function deleteProfile(profile: ModelProfile) {
+  const epoch = viewEpoch
+  const handle = session.user?.handle || ''
+  if (!isCurrentView(epoch, handle)) return
+  try {
+    await models.deleteProfile(profile.id)
+    if (!isCurrentView(epoch, handle)) return
+    selectedProfileId.value = models.activeProfileId || models.profiles[0]?.id || ''
+    ui.addToast('共享模型已删除', 'success')
+  } catch (e: unknown) {
+    if (!isCurrentView(epoch, handle)) return
+    ui.addToast(`删除失败：${getApiErrorMessage(e)}`, 'error')
+  }
 }
 
 function writeSampleProfiles() {
@@ -209,11 +279,15 @@ function writeSampleProfiles() {
   ui.addToast('已写入 2 个示例模型配置', 'success')
 }
 
-onMounted(async () => {
-  await models.loadSecrets()
-  selectedProfileId.value = models.activeProfileId || models.profiles[0]?.id || ''
-  hydrateSetupFromProfile(selectedProfile.value)
-})
+watch(
+  [() => session.user?.handle || '', () => session.sessionEpoch, () => session.isAdmin],
+  ([handle, _sessionEpoch, isAdmin]) => {
+    viewEpoch += 1
+    clearLocalState()
+    if (handle && isAdmin) void initializeForCurrentAccount(viewEpoch, handle)
+  },
+  { immediate: true },
+)
 
 watch(
   () => models.profiles.map((profile) => profile.id).join('|'),
@@ -230,99 +304,11 @@ watch(selectedProfileId, () => {
 </script>
 
 <template>
-  <div class="space-y-4">
-    <AppCard padding="md" tone="glow" class="space-y-5">
-      <div class="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <p class="text-xs uppercase tracking-[0.18em] text-brand-300 font-semibold">模型连接向导</p>
-          <h2 class="mt-2 text-xl font-semibold text-ink-primary">先把一个模型连通，其他参数以后再调。</h2>
-          <p class="mt-1 text-sm text-ink-secondary max-w-2xl leading-relaxed">
-            中转、Gemini 兼容、OpenAI-compatible、本地 Ollama 这类 /v1 接口，都走“中转 / OpenAI 兼容”。
-          </p>
-        </div>
-        <div class="rounded-lg bg-surface-sunken px-3 py-2 ring-1 ring-border-subtle">
-          <p class="text-[11px] text-ink-muted">当前默认</p>
-          <p class="mt-0.5 max-w-[260px] truncate text-sm font-semibold text-ink-primary">
-            {{ currentDefaultProfile?.name || '未设置' }}
-          </p>
-        </div>
-      </div>
-
-      <div class="grid md:grid-cols-3 gap-3">
-        <button
-          v-for="source in setupSources"
-          :key="source.value"
-          type="button"
-          class="min-h-[104px] rounded-xl p-4 text-left ring-1 transition-all"
-          :class="setupDraft.source === source.value
-            ? 'bg-brand-500/15 text-brand-100 ring-brand-400/60'
-            : 'bg-surface-elevated text-ink-secondary ring-border-subtle hover:text-ink-primary hover:ring-brand-500/40'"
-          @click="chooseSetupSource(source.value)"
-        >
-          <p class="text-sm font-semibold">{{ source.title }}</p>
-          <p class="mt-1 text-xs leading-relaxed text-ink-muted">{{ source.description }}</p>
-        </button>
-      </div>
-
-      <div class="grid lg:grid-cols-[1fr_1fr] gap-3">
-        <AppFormField label="Profile 名称">
-          <AppInput v-model="setupDraft.name" placeholder="例如：DS 中转" />
-        </AppFormField>
-        <AppFormField label="模型名">
-          <AppInput v-model="setupDraft.model" placeholder="例如：deepseek-v4-pro / gpt-5.5" />
-        </AppFormField>
-        <AppFormField
-          v-if="setupNeedsEndpoint"
-          label="接口端点"
-          hint="一般填写到 /v1，例如 https://example.com/v1"
-        >
-          <AppInput v-model="setupDraft.endpoint" placeholder="https://你的中转地址/v1" />
-        </AppFormField>
-        <AppFormField label="API Key">
-          <AppInput v-model="setupDraft.apiKey" type="password" placeholder="保存到 ST secrets，留空则沿用已保存 Key" />
-        </AppFormField>
-        <AppFormField label="Max Tokens" hint="上下文长度不是这里；这里是单次最多输出长度。">
-          <AppInput
-            type="number"
-            min="256"
-            :model-value="setupDraft.maxTokens"
-            @update:model-value="(value) => setupDraft.maxTokens = parseInt(String(value)) || 4096"
-          />
-        </AppFormField>
-      </div>
-
-      <div class="flex flex-wrap items-center justify-between gap-3">
-        <div
-          v-if="setupResult"
-          :class="[
-            'rounded-lg px-3 py-2 text-xs ring-1',
-            setupResult.ok
-              ? 'bg-emerald-500/10 text-emerald-600 ring-emerald-500/25'
-              : 'bg-red-500/10 text-red-600 ring-red-500/25',
-          ]"
-        >
-          {{ setupResult.ok ? '连接正常，已设为默认 Profile' : `连接失败：${setupResult.message}` }}
-          <template v-if="setupResult.ok && setupResult.models"> · {{ setupResult.models }} 个模型</template>
-        </div>
-        <div v-else class="text-xs text-ink-muted">
-          保存并测试通过后，聊天页和 AI 起草会默认使用这个 Profile。
-        </div>
-        <AppButton variant="gradient" :disabled="setupDraft.testing" @click="saveSetupProfile">
-          {{ setupDraft.testing ? '测试中…' : '保存并测试' }}
-        </AppButton>
-      </div>
-    </AppCard>
-
-    <details class="overflow-hidden rounded-xl bg-surface ring-1 ring-border-subtle">
-      <summary class="cursor-pointer list-none px-4 py-3 hover:bg-surface-elevated transition-colors">
-        <div class="flex flex-wrap items-center justify-between gap-2">
-          <h3 class="text-sm font-semibold text-ink-primary">高级 Profile 管理</h3>
-          <span class="text-xs text-ink-muted">多 Profile、参数、删除和示例配置</span>
-        </div>
-      </summary>
-      <div class="grid lg:grid-cols-[300px_1fr] gap-4 border-t border-border-subtle p-4">
+  <!-- 主从布局：左侧模型列表，右侧编辑区 -->
+  <div class="grid gap-4 lg:grid-cols-[300px_1fr]">
+    <!-- 左栏：共享模型列表 -->
     <AppCard padding="md">
-      <div class="flex flex-wrap gap-2 mb-4">
+      <div class="flex flex-wrap gap-2 mb-3">
         <AppButton size="sm" @click="addProfile()">+ 新建</AppButton>
         <AppButton size="sm" variant="secondary" @click="writeSampleProfiles">写入示例</AppButton>
       </div>
@@ -344,23 +330,123 @@ watch(selectedProfileId, () => {
           />
           <div class="flex items-center justify-between gap-2">
             <span class="text-sm font-medium truncate">{{ profile.name }}</span>
-            <span v-if="models.activeProfileId === profile.id" class="text-[10px] text-emerald-600 shrink-0">默认</span>
+            <span v-if="models.activeProfileId === profile.id" class="text-[11px] text-emerald-600 shrink-0">默认</span>
           </div>
           <div class="mt-1 text-[11px] text-ink-muted truncate">
             {{ providerConfigs[profile.source]?.label || profile.source }} · {{ profile.model || '未填模型' }}
           </div>
         </button>
+        <AppEmpty v-if="!models.profiles.length" icon="box" title="暂无模型配置" description="点击上方新建或写入示例。" />
       </div>
     </AppCard>
 
-    <AppCard v-if="selectedProfile" padding="none">
+    <!-- 右栏：新建向导 + 选中项详情 -->
+    <div class="space-y-4">
+      <AppCard padding="md" tone="glow" class="space-y-5">
+      <div class="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <p class="text-xs text-brand-300 font-semibold">共享模型管理</p>
+          <h2 class="mt-2 text-xl font-semibold text-ink-primary">配置一次，所有用户都可以选择。</h2>
+          <p class="mt-1 text-sm text-ink-secondary max-w-2xl leading-relaxed">
+            端点和密钥只对凭据所属管理员可见；普通用户只会看到已启用模型与公开价格。
+          </p>
+        </div>
+        <div class="rounded-lg bg-surface-sunken px-3 py-2 ring-1 ring-border-subtle">
+          <p class="text-[11px] text-ink-muted">当前默认</p>
+          <p class="mt-0.5 max-w-[260px] truncate text-sm font-semibold text-ink-primary">
+            {{ currentDefaultProfile?.name || '未设置' }}
+          </p>
+        </div>
+      </div>
+
+      <div class="grid gap-4 md:grid-cols-3">
+        <button
+          v-for="source in setupSources"
+          :key="source.value"
+          type="button"
+          :disabled="!canManageSelectedCredentials"
+          class="min-h-[104px] rounded-xl p-4 text-left ring-1 transition-all"
+          :class="[
+            setupDraft.source === source.value
+              ? 'bg-brand-500/15 text-brand-100 ring-brand-400/60'
+              : 'bg-surface-elevated text-ink-secondary ring-border-subtle hover:text-ink-primary hover:ring-brand-500/40',
+            !canManageSelectedCredentials ? 'cursor-not-allowed opacity-50' : '',
+          ]"
+          @click="chooseSetupSource(source.value)"
+        >
+          <p class="text-sm font-semibold">{{ source.title }}</p>
+          <p class="mt-1 text-xs leading-relaxed text-ink-muted">{{ source.description }}</p>
+        </button>
+      </div>
+
+      <div class="grid gap-4 sm:grid-cols-2">
+        <AppFormField label="Profile 名称">
+          <AppInput v-model="setupDraft.name" placeholder="例如：DS 中转" />
+        </AppFormField>
+        <AppFormField label="模型名">
+          <AppInput v-model="setupDraft.model" placeholder="例如：deepseek-v4-pro / gpt-5.5" />
+        </AppFormField>
+        <AppFormField
+          v-if="setupNeedsEndpoint"
+          label="接口端点"
+          :hint="canManageSelectedCredentials ? '一般填写到 /v1，例如 https://example.com/v1' : '凭据由其他管理员维护'"
+        >
+          <AppInput v-model="setupDraft.endpoint" :disabled="!canManageSelectedCredentials" placeholder="https://你的中转地址/v1" />
+        </AppFormField>
+        <AppFormField label="API Key" :hint="canManageSelectedCredentials ? '' : '凭据由其他管理员维护'">
+          <AppInput v-model="setupDraft.apiKey" type="password" :disabled="!canManageSelectedCredentials" placeholder="保存到 ST secrets，留空则沿用已保存 Key" />
+        </AppFormField>
+        <AppFormField label="Max Tokens" hint="上下文长度不是这里；这里是单次最多输出长度。">
+          <AppInput
+            type="number"
+            min="256"
+            :model-value="setupDraft.maxTokens"
+            @update:model-value="(value) => setupDraft.maxTokens = parseInt(String(value)) || 4096"
+          />
+        </AppFormField>
+        <AppFormField label="输入单价" hint="积分/token，支持 6 位小数">
+          <AppInput v-model="setupDraft.inputPrice" type="number" min="0" step="0.000001" />
+        </AppFormField>
+        <AppFormField label="输出单价" hint="积分/token，支持 6 位小数">
+          <AppInput v-model="setupDraft.outputPrice" type="number" min="0" step="0.000001" />
+        </AppFormField>
+        <label class="flex min-h-10 items-center gap-2 text-sm text-ink-secondary">
+          <input v-model="setupDraft.enabled" type="checkbox" class="h-4 w-4 accent-brand-500" />
+          对用户启用
+        </label>
+      </div>
+
+      <div class="flex flex-wrap items-center justify-between gap-3">
+        <div
+          v-if="setupResult"
+          :class="[
+            'rounded-lg px-3 py-2 text-xs ring-1',
+            setupResult.ok
+              ? 'bg-emerald-500/10 text-emerald-600 ring-emerald-500/25'
+              : 'bg-red-500/10 text-red-600 ring-red-500/25',
+          ]"
+        >
+          {{ setupResult.ok ? '连接正常，已设为默认 Profile' : `连接失败：${setupResult.message}` }}
+          <template v-if="setupResult.ok && setupResult.models"> · {{ setupResult.models }} 个模型</template>
+        </div>
+        <div v-else class="text-xs text-ink-muted">
+          保存后立即进入共享模型列表；连接测试仅使用管理员密钥。
+        </div>
+        <AppButton variant="gradient" :disabled="setupDraft.testing" @click="saveSetupProfile">
+          {{ setupDraft.testing ? '测试中…' : '保存并测试' }}
+        </AppButton>
+      </div>
+    </AppCard>
+
+      <AppCard v-if="selectedProfile" collapsible title="高级 Profile 管理" :default-open="false">
+        <template #summary>完整参数、计价、状态和删除</template>
       <div
         v-if="testResults[selectedProfile.id]"
         :class="[
-          'px-4 py-2 text-xs rounded-t-xl flex items-center gap-2',
+          'mb-4 px-3 py-2 text-xs rounded-lg flex items-center gap-2 ring-1',
           testResults[selectedProfile.id].ok
-            ? 'bg-emerald-500/10 text-emerald-600 border-b border-emerald-500/20'
-            : 'bg-red-500/10 text-red-600 border-b border-red-500/20',
+            ? 'bg-emerald-500/10 text-emerald-600 ring-emerald-500/20'
+            : 'bg-red-500/10 text-red-600 ring-red-500/20',
         ]"
       >
         <span class="w-1.5 h-1.5 rounded-full" :class="testResults[selectedProfile.id].ok ? 'bg-emerald-400' : 'bg-red-400'" />
@@ -375,13 +461,22 @@ watch(selectedProfileId, () => {
         </span>
       </div>
 
-      <div class="p-5 space-y-4">
+      <div class="space-y-4">
         <div class="flex flex-wrap items-center justify-between gap-3">
           <div>
             <h2 class="text-sm font-semibold text-ink-primary">模型配置详情</h2>
             <p class="text-xs text-ink-muted mt-1">左侧浏览已有 Profile,右侧编辑当前选中项。</p>
           </div>
           <div class="flex items-center gap-3">
+            <label class="flex items-center gap-1.5 text-xs text-ink-secondary cursor-pointer">
+              <input
+                type="checkbox"
+                :checked="selectedProfile.enabled !== false"
+                class="accent-brand-500"
+                @change="models.updateProfile(selectedProfile.id, { enabled: ($event.target as HTMLInputElement).checked })"
+              />
+              启用
+            </label>
             <span
               :class="[
                 'text-[11px] inline-flex items-center gap-1.5',
@@ -425,10 +520,11 @@ watch(selectedProfileId, () => {
           />
         </AppFormField>
 
-        <div class="grid md:grid-cols-3 gap-3">
+        <div class="grid gap-4 md:grid-cols-3">
           <AppFormField label="服务商">
             <AppSelect
               :model-value="selectedProfile.source"
+              :disabled="selectedProfile.canManageCredentials === false"
               @update:model-value="(value) => {
                 const provider = providerConfigs[value]
                 models.updateProfile(selectedProfile!.id, {
@@ -454,11 +550,13 @@ watch(selectedProfileId, () => {
           <AppFormField label="API Key">
             <div class="flex gap-2">
               <AppInput
-                v-model="apiKeyDrafts[selectedProfile.id]"
+                :model-value="apiKeyDrafts[selectedProfile.id] || ''"
                 type="password"
+                :disabled="selectedProfile.canManageCredentials === false"
                 placeholder="留空不修改"
+                @update:model-value="(value) => apiKeyDrafts[selectedProfile!.id] = String(value)"
               />
-              <AppButton size="sm" @click="saveKey(selectedProfile.id)">保存</AppButton>
+              <AppButton size="sm" :disabled="selectedProfile.canManageCredentials === false" @click="saveKey(selectedProfile.id)">保存</AppButton>
             </div>
           </AppFormField>
         </div>
@@ -470,12 +568,13 @@ watch(selectedProfileId, () => {
         >
           <AppInput
             :model-value="selectedProfile.endpoint || ''"
+            :disabled="selectedProfile.canManageCredentials === false"
             placeholder="http://127.0.0.1:11434/v1"
             @update:model-value="(value) => models.updateProfile(selectedProfile!.id, { endpoint: value })"
           />
         </AppFormField>
 
-        <div class="grid md:grid-cols-5 gap-3 pt-1">
+        <div class="grid gap-4 md:grid-cols-5 pt-1">
           <div>
             <label class="block text-xs font-medium text-ink-secondary mb-1.5">
               Temperature
@@ -531,9 +630,29 @@ watch(selectedProfileId, () => {
             />
           </AppFormField>
         </div>
+
+        <div class="grid gap-4 border-t border-border-subtle pt-4 sm:grid-cols-2">
+          <AppFormField label="输入单价" hint="积分/token">
+            <AppInput
+              type="number"
+              min="0"
+              step="0.000001"
+              :model-value="selectedProfile.inputPrice || 0"
+              @update:model-value="(value) => models.updateProfile(selectedProfile!.id, { inputPrice: Number(value) || 0 })"
+            />
+          </AppFormField>
+          <AppFormField label="输出单价" hint="积分/token">
+            <AppInput
+              type="number"
+              min="0"
+              step="0.000001"
+              :model-value="selectedProfile.outputPrice || 0"
+              @update:model-value="(value) => models.updateProfile(selectedProfile!.id, { outputPrice: Number(value) || 0 })"
+            />
+          </AppFormField>
+        </div>
       </div>
-    </AppCard>
-      </div>
-    </details>
+      </AppCard>
+    </div>
   </div>
 </template>

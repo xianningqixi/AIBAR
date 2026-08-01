@@ -1,11 +1,25 @@
 import { createRouter, createWebHashHistory } from 'vue-router'
+import { useSessionStore } from '@/stores/session'
 
 const router = createRouter({
   history: createWebHashHistory(),
+  scrollBehavior: () => ({ top: 0 }),
   routes: [
     {
       path: '/',
       redirect: '/browse',
+    },
+    {
+      path: '/login',
+      name: 'login',
+      component: () => import('@/pages/LoginPage.vue'),
+      meta: { public: true, publicOnly: true },
+    },
+    {
+      path: '/register',
+      name: 'register',
+      component: () => import('@/pages/RegisterPage.vue'),
+      meta: { public: true, publicOnly: true },
     },
     {
       path: '/browse',
@@ -21,6 +35,27 @@ const router = createRouter({
       path: '/hub',
       name: 'communityHub',
       component: () => import('@/pages/CommunityHubPage.vue'),
+    },
+    {
+      path: '/work/:id',
+      name: 'communityWork',
+      component: () => import('@/pages/CommunityWorkPage.vue'),
+    },
+    {
+      path: '/publish',
+      name: 'publish',
+      component: () => import('@/pages/PublishPage.vue'),
+    },
+    {
+      path: '/admin',
+      name: 'admin',
+      component: () => import('@/pages/AdminPage.vue'),
+      meta: { admin: true },
+    },
+    {
+      path: '/account',
+      name: 'account',
+      component: () => import('@/pages/AccountPage.vue'),
     },
     {
       path: '/chat/:avatar',
@@ -89,6 +124,18 @@ const router = createRouter({
       component: () => import('@/pages/NotFoundPage.vue'),
     },
   ],
+})
+
+router.beforeEach(async (to) => {
+  const session = useSessionStore()
+  if (!session.booted) await session.boot()
+
+  if (to.meta.publicOnly && session.authenticated) return { path: '/browse' }
+  if (!to.meta.public && !session.authenticated) {
+    return { path: '/login', query: { redirect: to.fullPath } }
+  }
+  if (to.meta.admin && !session.isAdmin) return { path: '/browse' }
+  return true
 })
 
 export default router

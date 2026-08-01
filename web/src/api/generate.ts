@@ -1,6 +1,12 @@
 import { ApiError, apiPost, apiStream } from './client'
-import { providerConfigs } from '@/lib/providers'
+import { useBillingStore } from '@/stores/billing'
 import type { ModelProfile } from './types'
+
+function refreshPointBalance() {
+  void useBillingStore().load(true).catch((error) => {
+    console.warn('Refresh point balance failed', error)
+  })
+}
 
 function explainGenerateError(error: unknown, payload?: Record<string, unknown>): string {
   const raw = error instanceof ApiError
@@ -36,51 +42,68 @@ function explainGenerateError(error: unknown, payload?: Record<string, unknown>)
 
 type ChatCompletionResponse = {
   choices?: Array<{
-    message?: { content?: string }
-    text?: string
-    delta?: { content?: string; reasoning?: string; reasoning_content?: string }
+    message?: { content?: unknown }
+    text?: unknown
+    delta?: { content?: unknown; reasoning?: unknown; reasoning_content?: unknown }
   }>
-  content?: string
-  response?: string
+  content?: unknown
+  response?: unknown
+  error?: unknown
+  message?: unknown
+}
+
+function responseError(data: ChatCompletionResponse): string {
+  if (!data?.error) return ''
+  if (typeof data.error === 'string') return data.error
+  if (typeof data.error === 'object' && data.error) {
+    const message = (data.error as { message?: unknown }).message
+    if (typeof message === 'string') return message
+  }
+  return typeof data.message === 'string' ? data.message : '模型接口返回错误'
+}
+
+function contentText(value: unknown): string {
+  if (typeof value === 'string') return value
+  if (!Array.isArray(value)) return ''
+  return value
+    .map((part) => {
+      if (typeof part === 'string') return part
+      if (!part || typeof part !== 'object') return ''
+      const text = (part as { text?: unknown; content?: unknown }).text
+        ?? (part as { content?: unknown }).content
+      return typeof text === 'string' ? text : ''
+    })
+    .join('')
 }
 
 export async function generateReply(payload: Record<string, unknown>): Promise<string> {
-  let data: ChatCompletionResponse
   try {
-    data = await apiPost<ChatCompletionResponse>(
-      '/api/backends/chat-completions/generate',
+    const data = await apiPost<ChatCompletionResponse>(
+      '/api/aibar/models/generate',
       payload,
     )
+    const apiError = responseError(data)
+    if (apiError) throw new Error(apiError)
+    return contentText(
+      data?.choices?.[0]?.message?.content
+      ?? data?.choices?.[0]?.text
+      ?? data?.content
+      ?? data?.response,
+    )
   } catch (error) {
-    throw new Error(explainGenerateError(error, payload))
+    throw new Error(explainGenerateError(error, payload), { cause: error })
+  } finally {
+    refreshPointBalance()
   }
-  const reply =
-    data?.choices?.[0]?.message?.content ||
-    data?.choices?.[0]?.text ||
-    data?.content ||
-    data?.response ||
-    ''
-  return String(reply || '')
 }
 
 export async function testConnection(
   profile: ModelProfile,
 ): Promise<{ ok: boolean; message: string; models?: number }> {
-  const body: Record<string, unknown> = {
-    chat_completion_source: profile.source,
-    model: profile.model,
-  }
-  if (profile.secretId) body.secret_id = profile.secretId
-  const cfg = providerConfigs[profile.source]
-  if (profile.source === 'custom') {
-    body.custom_url = profile.endpoint
-  } else if (cfg?.endpointKey === 'reverse_proxy' && profile.endpoint) {
-    body.reverse_proxy = profile.endpoint
-  }
   try {
     const r = await apiPost<{ data?: unknown[]; error?: unknown; message?: unknown }>(
-      '/api/backends/chat-completions/status',
-      body,
+      '/api/aibar/admin/models/test',
+      { id: profile.id },
     )
     const models = Array.isArray(r?.data) ? r.data.length : undefined
     if (r?.error) {
@@ -102,17 +125,36 @@ export async function* generateReplyStream(
   payload: Record<string, unknown>,
   signal?: AbortSignal,
 ): AsyncGenerator<{ content?: string; reasoning?: string }> {
-  for await (const evt of apiStream(
-    '/api/backends/chat-completions/generate',
-    payload,
-    signal,
-  )) {
-    const delta = (evt as ChatCompletionResponse)?.choices?.[0]?.delta
-    if (delta) {
-      yield {
-        content: delta.content || undefined,
-        reasoning: delta.reasoning || delta.reasoning_content || undefined,
+  try {
+    for await (const evt of apiStream(
+      '/api/aibar/models/generate',
+      payload,
+      signal,
+    )) {
+      const data = evt as ChatCompletionResponse
+      const apiError = responseError(data)
+      if (apiError) {
+        throw new Error(explainGenerateError(new Error(apiError), payload))
+      }
+
+      const choice = data?.choices?.[0]
+      const delta = choice?.delta
+      const content = contentText(
+        delta?.content
+        ?? choice?.message?.content
+        ?? choice?.text
+        ?? data?.content
+        ?? data?.response,
+      )
+      const reasoning = contentText(delta?.reasoning ?? delta?.reasoning_content)
+      if (content || reasoning) {
+        yield {
+          content: content || undefined,
+          reasoning: reasoning || undefined,
+        }
       }
     }
+  } finally {
+    refreshPointBalance()
   }
 }

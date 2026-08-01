@@ -34,9 +34,9 @@ onMounted(async () => {
 </script>
 
 <template>
-  <div class="grid lg:grid-cols-[300px_1fr] gap-4">
+  <div class="grid gap-4 lg:grid-cols-[300px_1fr]">
     <AppCard padding="md">
-      <div class="flex flex-wrap gap-2 mb-4">
+      <div class="flex flex-wrap gap-2 mb-3">
         <AppButton size="sm" @click="addPersona">+ 新建</AppButton>
       </div>
       <div class="space-y-1">
@@ -57,7 +57,7 @@ onMounted(async () => {
           />
           <div class="flex items-center justify-between gap-2">
             <span class="text-sm font-medium truncate">{{ p.name }}</span>
-            <span v-if="personas.activePersonaId === p.id" class="text-[10px] text-emerald-600 shrink-0">当前</span>
+            <span v-if="personas.activePersonaId === p.id" class="text-[11px] text-emerald-600 shrink-0">当前</span>
           </div>
           <div class="mt-1 text-[11px] text-ink-muted line-clamp-1">
             {{ p.description || '无描述' }}

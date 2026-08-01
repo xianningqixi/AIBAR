@@ -7,6 +7,7 @@ import { useModsStore } from '@/stores/mods'
 import { deleteStory, getStory, saveStory } from '@/api/stories'
 import { createChatFromStory } from '@/lib/storyStart'
 import { generateReply } from '@/api/generate'
+import { getApiErrorMessage } from '@/api/client'
 import { buildGeneratePayload } from '@/lib/buildPayload'
 import { getMatchedWorldInfo } from '@/lib/worldInfoMatch'
 import { useModelProfilesStore } from '@/stores/modelProfiles'
@@ -50,7 +51,7 @@ const tags = computed(() => story.value?.tags || [])
 const storyHeroImage = computed(() => {
   if (story.value?.coverImage) return story.value.coverImage
   if (character.value?.avatar && character.value.avatar !== 'none') {
-    return `/thumbnail?type=avatar&file=${encodeURIComponent(character.value.avatar)}`
+    return `/characters/${encodeURIComponent(character.value.avatar)}`
   }
   return ''
 })
@@ -76,8 +77,8 @@ async function loadData() {
     worlds.value = await listWorldInfo().catch(() => [])
     testModel.profileId = story.value.modelProfileId || models.activeProfileId
     testModel.world = story.value.world || ''
-  } catch (e: any) {
-    ui.addToast(`加载失败：${e.message}`, 'error')
+  } catch (e: unknown) {
+    ui.addToast(`加载失败：${getApiErrorMessage(e)}`, 'error')
     router.push({ path: '/browse', query: { tab: 'stories' } })
   } finally {
     loading.value = false
@@ -100,8 +101,8 @@ async function startStory() {
       path: `/chat/${encodeURIComponent(character.value.avatar)}`,
       query: { chat: fileName },
     })
-  } catch (e: any) {
-    ui.addToast(`开始故事失败：${e.message}`, 'error')
+  } catch (e: unknown) {
+    ui.addToast(`开始故事失败：${getApiErrorMessage(e)}`, 'error')
   } finally {
     starting.value = false
   }
@@ -114,8 +115,8 @@ async function renameStory() {
   try {
     story.value = await saveStory({ ...story.value, title: next.trim() })
     ui.addToast('故事标题已更新', 'success')
-  } catch (e: any) {
-    ui.addToast(`保存失败：${e.message}`, 'error')
+  } catch (e: unknown) {
+    ui.addToast(`保存失败：${getApiErrorMessage(e)}`, 'error')
   }
 }
 
@@ -130,8 +131,8 @@ async function quickTagEdit() {
   try {
     story.value = await saveStory({ ...story.value, tags: arr })
     ui.addToast('标签已更新', 'success')
-  } catch (e: any) {
-    ui.addToast(`保存失败：${e.message}`, 'error')
+  } catch (e: unknown) {
+    ui.addToast(`保存失败：${getApiErrorMessage(e)}`, 'error')
   }
 }
 
@@ -176,8 +177,8 @@ async function runStoryTest() {
     )
     const reply = await generateReply(payload)
     testModel.result = reply || '(模型返回了空响应)'
-  } catch (e: any) {
-    testModel.error = e?.message || '生成失败'
+  } catch (e: unknown) {
+    testModel.error = getApiErrorMessage(e, '生成失败')
   } finally {
     testModel.loading = false
   }
@@ -217,8 +218,8 @@ async function importStoryJSON() {
       })
       ui.addToast('故事卡已导入', 'success')
       router.push(`/story/${encodeURIComponent(saved.id)}`)
-    } catch (e: any) {
-      ui.addToast(`导入失败：${e.message}`, 'error')
+    } catch (e: unknown) {
+      ui.addToast(`导入失败：${getApiErrorMessage(e)}`, 'error')
     }
   }
   input.click()
@@ -236,8 +237,8 @@ async function duplicateStory() {
     })
     ui.addToast('故事卡已复制', 'success')
     router.push(`/story/${encodeURIComponent(saved.id)}`)
-  } catch (e: any) {
-    ui.addToast(`复制失败：${e.message}`, 'error')
+  } catch (e: unknown) {
+    ui.addToast(`复制失败：${getApiErrorMessage(e)}`, 'error')
   }
 }
 
@@ -248,8 +249,8 @@ async function removeStory() {
     await deleteStory(story.value.id)
     ui.addToast('故事卡已删除', 'success')
     router.push({ path: '/browse', query: { tab: 'stories' } })
-  } catch (e: any) {
-    ui.addToast(`删除失败：${e.message}`, 'error')
+  } catch (e: unknown) {
+    ui.addToast(`删除失败：${getApiErrorMessage(e)}`, 'error')
   }
 }
 
@@ -257,13 +258,12 @@ onMounted(loadData)
 </script>
 
 <template>
-  <div class="min-h-screen bg-bg">
-    <AppPageHeader title="故事卡详情" back-to="/browse?tab=stories">
+  <div class="min-h-[100dvh] bg-bg">
+    <!-- 开始故事只保留 hero 中的主按钮，避免与标题栏重复 -->
+    <AppPageHeader title="故事卡详情" back-to="/browse?tab=stories" width="4xl">
       <template #actions>
         <AppButton v-if="story" size="sm" variant="secondary" @click="router.push(`/story/${encodeURIComponent(story.id)}/edit`)">编辑</AppButton>
-        <AppButton v-if="story" size="sm" variant="gradient" :disabled="starting" @click="startStory">
-          {{ starting ? '创建中…' : '▶ 开始故事' }}
-        </AppButton>
+        <AppButton v-if="story" size="sm" variant="secondary" @click="router.push({ path: '/publish', query: { type: 'story', sourceId: story.id } })">发布</AppButton>
       </template>
     </AppPageHeader>
 
@@ -271,7 +271,7 @@ onMounted(loadData)
       <AppSpinner size="lg" />
     </div>
 
-    <main v-else-if="story" class="max-w-4xl mx-auto px-5 py-6 space-y-4 animate-fade-in-up">
+    <main v-else-if="story" class="max-w-4xl mx-auto px-5 py-6 md:px-8 lg:px-10 space-y-4 animate-fade-in-up">
       <section class="relative overflow-hidden rounded-2xl ring-1 ring-border-subtle bg-hero-radial">
         <div
           v-if="storyHeroImage"
@@ -280,22 +280,22 @@ onMounted(loadData)
         />
         <div class="absolute -top-16 -right-12 w-72 h-72 rounded-full bg-accent-500/25 blur-3xl pointer-events-none" />
         <div class="absolute -bottom-20 -left-8 w-72 h-72 rounded-full bg-brand-500/20 blur-3xl pointer-events-none" />
-        <div class="relative p-5 md:p-7 flex flex-wrap items-start gap-5">
+        <div class="relative p-5 md:p-7 flex flex-wrap items-start gap-6">
           <div class="relative shrink-0">
             <img
               v-if="storyHeroImage"
               :src="storyHeroImage"
-              class="w-24 h-32 sm:w-28 sm:h-36 rounded-2xl object-cover ring-2 ring-accent-500/40 shadow-glow-accent"
+              class="w-40 aspect-[3/4] rounded-2xl object-cover ring-2 ring-accent-500/40 shadow-glow-accent"
             />
             <div
               v-else
-              class="w-24 h-32 sm:w-28 sm:h-36 rounded-2xl bg-brand-soft ring-2 ring-accent-500/40 flex items-center justify-center text-accent-300 shadow-glow-accent"
+              class="w-40 aspect-[3/4] rounded-2xl bg-brand-soft ring-2 ring-accent-500/40 flex items-center justify-center text-accent-300 shadow-glow-accent"
             >
               <svg class="w-10 h-10" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
               </svg>
             </div>
-            <span class="absolute -top-2 -right-2 px-2 py-0.5 rounded-full bg-brand-gradient text-white text-[10px] font-medium uppercase tracking-wider shadow-glow">
+            <span class="absolute -top-2 -right-2 px-2 py-0.5 rounded-full bg-brand-gradient text-white text-[11px] font-medium shadow-glow">
               故事卡
             </span>
           </div>
@@ -380,7 +380,7 @@ onMounted(loadData)
           <span class="w-1 h-4 rounded-full bg-brand-gradient" />
           默认配置
         </h3>
-        <dl class="grid sm:grid-cols-2 gap-3 text-sm">
+        <dl class="grid gap-4 sm:grid-cols-2 text-sm">
           <div class="rounded-lg bg-surface-sunken p-3 ring-1 ring-border-subtle">
             <dt class="text-xs text-ink-muted">世界书</dt>
             <dd class="mt-1 text-ink-primary">{{ story.world || '不绑定' }}</dd>
@@ -433,7 +433,7 @@ onMounted(loadData)
             {{ testModel.loading ? '生成中…' : '▶ 运行测试' }}
           </AppButton>
         </div>
-        <div class="grid md:grid-cols-2 gap-3">
+        <div class="grid md:grid-cols-2 gap-4">
           <AppFormField label="使用 Profile">
             <AppSelect v-model="testModel.profileId">
               <option v-for="p in models.profiles" :key="p.id" :value="p.id">
@@ -454,16 +454,16 @@ onMounted(loadData)
           <AppTextarea v-model="testModel.prompt" :rows="3" auto-grow placeholder="例如：你收到了一封匿名信…" />
         </AppFormField>
         <div v-if="testModel.result || testModel.error" class="space-y-2">
-          <h4 class="text-xs font-semibold text-ink-muted uppercase tracking-wider">输出</h4>
+          <h4 class="text-xs font-semibold text-ink-muted">输出</h4>
           <div
             v-if="testModel.error"
-            class="text-xs whitespace-pre-wrap bg-red-500/10 text-red-600 ring-1 ring-red-500/20 p-3 rounded-md"
+            class="text-xs whitespace-pre-wrap bg-red-500/10 text-red-600 ring-1 ring-red-500/20 p-3 rounded-lg"
           >
             {{ testModel.error }}
           </div>
           <div
             v-else
-            class="text-sm whitespace-pre-wrap text-ink-primary bg-surface-sunken ring-1 ring-border-subtle p-3 rounded-md leading-relaxed max-h-72 overflow-y-auto"
+            class="text-sm whitespace-pre-wrap text-ink-primary bg-surface-sunken ring-1 ring-border-subtle p-3 rounded-lg leading-relaxed max-h-72 overflow-y-auto"
           >
             {{ testModel.result }}
           </div>

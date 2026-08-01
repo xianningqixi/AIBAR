@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { useUiStore } from '@/stores/ui'
 import { useModsStore, type ModItem } from '@/stores/mods'
 import AppButton from '@/components/ui/AppButton.vue'
@@ -12,6 +13,8 @@ import AppEmpty from '@/components/ui/AppEmpty.vue'
 
 const ui = useUiStore()
 const mods = useModsStore()
+const route = useRoute()
+const router = useRouter()
 
 const selectedModId = ref('')
 
@@ -33,6 +36,14 @@ function addMod() {
 function deleteSelectedMod(mod: ModItem) {
   mods.deleteMod(mod.id)
   selectedModId.value = mods.mods[0]?.id || ''
+}
+
+function publishSelectedMod(mod: ModItem) {
+  if (!mod.content.trim()) {
+    ui.addToast('请先填写提示词内容', 'warning')
+    return
+  }
+  router.push({ path: '/publish', query: { type: 'mod', sourceId: mod.id } })
 }
 
 function writeSampleMods() {
@@ -64,7 +75,8 @@ function writeSampleMods() {
 
 onMounted(async () => {
   await mods.load()
-  selectedModId.value = mods.mods[0]?.id || ''
+  const requestedId = typeof route.query.modId === 'string' ? route.query.modId : ''
+  selectedModId.value = mods.getMod(requestedId)?.id || mods.mods[0]?.id || ''
 })
 
 watch(
@@ -78,9 +90,9 @@ watch(
 </script>
 
 <template>
-  <div class="grid lg:grid-cols-[300px_1fr] gap-4">
+  <div class="grid gap-4 lg:grid-cols-[300px_1fr]">
     <AppCard padding="md">
-      <div class="flex flex-wrap gap-2 mb-4">
+      <div class="flex flex-wrap gap-2 mb-3">
         <AppButton size="sm" @click="addMod">+ 新建</AppButton>
         <AppButton size="sm" variant="secondary" @click="writeSampleMods">写入示例</AppButton>
       </div>
@@ -102,7 +114,7 @@ watch(
           />
           <div class="flex items-center justify-between gap-2">
             <span class="text-sm font-medium truncate">{{ mod.name }}</span>
-            <span v-if="mod.enabled" class="text-[10px] text-emerald-600 shrink-0">全局</span>
+            <span v-if="mod.enabled" class="text-[11px] text-emerald-600 shrink-0">全局</span>
           </div>
           <div class="mt-1 text-[11px] text-ink-muted truncate">
             {{ mod.builtin ? '公用Mod' : '我的Mod' }} · {{ positionLabels[mod.position] }} · {{ mod.content.length }} 字
@@ -119,7 +131,8 @@ watch(
           <p class="text-xs text-ink-muted mt-1">左侧浏览已有 MOD,右侧编辑当前选中项。</p>
         </div>
         <div class="flex items-center gap-2">
-          <span v-if="selectedMod.builtin" class="text-[10px] uppercase tracking-wider text-ink-muted bg-surface-sunken px-1.5 py-0.5 rounded">内置</span>
+          <span v-if="selectedMod.builtin" class="text-[11px] text-ink-muted bg-surface-sunken px-1.5 py-0.5 rounded">内置</span>
+          <AppButton v-if="!selectedMod.builtin" size="sm" variant="secondary" @click="publishSelectedMod(selectedMod)">发布到社区</AppButton>
           <label class="flex items-center gap-1.5 text-xs text-ink-secondary cursor-pointer">
             <input
               type="checkbox"
@@ -146,7 +159,7 @@ watch(
         />
       </AppFormField>
 
-      <div class="grid md:grid-cols-2 gap-3">
+      <div class="grid gap-4 md:grid-cols-2">
         <AppFormField label="位置">
           <AppSelect
             :model-value="selectedMod.position"

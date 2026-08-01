@@ -9,6 +9,7 @@ import { useImageGenStore } from '@/stores/imageGen'
 import { getStory, saveStory } from '@/api/stories'
 import { listWorldInfo } from '@/api/worldinfo'
 import { generateReply } from '@/api/generate'
+import { getApiErrorMessage } from '@/api/client'
 import type { Character, ImageAsset, ModelProfile, StoryCard, WorldInfoSummary } from '@/api/types'
 import AppButton from '@/components/ui/AppButton.vue'
 import AppInput from '@/components/ui/AppInput.vue'
@@ -20,6 +21,7 @@ import AppPageHeader from '@/components/ui/AppPageHeader.vue'
 import AppSpinner from '@/components/ui/AppSpinner.vue'
 import ModPicker from '@/components/mods/ModPicker.vue'
 import ImageGenerateBox from '@/components/image/ImageGenerateBox.vue'
+import { useSessionStore } from '@/stores/session'
 import { buildStoryImagePrompt } from '@/lib/imagePrompts'
 import {
   buildStoryDraftPayload,
@@ -31,6 +33,7 @@ import {
 
 const route = useRoute()
 const router = useRouter()
+const session = useSessionStore()
 const chars = useCharactersStore()
 const ui = useUiStore()
 const mods = useModsStore()
@@ -222,8 +225,8 @@ async function askDraftQuestions() {
     draft.questions = questions
     draft.answers = nextAnswers
     ui.addToast('问题已生成，按你的偏好回答后再生成', 'success')
-  } catch (e: any) {
-    draft.error = e?.message || '追问生成失败'
+  } catch (e: unknown) {
+    draft.error = getApiErrorMessage(e, '追问生成失败')
     ui.addToast(`追问生成失败：${draft.error}`, 'error')
   } finally {
     draft.asking = false
@@ -270,8 +273,8 @@ async function draftWithAi() {
     if (result.tags.length) tags.value = result.tags.join(', ')
     if (!modelProfileId.value) modelProfileId.value = profile.id
     ui.addToast('AI 故事初稿已填入表单，可以继续手改', 'success')
-  } catch (e: any) {
-    draft.error = e?.message || '起草失败'
+  } catch (e: unknown) {
+    draft.error = getApiErrorMessage(e, '起草失败')
     ui.addToast(`起草失败：${draft.error}`, 'error')
   } finally {
     draft.loading = false
@@ -312,8 +315,8 @@ async function saveHandler() {
     const story = await saveStory(payload)
     ui.addToast(isEdit.value ? '故事卡已更新' : '故事卡已保存', 'success')
     router.push(`/story/${encodeURIComponent(story.id)}`)
-  } catch (e: any) {
-    ui.addToast(`保存失败：${e.message}`, 'error')
+  } catch (e: unknown) {
+    ui.addToast(`保存失败：${getApiErrorMessage(e)}`, 'error')
   } finally {
     submitting.value = false
   }
@@ -333,8 +336,8 @@ onMounted(async () => {
     try {
       const existing = await getStory(editId.value)
       fillFromStory(existing)
-    } catch (e: any) {
-      ui.addToast(`加载故事失败：${e.message}`, 'error')
+    } catch (e: unknown) {
+      ui.addToast(`加载故事失败：${getApiErrorMessage(e)}`, 'error')
       router.push('/browse?tab=stories')
     } finally {
       loadingStory.value = false
@@ -351,8 +354,8 @@ function applyStoryCover(asset: ImageAsset) {
 </script>
 
 <template>
-  <div class="min-h-screen bg-bg">
-    <AppPageHeader :title="pageTitle" :back-to="backTo">
+  <div class="min-h-[100dvh] bg-bg">
+    <AppPageHeader :title="pageTitle" :back-to="backTo" width="4xl">
       <template #actions>
         <AppButton variant="gradient" :disabled="submitting" @click="saveHandler">
           {{ submitting ? '保存中…' : isEdit ? '更新故事卡' : '保存故事卡' }}
@@ -364,12 +367,12 @@ function applyStoryCover(asset: ImageAsset) {
       <AppSpinner size="lg" />
     </div>
 
-    <main v-else class="max-w-4xl mx-auto px-5 py-6 space-y-4 animate-fade-in-up">
+    <main v-else class="max-w-4xl mx-auto px-5 py-6 md:px-8 lg:px-10 space-y-4 animate-fade-in-up">
       <section class="relative overflow-hidden rounded-2xl ring-1 ring-border-subtle bg-hero-radial">
         <div class="absolute -top-12 -right-12 w-56 h-56 rounded-full bg-accent-500/20 blur-3xl pointer-events-none" />
         <div class="absolute -bottom-16 -left-8 w-56 h-56 rounded-full bg-brand-500/15 blur-3xl pointer-events-none" />
         <div class="relative p-5 md:p-7 max-w-2xl">
-          <p class="text-[11px] uppercase tracking-[0.2em] text-accent-300/80 mb-2">{{ isEdit ? '编辑故事模板' : '故事模板' }}</p>
+          <p class="text-[11px] text-accent-300/80 mb-2">{{ isEdit ? '编辑故事模板' : '故事模板' }}</p>
           <h2 class="text-xl md:text-2xl font-semibold text-ink-primary">
             <template v-if="isEdit">修改 <span class="text-brand-300">{{ title || '故事卡' }}</span> 的设定</template>
             <template v-else>把一段 <span class="text-brand-300">设定</span> 保存成可复用的故事卡</template>
@@ -411,7 +414,7 @@ function applyStoryCover(asset: ImageAsset) {
           </div>
         </div>
 
-        <div class="grid md:grid-cols-[1fr_260px] gap-3">
+        <div class="grid gap-4 md:grid-cols-[1fr_260px]">
           <AppFormField label="故事想法">
             <AppTextarea
               v-model="draft.idea"
@@ -430,7 +433,7 @@ function applyStoryCover(asset: ImageAsset) {
         </div>
 
         <div v-if="draft.questions.length" class="space-y-3 rounded-lg bg-surface-sunken p-3 ring-1 ring-border-subtle">
-          <h4 class="text-xs font-semibold uppercase tracking-wider text-ink-muted">关键问题</h4>
+          <h4 class="text-xs font-semibold text-ink-muted">关键问题</h4>
           <div
             v-for="(question, index) in draft.questions"
             :key="question.id"
@@ -477,7 +480,7 @@ function applyStoryCover(asset: ImageAsset) {
           </div>
         </div>
 
-        <div v-if="draft.error" class="text-xs whitespace-pre-wrap bg-red-500/10 text-red-600 ring-1 ring-red-500/20 p-3 rounded-md">
+        <div v-if="draft.error" class="text-xs whitespace-pre-wrap bg-red-500/10 text-red-600 ring-1 ring-red-500/20 p-3 rounded-lg">
           {{ draft.error }}
         </div>
       </AppCard>
@@ -523,7 +526,7 @@ function applyStoryCover(asset: ImageAsset) {
           <AppInput v-model="tags" placeholder="悬疑, 学院, 长线" />
         </AppFormField>
 
-        <div class="grid gap-3 md:grid-cols-[160px_minmax(0,1fr)]">
+        <div class="grid gap-4 md:grid-cols-[180px_minmax(0,1fr)]">
           <div class="aspect-[3/4] overflow-hidden rounded-xl bg-surface-sunken ring-1 ring-border-subtle">
             <img
               v-if="coverImage"
@@ -536,6 +539,7 @@ function applyStoryCover(asset: ImageAsset) {
             </div>
           </div>
           <ImageGenerateBox
+            v-if="session.isAdmin"
             title="生成故事封面"
             description="使用标题、简介、场景和绑定角色生成封面。生成后会随故事卡保存到本地。"
             :prompt="storyImagePrompt"
@@ -561,12 +565,12 @@ function applyStoryCover(asset: ImageAsset) {
           <AppTextarea v-model="openingUserMessage" :rows="3" auto-grow placeholder="我推开门,走进雨夜里的酒馆。" />
         </AppFormField>
 
-        <div class="space-y-3">
-          <label class="flex items-center gap-2 text-xs text-ink-secondary cursor-pointer">
+        <div class="space-y-4">
+          <label class="flex cursor-pointer items-center gap-2 text-xs font-medium text-ink-secondary">
             <input v-model="useCharGreeting" type="checkbox" class="accent-brand-500" />
             使用角色卡自带开场白作为 AI 开场
           </label>
-          <div v-if="useCharGreeting" class="text-xs text-ink-muted whitespace-pre-wrap bg-surface-sunken p-3 rounded-md ring-1 ring-border-subtle max-h-48 overflow-y-auto">
+          <div v-if="useCharGreeting" class="text-xs text-ink-muted whitespace-pre-wrap bg-surface-sunken p-3 rounded-lg ring-1 ring-border-subtle max-h-48 overflow-y-auto">
             {{ assistantOpening || '(角色卡没有开场白)' }}
           </div>
           <AppFormField v-else label="AI 开场">
@@ -584,20 +588,9 @@ function applyStoryCover(asset: ImageAsset) {
         </AppFormField>
       </AppCard>
 
-      <details
-        :open="isEdit || isAdvancedCreate"
-        class="overflow-hidden rounded-lg bg-surface ring-1 ring-border-subtle"
-      >
-        <summary class="cursor-pointer list-none px-4 py-3 hover:bg-surface-elevated transition-colors">
-          <div class="flex flex-wrap items-center justify-between gap-2">
-            <h3 class="flex items-center gap-2 text-sm font-semibold text-ink-primary">
-              <span class="w-1 h-4 rounded-full bg-brand-gradient" />
-              高级配置
-            </h3>
-            <span class="text-xs text-ink-muted">世界书(地点/组织/规则)、模型 Profile、默认 MOD</span>
-          </div>
-        </summary>
-        <div class="space-y-4 border-t border-border-subtle p-4">
+      <AppCard collapsible title="高级配置" :default-open="isEdit || isAdvancedCreate">
+        <template #summary>世界书(地点/组织/规则)、模型 Profile、默认 MOD</template>
+        <div class="space-y-4">
           <AppFormField label="世界书" hint="故事发生在固定地点、组织或规则下时再选；只会注入命中关键词的条目。">
             <AppSelect v-model="world">
               <option value="">不绑定</option>
@@ -623,9 +616,9 @@ function applyStoryCover(asset: ImageAsset) {
             description="保存到故事卡模板里。每次开始故事时会默认勾选这些 MOD,也可以临时调整。"
           />
         </div>
-      </details>
+      </AppCard>
 
-      <p class="text-xs text-ink-muted">
+      <p class="px-1 text-xs text-ink-muted">
         {{ isEdit ? '保存后修改立即生效，已从该模板创建的聊天记录不受影响。' : '故事卡是可复用模板。点击开始故事时才会创建新的 ST 聊天记录,同一个故事可以开多条不同存档。' }}
       </p>
     </main>

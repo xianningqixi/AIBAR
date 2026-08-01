@@ -14,6 +14,7 @@ import AppCard from '@/components/ui/AppCard.vue'
 import AppFormField from '@/components/ui/AppFormField.vue'
 import AppEmpty from '@/components/ui/AppEmpty.vue'
 import { generateReply } from '@/api/generate'
+import { getApiErrorMessage } from '@/api/client'
 import { buildImageGenDraftPayload, parseImageGenDraft } from '@/lib/imageGenDraft'
 import { imageHistory, loadImageHistory } from './shared'
 
@@ -79,8 +80,8 @@ async function saveImageSecret() {
     await writeSecret(meta.secretKey, value.trim(), meta.secretLabel || meta.label)
     imageKeyDrafts[draftKey] = ''
     ui.addToast(`${meta.secretLabel || 'API Key'} 已写入 ST secrets`, 'success')
-  } catch (e: any) {
-    ui.addToast(`保存失败：${e.message}`, 'error')
+  } catch (e: unknown) {
+    ui.addToast(`保存失败：${getApiErrorMessage(e)}`, 'error')
   } finally {
     savingImageKey.value = ''
   }
@@ -124,8 +125,8 @@ async function optimizeImageTestPrompt() {
       enhance: draft.enhance,
     }
     ui.addToast('已优化测试图提示词', 'success')
-  } catch (e: any) {
-    ui.addToast(`优化失败：${e.message || '请检查模型配置'}`, 'error')
+  } catch (e: unknown) {
+    ui.addToast(`优化失败：${getApiErrorMessage(e, '请检查模型配置')}`, 'error')
   } finally {
     imageOptimizing.value = false
   }
@@ -143,8 +144,8 @@ async function runImageTest() {
     imageTestAsset.value = asset
     await loadImageHistory()
     ui.addToast('测试图片已生成', 'success')
-  } catch (e: any) {
-    ui.addToast(`测试失败：${e.message || '请检查图像配置'}`, 'error')
+  } catch (e: unknown) {
+    ui.addToast(`测试失败：${getApiErrorMessage(e, '请检查图像配置')}`, 'error')
   } finally {
     imageTesting.value = false
   }
@@ -161,7 +162,7 @@ onMounted(async () => {
     <AppCard padding="md" tone="glow" class="space-y-4">
       <div class="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <p class="text-xs uppercase tracking-[0.18em] text-brand-300 font-semibold">文生图配置</p>
+          <p class="text-xs text-brand-300 font-semibold">文生图配置</p>
           <h2 class="mt-2 text-xl font-semibold text-ink-primary">统一配置后，故事封面、角色图、聊天配图都会复用这里。</h2>
           <p class="mt-1 text-sm text-ink-secondary max-w-2xl leading-relaxed">
             图片会保存到本地 ST 用户目录下的 AIBAR 图片库，聊天记录和故事卡只保存图片引用。
@@ -297,12 +298,12 @@ onMounted(async () => {
               @update:model-value="(v) => imageGen.updateSettings({ autoAuth: v })"
             />
           </AppFormField>
-          <div class="md:col-span-2 flex justify-end">
+          <div class="md:col-span-2 flex items-center justify-end gap-3">
             <AppButton
               size="sm"
               variant="secondary"
               :disabled="imageGen.testing"
-              @click="() => imageGen.testCurrentProvider().then(() => ui.addToast('SD WebUI 连接正常', 'success')).catch((e) => ui.addToast(`连接失败：${e.message}`, 'error'))"
+              @click="() => imageGen.testCurrentProvider().then(() => ui.addToast('SD WebUI 连接正常', 'success')).catch((e: unknown) => ui.addToast(`连接失败：${getApiErrorMessage(e)}`, 'error'))"
             >
               {{ imageGen.testing ? '检测中…' : '检测连接' }}
             </AppButton>
@@ -372,7 +373,7 @@ onMounted(async () => {
         <p v-if="imageTestDraftParameterText" class="text-[11px] text-brand-start">
           建议参数 · {{ imageTestDraftParameterText }}
         </p>
-        <p v-if="imageTestDraftReason" class="rounded-md bg-surface-sunken px-3 py-2 text-[11px] leading-relaxed text-ink-muted ring-1 ring-border-subtle">
+        <p v-if="imageTestDraftReason" class="rounded-lg bg-surface-sunken px-3 py-2 text-[11px] leading-relaxed text-ink-muted ring-1 ring-border-subtle">
           优化说明：{{ imageTestDraftReason }}
         </p>
         <AppButton class="w-full" variant="gradient" :disabled="imageOptimizing || imageTesting || imageGen.generating" @click="runImageTest">

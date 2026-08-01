@@ -1,17 +1,13 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
-import { useLocalStorage } from '@vueuse/core'
+import { computed, ref, watch } from 'vue'
 import { useModelProfilesStore } from '@/stores/modelProfiles'
+import { useSessionStore } from '@/stores/session'
 import { useUiStore } from '@/stores/ui'
 import {
-  DEFAULT_TELEGRAM_BOT_ADMIN_URL,
-  TELEGRAM_BOT_ADMIN_TOKEN_KEY,
-  TELEGRAM_BOT_ADMIN_URL_KEY,
   debugTelegramBot,
   debugTelegramFull,
   debugTelegramSt,
   getTelegramBotStatus,
-  normalizeTelegramBotAdminUrl,
   restartTelegramBotPolling,
   saveTelegramBotConfig,
   type FullDebugResult,
@@ -29,9 +25,10 @@ type DebugResult = TelegramDebugResult | StDebugResult | FullDebugResult
 
 const ui = useUiStore()
 const models = useModelProfilesStore()
+const session = useSessionStore()
 
-const serviceUrl = useLocalStorage(TELEGRAM_BOT_ADMIN_URL_KEY, DEFAULT_TELEGRAM_BOT_ADMIN_URL)
-const adminToken = useLocalStorage(TELEGRAM_BOT_ADMIN_TOKEN_KEY, '')
+const adminToken = ref('')
+let viewEpoch = 0
 
 const status = ref<TelegramBotStatus | null>(null)
 const loadingStatus = ref(false)
@@ -43,12 +40,36 @@ const debugResult = ref<{ title: string; data: DebugResult } | null>(null)
 const tokenDraft = ref('')
 const allowedUserIds = ref('')
 const stBaseUrl = ref('http://127.0.0.1:8001')
+const stUserHandle = ref('')
+const stUserPassword = ref('')
+const clearStUserPassword = ref(false)
 const modelProfileId = ref('')
 const maxCompletionTokens = ref('4096')
 const pollTimeoutSeconds = ref('25')
 
+function isCurrentView(epoch: number, handle: string) {
+  return epoch === viewEpoch && handle === (session.user?.handle || '') && session.isAdmin
+}
+
+function clearAccountState() {
+  status.value = null
+  loadingStatus.value = false
+  saving.value = false
+  restarting.value = false
+  debugRunning.value = ''
+  debugResult.value = null
+  tokenDraft.value = ''
+  allowedUserIds.value = ''
+  stBaseUrl.value = 'http://127.0.0.1:8001'
+  stUserHandle.value = ''
+  stUserPassword.value = ''
+  clearStUserPassword.value = false
+  modelProfileId.value = ''
+  maxCompletionTokens.value = '4096'
+  pollTimeoutSeconds.value = '25'
+}
+
 const adminOptions = computed(() => ({
-  baseUrl: normalizeTelegramBotAdminUrl(serviceUrl.value),
   adminToken: adminToken.value.trim() || undefined,
 }))
 
@@ -66,73 +87,97 @@ const pollingLabel = computed(() => {
 
 const pollingToneClass = computed(() => {
   if (!status.value) return 'bg-ink-primary/5 text-ink-muted ring-border-subtle'
-  if (status.value.polling.running) return 'bg-emerald-500/10 text-emerald-300 ring-emerald-500/25'
-  if (status.value.config.tokenConfigured) return 'bg-amber-500/10 text-amber-300 ring-amber-500/25'
+  if (status.value.polling.running) return 'bg-emerald-500/10 text-emerald-700 ring-emerald-500/25'
+  if (status.value.config.tokenConfigured) return 'bg-amber-500/10 text-amber-700 ring-amber-500/25'
   return 'bg-ink-primary/5 text-ink-muted ring-border-subtle'
 })
 
 function hydrateFromStatus(next: TelegramBotStatus) {
   allowedUserIds.value = next.config.allowedUserIds.join(', ')
   stBaseUrl.value = next.config.stBaseUrl || stBaseUrl.value
+  stUserHandle.value = next.config.stUserHandle || ''
   modelProfileId.value = next.config.modelProfileId || ''
   maxCompletionTokens.value = String(next.config.maxCompletionTokens || 4096)
   pollTimeoutSeconds.value = String(next.config.pollTimeoutSeconds || 25)
 }
 
 async function refreshStatus(showToast = false) {
+  const epoch = viewEpoch
+  const handle = session.user?.handle || ''
+  if (!isCurrentView(epoch, handle)) return
   loadingStatus.value = true
   try {
-    serviceUrl.value = normalizeTelegramBotAdminUrl(serviceUrl.value)
     const next = await getTelegramBotStatus(adminOptions.value)
+    if (!isCurrentView(epoch, handle)) return
     status.value = next
+    adminToken.value = ''
     hydrateFromStatus(next)
     if (showToast) ui.addToast('Telegram Bot 状态已刷新', 'success')
   } catch (error) {
+    if (!isCurrentView(epoch, handle)) return
     status.value = null
     if (showToast) ui.addToast(`无法连接 Telegram Bot 服务：${errorMessage(error)}`, 'error')
   } finally {
-    loadingStatus.value = false
+    if (isCurrentView(epoch, handle)) loadingStatus.value = false
   }
 }
 
 async function saveConfig() {
+  const epoch = viewEpoch
+  const handle = session.user?.handle || ''
+  if (!isCurrentView(epoch, handle)) return
   saving.value = true
   try {
-    serviceUrl.value = normalizeTelegramBotAdminUrl(serviceUrl.value)
     const next = await saveTelegramBotConfig(adminOptions.value, {
       ...(tokenDraft.value.trim() ? { token: tokenDraft.value.trim() } : {}),
       allowedUserIds: allowedUserIds.value,
-      stBaseUrl: stBaseUrl.value,
+      stUserHandle: stUserHandle.value,
+      ...(clearStUserPassword.value
+        ? { clearStUserPassword: true }
+        : stUserPassword.value ? { stUserPassword: stUserPassword.value } : {}),
       modelProfileId: modelProfileId.value,
       maxCompletionTokens: Number(maxCompletionTokens.value) || 4096,
       pollTimeoutSeconds: Number(pollTimeoutSeconds.value) || 25,
     })
+    if (!isCurrentView(epoch, handle)) return
     status.value = next
+    adminToken.value = ''
     tokenDraft.value = ''
+    stUserPassword.value = ''
+    clearStUserPassword.value = false
     hydrateFromStatus(next)
     ui.addToast('Telegram Bot 配置已保存', 'success')
   } catch (error) {
+    if (!isCurrentView(epoch, handle)) return
     ui.addToast(`保存失败：${errorMessage(error)}`, 'error')
   } finally {
-    saving.value = false
+    if (isCurrentView(epoch, handle)) saving.value = false
   }
 }
 
 async function restartPolling() {
+  const epoch = viewEpoch
+  const handle = session.user?.handle || ''
+  if (!isCurrentView(epoch, handle)) return
   restarting.value = true
   try {
     const next = await restartTelegramBotPolling(adminOptions.value)
+    if (!isCurrentView(epoch, handle)) return
     status.value = next
     hydrateFromStatus(next)
     ui.addToast(next.polling.running ? '轮询已重启' : '轮询未启动，请检查 Token', next.polling.running ? 'success' : 'warning')
   } catch (error) {
+    if (!isCurrentView(epoch, handle)) return
     ui.addToast(`重启失败：${errorMessage(error)}`, 'error')
   } finally {
-    restarting.value = false
+    if (isCurrentView(epoch, handle)) restarting.value = false
   }
 }
 
 async function runDebug(kind: 'telegram' | 'st' | 'full') {
+  const epoch = viewEpoch
+  const handle = session.user?.handle || ''
+  if (!isCurrentView(epoch, handle)) return
   debugRunning.value = kind
   debugResult.value = null
   try {
@@ -140,26 +185,38 @@ async function runDebug(kind: 'telegram' | 'st' | 'full') {
       const data = await debugTelegramBot(adminOptions.value, {
         ...(tokenDraft.value.trim() ? { token: tokenDraft.value.trim() } : {}),
       })
+      if (!isCurrentView(epoch, handle)) return
       debugResult.value = { title: 'Telegram Token 检查', data }
       ui.addToast(data.ok ? data.message : `Telegram 检查失败：${data.message}`, data.ok ? 'success' : 'error')
       return
     }
     if (kind === 'st') {
-      const data = await debugTelegramSt(adminOptions.value, { stBaseUrl: stBaseUrl.value })
+      const data = await debugTelegramSt(adminOptions.value, {
+        stUserHandle: stUserHandle.value,
+        ...(clearStUserPassword.value
+          ? { stUserPassword: '' }
+          : stUserPassword.value ? { stUserPassword: stUserPassword.value } : {}),
+      })
+      if (!isCurrentView(epoch, handle)) return
       debugResult.value = { title: 'ST 后端检查', data }
       ui.addToast(data.ok ? data.message : `ST 检查失败：${data.message}`, data.ok ? 'success' : 'error')
       return
     }
     const data = await debugTelegramFull(adminOptions.value, {
       ...(tokenDraft.value.trim() ? { token: tokenDraft.value.trim() } : {}),
-      stBaseUrl: stBaseUrl.value,
+      stUserHandle: stUserHandle.value,
+      ...(clearStUserPassword.value
+        ? { stUserPassword: '' }
+        : stUserPassword.value ? { stUserPassword: stUserPassword.value } : {}),
     })
+    if (!isCurrentView(epoch, handle)) return
     debugResult.value = { title: '完整诊断', data }
     ui.addToast(data.ok ? '完整诊断通过' : '完整诊断存在失败项', data.ok ? 'success' : 'warning')
   } catch (error) {
+    if (!isCurrentView(epoch, handle)) return
     ui.addToast(`诊断失败：${errorMessage(error)}`, 'error')
   } finally {
-    debugRunning.value = ''
+    if (isCurrentView(epoch, handle)) debugRunning.value = ''
   }
 }
 
@@ -181,9 +238,19 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
 }
 
-onMounted(() => {
-  void refreshStatus(false)
-})
+watch(
+  [() => session.user?.handle || '', () => session.sessionEpoch, () => session.isAdmin],
+  ([handle, _sessionEpoch, isAdmin]) => {
+    viewEpoch += 1
+    clearAccountState()
+    if (!isAdmin) {
+      adminToken.value = ''
+      return
+    }
+    if (handle) void refreshStatus(false)
+  },
+  { immediate: true },
+)
 </script>
 
 <template>
@@ -191,7 +258,7 @@ onMounted(() => {
     <AppCard padding="md" tone="glow" class="space-y-5">
       <div class="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <p class="text-xs uppercase tracking-[0.18em] text-brand-300 font-semibold">Telegram Bot</p>
+          <p class="text-xs text-brand-300 font-semibold">Telegram Bot</p>
           <h2 class="mt-2 text-xl font-semibold text-ink-primary">本地 companion 服务配置</h2>
           <p class="mt-1 text-sm text-ink-secondary max-w-2xl leading-relaxed">
             配置写入独立的 <span class="font-mono text-ink-primary">telegram-bot/.env</span>，聊天数据仍通过 ST API 保存到现有角色聊天。
@@ -233,23 +300,18 @@ onMounted(() => {
       </div>
     </AppCard>
 
-    <div class="grid gap-4 lg:grid-cols-[1fr_360px]">
+    <div class="grid gap-4 lg:grid-cols-[1fr_340px]">
       <AppCard padding="md" class="space-y-4">
         <div>
           <h3 class="text-base font-semibold text-ink-primary">连接配置</h3>
           <p class="mt-1 text-sm text-ink-secondary">
-            先启动 <span class="font-mono text-ink-primary">telegram-bot</span> 服务，再在这里保存 Token 和白名单。
+            先启动 <span class="font-mono text-ink-primary">telegram-bot</span> 服务，再填写管理凭据、Bot Token、白名单和专用 AIBAR 账号。
           </p>
         </div>
 
-        <div class="grid gap-3 md:grid-cols-2">
-          <AppFormField label="Bot 服务地址">
-            <AppInput v-model="serviceUrl" placeholder="http://127.0.0.1:8787" />
-          </AppFormField>
-          <AppFormField label="Admin Token" hint="如果服务端配置了 ADMIN_TOKEN，在这里填写；只保存在当前浏览器。">
-            <AppInput v-model="adminToken" type="password" placeholder="可选" />
-          </AppFormField>
-        </div>
+        <AppFormField label="Admin Token" hint="首次连接时填写；校验成功后加密边界停留在 ST 服务端，不写入浏览器存储。">
+          <AppInput v-model="adminToken" type="password" placeholder="首次连接时填写" autocomplete="off" />
+        </AppFormField>
 
         <AppFormField
           label="Telegram Bot Token"
@@ -259,24 +321,46 @@ onMounted(() => {
         </AppFormField>
 
         <div class="grid gap-3 md:grid-cols-2">
-          <AppFormField label="允许使用的 Telegram 数字 ID" hint="多个 ID 用英文逗号分隔；为空表示不限制。">
+          <AppFormField label="允许使用的 Telegram 数字 ID" hint="多个 ID 用英文逗号分隔；为空时 bot 保持关闭。">
             <AppInput v-model="allowedUserIds" placeholder="123456789,987654321" />
           </AppFormField>
-          <AppFormField label="ST 后端地址">
-            <AppInput v-model="stBaseUrl" placeholder="http://127.0.0.1:8001" />
+          <AppFormField label="ST 后端地址" hint="只允许在 companion 服务的 .env 中修改，防止管理请求重定向凭据。">
+            <AppInput v-model="stBaseUrl" disabled placeholder="http://127.0.0.1:8001" />
           </AppFormField>
         </div>
 
         <div class="grid gap-3 md:grid-cols-2">
-          <AppFormField label="模型 Profile">
+          <AppFormField label="ST 登录账号" hint="Telegram Bot 使用这个 AIBAR 账号访问角色、模型和聊天记录。">
+            <AppInput v-model="stUserHandle" autocomplete="username" placeholder="AIBAR 账号 handle" />
+          </AppFormField>
+          <AppFormField
+            label="ST 登录密码"
+            :hint="status?.config.stPasswordConfigured ? '密码已配置；留空表示不修改。' : '尚未配置 ST 登录密码。'"
+          >
+            <AppInput
+              v-model="stUserPassword"
+              type="password"
+              autocomplete="new-password"
+              :disabled="clearStUserPassword"
+              placeholder="留空表示不修改"
+            />
+          </AppFormField>
+        </div>
+        <label v-if="status?.config.stPasswordConfigured" class="flex min-h-10 items-center gap-2 text-sm text-ink-secondary">
+          <input v-model="clearStUserPassword" type="checkbox" class="h-4 w-4 accent-brand-500" />
+          保存时清除已配置的 ST 登录密码
+        </label>
+
+        <div class="grid gap-3 md:grid-cols-2">
+          <AppFormField label="共享模型">
             <AppSelect v-model="modelProfileId">
               <option value="">跟随 AIBAR 当前默认</option>
-              <option v-for="profile in models.profiles" :key="profile.id" :value="profile.id">
+              <option v-for="profile in models.profiles.filter(item => item.enabled !== false)" :key="profile.id" :value="profile.id">
                 {{ profile.name }} · {{ profile.model }}
               </option>
             </AppSelect>
           </AppFormField>
-          <AppFormField label="TG 单次最大输出 tokens" hint="会限制 profile/preset 的 max_tokens，避免超大值导致模型 Bad Request。">
+          <AppFormField label="TG 单次最大输出 tokens" hint="会限制 Profile 的 max_tokens，避免超大值导致模型 Bad Request。">
             <AppInput v-model="maxCompletionTokens" type="number" min="256" max="65536" step="256" />
           </AppFormField>
         </div>
@@ -321,7 +405,7 @@ onMounted(() => {
           <div class="rounded-lg bg-surface-sunken px-3 py-2 ring-1 ring-border-subtle">
             <div class="flex items-center justify-between gap-3">
               <span class="text-ink-muted">最近错误</span>
-              <span :class="status?.polling.lastError ? 'text-red-300' : 'text-emerald-300'">
+              <span :class="status?.polling.lastError ? 'text-red-600' : 'text-emerald-700'">
                 {{ status?.polling.lastError ? '有' : '无' }}
               </span>
             </div>
@@ -365,11 +449,11 @@ onMounted(() => {
       >
         <div class="flex items-center justify-between gap-3">
           <p class="text-sm font-semibold text-ink-primary">{{ debugResult.title }}</p>
-          <span :class="isDebugOk(debugResult.data) ? 'text-emerald-300' : 'text-red-300'" class="text-xs font-medium">
+          <span :class="isDebugOk(debugResult.data) ? 'text-emerald-700' : 'text-red-600'" class="text-xs font-medium">
             {{ isDebugOk(debugResult.data) ? '通过' : '失败' }}
           </span>
         </div>
-        <pre class="mt-3 max-h-80 overflow-auto whitespace-pre-wrap break-words rounded-md bg-black/20 p-3 text-xs leading-relaxed text-ink-secondary">{{ formatDebug(debugResult.data) }}</pre>
+        <pre class="mt-3 max-h-80 overflow-auto whitespace-pre-wrap break-words rounded-lg bg-black/20 p-3 text-xs leading-relaxed text-ink-secondary">{{ formatDebug(debugResult.data) }}</pre>
       </div>
     </AppCard>
   </div>

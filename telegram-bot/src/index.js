@@ -1,7 +1,24 @@
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 import http from 'node:http';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { isUsableAdminToken, pollingReadiness } from './runtimeConfig.js';
+import { createRuntimeCoordinator, supervisePolling } from './runtimeLifecycle.js';
+import {
+  appendRuntimeUpdates,
+  createEmptyRuntimeState,
+  createRuntimeIdentity,
+  getRuntimeStateUpdateProgress,
+  loadRuntimeState,
+  markRuntimeStateUpdateProcessed,
+  runtimeStatePath,
+  saveRuntimeState,
+  setRuntimeStateUpdateProgress,
+  settleRuntimeStateUpdate,
+  telegramUpdateId,
+} from './runtimeState.js';
+import { createRetryingUpdateHandler, createUpdatePipeline } from './updatePipeline.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const rootDir = path.resolve(__dirname, '..');
@@ -11,6 +28,8 @@ const ENV_WRITE_ORDER = [
   'TELEGRAM_BOT_TOKEN',
   'TELEGRAM_ALLOWED_USER_IDS',
   'ST_BASE_URL',
+  'ST_USER_HANDLE',
+  'ST_USER_PASSWORD',
   'AIBAR_MODEL_PROFILE_ID',
   'AIBAR_MAX_COMPLETION_TOKENS',
   'POLL_TIMEOUT_SECONDS',
@@ -19,14 +38,18 @@ const ENV_WRITE_ORDER = [
   'ADMIN_PORT',
   'ADMIN_TOKEN',
 ];
+const MAX_PENDING_UPDATES = 200;
+const MAX_UPDATE_ATTEMPTS = 5;
+const POLLING_RESTART_DELAY_MS = 1000;
 
 let config = loadConfig();
 let statePath = '';
-let state = { offset: 0, sessions: {} };
+let state = createEmptyRuntimeState(createRuntimeIdentity(config.token, config.stUserHandle));
 let st;
 let adminServer;
 let adminServerInfo = null;
 let pollAbortController = null;
+let runtimeAbortController = null;
 
 const activeUsers = new Set();
 const polling = {
@@ -39,6 +62,12 @@ const polling = {
   lastError: '',
   bot: null,
 };
+
+const runtimeCoordinator = createRuntimeCoordinator({
+  stop: stopPolling,
+  reload: reloadRuntime,
+  start: startPolling,
+});
 
 async function main() {
   reloadRuntime();
@@ -53,6 +82,7 @@ async function handleUpdate(update) {
   const userId = String(message.from.id);
   const chatId = message.chat.id;
   const text = String(message.text || '').trim();
+  const updateId = telegramUpdateId(update);
 
   if (message.chat.type !== 'private') {
     await sendMessage(chatId, '当前版本只支持私聊。');
@@ -69,8 +99,7 @@ async function handleUpdate(update) {
 
   const session = getSession(userId, chatId);
   if (text.startsWith('/')) {
-    await handleCommand(text, session, message.from);
-    saveState(statePath, state);
+    await handleCommand(text, session, message.from, update);
     return;
   }
 
@@ -81,14 +110,13 @@ async function handleUpdate(update) {
 
   activeUsers.add(userId);
   try {
-    await handleChatText(text, session, message.from);
+    await handleChatText(text, session, message.from, update, updateId);
   } finally {
     activeUsers.delete(userId);
-    saveState(statePath, state);
   }
 }
 
-async function handleCommand(text, session, from) {
+async function handleCommand(text, session, from, update) {
   const [rawCommand, ...rest] = text.split(/\s+/);
   const command = rawCommand.split('@')[0].toLowerCase();
   const arg = rest.join(' ').trim();
@@ -110,7 +138,7 @@ async function handleCommand(text, session, from) {
     case '/history':
       return showHistory(session, arg);
     case '/retry':
-      return retryLastUserMessage(session, from);
+      return retryLastUserMessage(session, from, update);
     case '/current':
       return showCurrent(session);
     case '/new':
@@ -315,7 +343,7 @@ async function showHistory(session, arg) {
   ].join('\n\n'));
 }
 
-async function handleChatText(text, session, from) {
+async function handleChatText(text, session, from, update, updateId) {
   if (!session.characterAvatar) {
     await sendMessage(session.chatId, '还没有选择角色。发送 /characters 开始。');
     return;
@@ -328,31 +356,65 @@ async function handleChatText(text, session, from) {
   const createdChatFile = !session.chatFile;
   if (!session.chatFile) {
     session.chatFile = createChatName(character, 'Telegram');
+    setUpdateProgress(update, {
+      characterAvatar: character.avatar,
+      chatFile: session.chatFile,
+    });
   }
 
   const current = await fetchChatSafe(character, session.chatFile);
-  const now = new Date().toISOString();
-  const messages = [
-    ...current.messages,
-    { role: 'user', content: text, date: now },
-  ];
-  await saveChat(character, session.chatFile, messages, current.metadata);
-  if (createdChatFile) {
-    await setDefaultCharacterChat(character.avatar, session.chatFile);
+  const existingAssistant = current.messages.find((message) => (
+    message.role === 'assistant' && message.telegramUpdateId === updateId
+  ));
+  if (existingAssistant) {
+    await deliverGeneratedReply(update, session.chatId, existingAssistant.content);
+    return;
   }
 
-  const reply = await generateAssistantReply(character, messages, current.metadata, from);
+  const now = new Date().toISOString();
+  const existingUser = current.messages.some((message) => (
+    message.role === 'user' && message.telegramUpdateId === updateId
+  ));
+  const messages = existingUser
+    ? current.messages
+    : [
+      ...current.messages,
+      { role: 'user', content: text, date: now, telegramUpdateId: updateId },
+    ];
+  if (!existingUser) {
+    await saveChat(character, session.chatFile, messages, current.metadata);
+    setUpdateProgress(update, {
+      userMessageSaved: true,
+      characterAvatar: character.avatar,
+      chatFile: session.chatFile,
+    });
+    if (createdChatFile) {
+      await setDefaultCharacterChat(character.avatar, session.chatFile);
+    }
+  }
+
+  const progress = getRuntimeStateUpdateProgress(state, update);
+  const reply = typeof progress.reply === 'string' && progress.reply.trim()
+    ? progress.reply.trim()
+    : await generateAssistantReply(character, messages, current.metadata, from);
   if (!reply) return;
+  if (progress.reply !== reply) setUpdateProgress(update, { reply });
 
   const nextMessages = [
     ...messages,
-    { role: 'assistant', content: reply.trim(), date: new Date().toISOString() },
+    {
+      role: 'assistant',
+      content: reply.trim(),
+      date: new Date().toISOString(),
+      telegramUpdateId: updateId,
+    },
   ];
   await saveChat(character, session.chatFile, nextMessages, current.metadata);
-  await sendLongMessage(session.chatId, reply.trim());
+  setUpdateProgress(update, { assistantMessageSaved: true });
+  await deliverGeneratedReply(update, session.chatId, reply.trim());
 }
 
-async function retryLastUserMessage(session, from) {
+async function retryLastUserMessage(session, from, update) {
   if (!session.characterAvatar || !session.chatFile) {
     await sendMessage(session.chatId, '还没有当前聊天。发送 /recent 后用 /resume 编号接续，或发送 /characters 选择角色。');
     return;
@@ -361,20 +423,45 @@ async function retryLastUserMessage(session, from) {
   const character = await st.post('/api/characters/get', { avatar_url: session.characterAvatar });
   session.characterName = character.name;
   const current = await fetchChatSafe(character, session.chatFile);
+  const updateId = telegramUpdateId(update);
+  const existingAssistant = current.messages.find((message) => (
+    message.role === 'assistant' && message.telegramUpdateId === updateId
+  ));
+  if (existingAssistant) {
+    await deliverGeneratedReply(update, session.chatId, existingAssistant.content);
+    return;
+  }
   const last = current.messages[current.messages.length - 1];
   if (!last || last.role !== 'user') {
     await sendMessage(session.chatId, '当前聊天最后一条不是用户消息，不需要重试。');
     return;
   }
 
-  const reply = await generateAssistantReply(character, current.messages, current.metadata, from);
+  const progress = getRuntimeStateUpdateProgress(state, update);
+  const reply = typeof progress.reply === 'string' && progress.reply.trim()
+    ? progress.reply.trim()
+    : await generateAssistantReply(character, current.messages, current.metadata, from);
   if (!reply) return;
+  if (progress.reply !== reply) setUpdateProgress(update, { reply });
 
   await saveChat(character, session.chatFile, [
     ...current.messages,
-    { role: 'assistant', content: reply.trim(), date: new Date().toISOString() },
+    {
+      role: 'assistant',
+      content: reply.trim(),
+      date: new Date().toISOString(),
+      telegramUpdateId: updateId,
+    },
   ], current.metadata);
-  await sendLongMessage(session.chatId, reply.trim());
+  setUpdateProgress(update, { assistantMessageSaved: true });
+  await deliverGeneratedReply(update, session.chatId, reply.trim());
+}
+
+async function deliverGeneratedReply(update, chatId, reply) {
+  const progress = getRuntimeStateUpdateProgress(state, update);
+  if (progress.replyDelivered) return;
+  await sendLongMessage(chatId, reply);
+  setUpdateProgress(update, { replyDelivered: true });
 }
 
 async function generateAssistantReply(character, messages, metadata, from) {
@@ -395,16 +482,21 @@ async function generateAssistantReply(character, messages, metadata, from) {
     }
     return reply.trim();
   } catch (error) {
-    await sendMessage(from.id, `模型生成失败：${error?.message || error}\n可以调整模型参数后发送 /retry 重试。`);
+    await sendMessage(from.id, `模型生成失败：${error?.message || error}\n请检查积分余额或联系管理员，然后发送 /retry 重试。`);
     return '';
   }
 }
 
 async function loadAibarGenerationConfig(metadata = {}) {
-  const raw = await st.post('/api/settings/get');
+  const [raw, sharedModelResult] = await Promise.all([
+    st.post('/api/settings/get'),
+    st.post('/api/aibar/models/list'),
+  ]);
   const settings = parseSettings(raw?.settings);
   const aibar = settings.aibar || {};
-  const profiles = Array.isArray(aibar.simple_ui_model_profiles) ? aibar.simple_ui_model_profiles : [];
+  const profiles = Array.isArray(sharedModelResult?.models)
+    ? sharedModelResult.models.filter((item) => item?.enabled !== false)
+    : [];
   const presets = Array.isArray(aibar.simple_ui_presets) ? aibar.simple_ui_presets : [];
   const metadataAibar = getMetadataAibar(metadata);
   const profileId = config.modelProfileId || stringValue(metadataAibar.profileId) || aibar.simple_ui_active_profile || '';
@@ -414,7 +506,7 @@ async function loadAibarGenerationConfig(metadata = {}) {
     : profiles[0];
 
   if (!selected) {
-    throw new Error('没有找到 AIBAR 模型 Profile。请先在 AIBAR 设置里配置模型连接。');
+    throw new Error('没有可用的 AIBAR 共享模型。请联系管理员配置。');
   }
   return {
     profile: selected,
@@ -423,7 +515,7 @@ async function loadAibarGenerationConfig(metadata = {}) {
 }
 
 async function generateReply(payload) {
-  const data = await st.post('/api/backends/chat-completions/generate', payload);
+  const data = await st.post('/api/aibar/models/generate', payload);
   if (data?.error) {
     const message = typeof data.error === 'string'
       ? data.error
@@ -440,39 +532,30 @@ async function generateReply(payload) {
 }
 
 async function fetchChatSafe(character, fileName) {
-  try {
-    const data = await st.post('/api/chats/get', {
-      ch_name: character.name,
-      file_name: fileName,
-      avatar_url: character.avatar,
-    });
-    const arr = Array.isArray(data) ? data : [];
-    const header = arr.find((item) => item?.chat_metadata);
-    return {
-      metadata: {
-        simple_ui: true,
-        ...(header?.chat_metadata || {}),
-      },
-      messages: arr
-        .filter((item) => item && !item.chat_metadata && item.mes)
-        .map((item) => ({
-          role: item.is_user || item.role === 'user' ? 'user' : 'assistant',
-          content: item.mes || '',
-          date: item.send_date || item.date || new Date().toISOString(),
-        })),
-    };
-  } catch {
-    return {
-      metadata: {
-        simple_ui: true,
-        aibar: {
-          kind: 'telegram_session',
-          createdAt: new Date().toISOString(),
-        },
-      },
-      messages: [],
-    };
-  }
+  const data = await st.post('/api/chats/get', {
+    ch_name: character.name,
+    file_name: fileName,
+    avatar_url: character.avatar,
+    strict: true,
+  });
+  const arr = Array.isArray(data) ? data : [];
+  const header = arr.find((item) => item?.chat_metadata);
+  return {
+    metadata: {
+      simple_ui: true,
+      ...(header?.chat_metadata || {}),
+    },
+    messages: arr
+      .filter((item) => item && !item.chat_metadata && item.mes)
+      .map((item) => ({
+        role: item.is_user || item.role === 'user' ? 'user' : 'assistant',
+        content: item.mes || '',
+        date: item.send_date || item.date || new Date().toISOString(),
+        telegramUpdateId: Number.isSafeInteger(Number(item.extra?.aibar?.telegramUpdateId))
+          ? Number(item.extra.aibar.telegramUpdateId)
+          : null,
+      })),
+  };
 }
 
 async function saveChat(character, fileName, messages, metadata = {}) {
@@ -493,7 +576,13 @@ async function saveChat(character, fileName, messages, metadata = {}) {
       is_user: message.role === 'user',
       send_date: message.date || new Date().toISOString(),
       mes: message.content,
-      extra: { aibar: {} },
+      extra: {
+        aibar: {
+          ...(Number.isSafeInteger(Number(message.telegramUpdateId))
+            ? { telegramUpdateId: Number(message.telegramUpdateId) }
+            : {}),
+        },
+      },
       swipes: [],
     }))],
     force: true,
@@ -643,6 +732,7 @@ function buildGeneratePayload(profile, character, sourceMessages, userName, meta
   ];
   const payload = {
     type: 'normal',
+    aibar_model_id: profile.id,
     messages,
     model: profile.model,
     temperature: preset?.temperature ?? profile.temperature ?? 0.7,
@@ -654,22 +744,8 @@ function buildGeneratePayload(profile, character, sourceMessages, userName, meta
     user_name: userName || 'Telegram',
     char_name: character.name || 'Character',
   };
-  if (profile.secretId) payload.secret_id = profile.secretId;
-  if (profile.source === 'custom') payload.custom_url = profile.endpoint;
-  if (profile.endpoint && reverseProxySources.has(profile.source)) payload.reverse_proxy = profile.endpoint;
   return payload;
 }
-
-const reverseProxySources = new Set([
-  'openai',
-  'openrouter',
-  'deepseek',
-  'mistral',
-  'groq',
-  'cohere',
-  'ai21',
-  'electronhub',
-]);
 
 function getSystemPrompt(character, metadata = {}, presetSystemPrompt = '') {
   const data = character.data || {};
@@ -708,9 +784,9 @@ function textBlock(label, value) {
 }
 
 function createChatName(character, source) {
-  const stamp = new Date().toISOString().replace(/[-:]/g, '').replace(/[.TZ]/g, '').slice(0, 14);
+  const stamp = new Date().toISOString().replace(/\D/g, '');
   const base = sanitizeFileBase(character.name || character.avatar || 'AIBAR Chat');
-  return `${base} - ${source} - ${stamp}`;
+  return `${base} - ${source} - ${stamp}-${crypto.randomUUID().slice(0, 8)}`;
 }
 
 function sanitizeFileBase(value) {
@@ -769,14 +845,37 @@ async function telegram(method, body = {}, options = {}) {
   return data.result;
 }
 
-class StClient {
-  constructor(baseUrl) {
+export class StClient {
+  constructor(baseUrl, credentials = {}) {
     this.baseUrl = normalizeBaseUrl(baseUrl || 'http://127.0.0.1:8001');
+    this.handle = String(credentials.handle || '').trim();
+    this.password = String(credentials.password || '');
     this.csrfToken = '';
     this.cookie = '';
+    this.bootPromise = null;
   }
 
   async boot() {
+    if (this.bootPromise) return this.bootPromise;
+    const operation = this.performBoot();
+    this.bootPromise = operation;
+    try {
+      return await operation;
+    } finally {
+      if (this.bootPromise === operation) this.bootPromise = null;
+    }
+  }
+
+  async performBoot() {
+    if (!this.handle) {
+      throw new Error('ST_USER_HANDLE 未配置，Telegram Bot 无法登录多用户 AIBAR');
+    }
+    await this.fetchCsrf();
+    await this.login();
+    await this.fetchCsrf();
+  }
+
+  async fetchCsrf() {
     const response = await fetch(`${this.baseUrl}/csrf-token`, {
       headers: this.cookie ? { Cookie: this.cookie } : {},
     });
@@ -788,7 +887,24 @@ class StClient {
     this.csrfToken = data.token;
   }
 
-  async post(url, body = {}) {
+  async login() {
+    const response = await fetch(`${this.baseUrl}/api/users/login`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-CSRF-Token': this.csrfToken,
+        ...(this.cookie ? { Cookie: this.cookie } : {}),
+      },
+      body: JSON.stringify({ handle: this.handle, password: this.password }),
+    });
+    this.captureCookie(response);
+    if (!response.ok) {
+      const raw = await response.text();
+      throw new Error(`ST 服务账号登录失败 (${response.status}): ${raw || response.statusText}`);
+    }
+  }
+
+  async post(url, body = {}, retryCsrf = true) {
     if (!this.csrfToken) await this.boot();
     const response = await fetch(`${this.baseUrl}${url}`, {
       method: 'POST',
@@ -800,12 +916,23 @@ class StClient {
       body: JSON.stringify(body),
     });
     this.captureCookie(response);
-    if (response.status === 403) {
+    if (response.status === 403 && retryCsrf) {
+      this.csrfToken = '';
       await this.boot();
-      return this.post(url, body);
+      return this.post(url, body, false);
     }
     if (!response.ok) {
-      throw new Error(`ST ${url} failed (${response.status}): ${await response.text()}`);
+      const raw = await response.text();
+      let message = raw;
+      try {
+        const parsed = JSON.parse(raw);
+        message = typeof parsed?.error === 'string'
+          ? parsed.error
+          : parsed?.error?.message || parsed?.message || raw;
+      } catch {
+        // Keep the plain-text response.
+      }
+      throw new Error(message || `ST ${url} failed (${response.status})`);
     }
     const contentType = response.headers.get('content-type') || '';
     return contentType.includes('json') ? response.json() : response.text();
@@ -823,88 +950,223 @@ class StClient {
 }
 
 function startPolling() {
-  if (!config.token) {
+  const readiness = pollingReadiness(config);
+  if (!readiness.ready) {
     polling.desired = false;
     polling.running = false;
     polling.bot = null;
-    polling.lastError = 'TELEGRAM_BOT_TOKEN 未配置，轮询未启动';
+    polling.lastError = readiness.message;
     console.log(`AIBAR Telegram admin API is ready at ${adminServerUrl()}`);
-    console.log('Telegram polling is idle until TELEGRAM_BOT_TOKEN is configured.');
+    console.log(`Telegram polling is idle: ${readiness.message}`);
     return;
   }
   if (polling.promise) return;
   polling.desired = true;
+  polling.bot = null;
   polling.lastError = '';
-  polling.promise = pollingLoop().finally(() => {
+  runtimeAbortController = new AbortController();
+  const signal = runtimeAbortController.signal;
+  const supervised = supervisePolling({
+    restartDelayMs: POLLING_RESTART_DELAY_MS,
+    isActive: () => polling.desired && !signal.aborted,
+    run: () => pollingLoop(signal),
+    sleep: (ms) => sleepWithSignal(ms, signal).catch(() => undefined),
+    onRestart(error, delayMs) {
+      polling.running = false;
+      if (error) polling.lastError = error?.message || String(error);
+      console.error(
+        `Telegram polling stopped while still enabled; restarting in ${delayMs} ms:`,
+        error?.message || polling.lastError || 'polling loop returned',
+      );
+    },
+  });
+  polling.promise = supervised.finally(() => {
     polling.promise = null;
     polling.running = false;
     polling.stoppedAt = new Date().toISOString();
+    if (runtimeAbortController?.signal === signal) runtimeAbortController = null;
   });
 }
 
-async function stopPolling(timeoutMs = 3000) {
+async function stopPolling() {
   polling.desired = false;
   if (pollAbortController) {
     pollAbortController.abort();
     pollAbortController = null;
   }
-  if (!polling.promise) return;
-  await Promise.race([
-    polling.promise.catch(() => undefined),
-    sleep(timeoutMs),
-  ]);
+  runtimeAbortController?.abort();
+  const active = polling.promise;
+  if (active) await active.catch(() => undefined);
 }
 
-async function restartPolling() {
-  await stopPolling();
-  startPolling();
+function persistFetchedUpdates(updates) {
+  const result = appendRuntimeUpdates(state, updates);
+  const { accepted } = result;
+  if (!accepted.length) return accepted;
+  saveRuntimeState(statePath, result.state);
+  state = result.state;
+  return accepted;
 }
 
-async function pollingLoop() {
+function persistRuntimeState(nextState) {
+  saveRuntimeState(statePath, nextState);
+  state = nextState;
+}
+
+function setUpdateProgress(update, patch) {
+  persistRuntimeState(setRuntimeStateUpdateProgress(state, update, patch));
+}
+
+function markRuntimeUpdateProcessed(update) {
+  persistRuntimeState(markRuntimeStateUpdateProcessed(state, update));
+}
+
+function isRuntimeUpdateProcessed(update) {
+  return state.processedUpdateIds.includes(telegramUpdateId(update));
+}
+
+function runtimeUpdateKeys(update, index) {
+  const userId = update?.message?.from?.id;
+  if (userId === undefined || userId === null) return [`update:${update?.update_id ?? index}`];
+  const normalizedUserId = String(userId);
+  const keys = [`user:${normalizedUserId}`];
+  const session = state.sessions?.[normalizedUserId];
+  if (session?.characterAvatar && session?.chatFile) {
+    keys.push(`st-chat:${session.characterAvatar}:${normalizeChatFileName(session.chatFile)}`);
+  }
+  return keys;
+}
+
+function settleRuntimeUpdate(update) {
+  const nextState = settleRuntimeStateUpdate(state, update);
+  persistRuntimeState(nextState);
+}
+
+async function pollingLoop(signal) {
   polling.running = true;
   polling.startedAt = new Date().toISOString();
   polling.stoppedAt = '';
 
-  try {
-    const me = await telegram('getMe');
-    polling.bot = normalizeTelegramBot(me);
-    console.log(`AIBAR Telegram bot started: @${me.username || me.first_name || 'unknown'}`);
-    console.log(`ST backend: ${config.stBaseUrl}`);
-    console.log(`Admin API: ${adminServerUrl()}`);
-    if (!config.allowedUserIds.size) {
-      console.warn('WARNING: TELEGRAM_ALLOWED_USER_IDS is empty. Anyone who can reach the bot may use it.');
+  let startupDelayMs = 1000;
+  while (polling.desired && !signal.aborted) {
+    try {
+      const [me] = await Promise.all([
+        telegram('getMe'),
+        st.boot(),
+      ]);
+      polling.bot = normalizeTelegramBot(me);
+      polling.lastError = '';
+      console.log(`AIBAR Telegram bot started: @${me.username || me.first_name || 'unknown'}`);
+      console.log(`ST backend: ${config.stBaseUrl}`);
+      console.log(`Admin API: ${adminServerUrl()}`);
+      break;
+    } catch (error) {
+      polling.lastError = error?.message || String(error);
+      console.error(`Telegram startup check failed; retrying in ${startupDelayMs} ms:`, polling.lastError);
+      await sleepWithSignal(startupDelayMs, signal).catch(() => undefined);
+      startupDelayMs = Math.min(startupDelayMs * 2, 30_000);
     }
-  } catch (error) {
-    polling.lastError = error?.message || String(error);
-    console.error('Telegram startup check failed:', polling.lastError);
   }
+  if (!polling.desired || signal.aborted) return;
 
-  while (polling.desired) {
+  const handleWithRetry = createRetryingUpdateHandler({
+    maxAttempts: MAX_UPDATE_ATTEMPTS,
+    isActive: () => polling.desired && !signal.aborted,
+    sleep: (ms) => sleepWithSignal(ms, signal),
+    async handle(update) {
+      await handleUpdate(update);
+      polling.lastError = '';
+    },
+    onRetry(error, update, attempt, delayMs) {
+      polling.lastError = error?.message || String(error);
+      console.error(
+        `Update ${update?.update_id} failed (attempt ${attempt}/${MAX_UPDATE_ATTEMPTS}); retrying in ${delayMs} ms:`,
+        polling.lastError,
+      );
+    },
+    async onGiveUp(error, update, attempt) {
+      polling.lastError = error?.message || String(error);
+      console.error(
+        `Update ${update?.update_id} failed ${attempt} times; giving up and skipping it:`,
+        polling.lastError,
+      );
+      const chatId = update?.message?.chat?.id;
+      if (chatId === undefined || chatId === null) return;
+      try {
+        await sendMessage(chatId, '这条消息处理失败了（已重试多次），已跳过。请稍后再发一次。');
+      } catch (notifyError) {
+        if (notifyError?.name === 'AbortError') throw notifyError;
+        console.error('Failed to notify the Telegram user about a skipped update:', notifyError?.message || notifyError);
+      }
+    },
+  });
+
+  const pipeline = createUpdatePipeline({
+    keys: runtimeUpdateKeys,
+    isProcessed: isRuntimeUpdateProcessed,
+    handle: handleWithRetry,
+    onProcessed: markRuntimeUpdateProcessed,
+    onError(error) {
+      polling.lastError = error?.message || String(error);
+      if (polling.desired && error?.name !== 'AbortError') console.error('Update pipeline failed:', error);
+    },
+    onSettled(update) {
+      settleRuntimeUpdate(update);
+      polling.lastUpdateAt = new Date().toISOString();
+    },
+  });
+  pipeline.enqueue(state.pendingUpdates);
+
+  let pollingDelayMs = 1000;
+  let pipelineFailure = null;
+  while (polling.desired && !signal.aborted) {
+    try {
+      await pipeline.waitForCapacity(MAX_PENDING_UPDATES);
+    } catch (error) {
+      // pipelineError 是粘性的：这个 pipeline 已经不可用，交给 supervisePolling 退避后用新的 pipeline 重启。
+      if (error?.name !== 'AbortError' && polling.desired) pipelineFailure = error;
+      break;
+    }
+    if (!polling.desired) break;
+
     const controller = new AbortController();
     pollAbortController = controller;
     try {
+      const limit = Math.max(1, Math.min(100, MAX_PENDING_UPDATES - pipeline.pendingCount));
       const updates = await telegram('getUpdates', {
-        offset: state.offset,
+        offset: state.fetchOffset,
+        limit,
         timeout: config.pollTimeoutSeconds,
         allowed_updates: ['message'],
       }, { signal: controller.signal });
-      for (const update of updates) {
-        state.offset = update.update_id + 1;
-        polling.lastUpdateAt = new Date().toISOString();
-        saveState(statePath, state);
-        void handleUpdate(update).catch((error) => {
-          polling.lastError = error?.message || String(error);
-          console.error('Update failed:', error);
-        });
-      }
+      const accepted = persistFetchedUpdates(updates);
+      pipeline.enqueue(accepted);
+      polling.lastError = '';
+      pollingDelayMs = 1000;
     } catch (error) {
       if (!polling.desired || error?.name === 'AbortError') break;
       polling.lastError = error?.message || String(error);
-      console.error('Polling failed:', polling.lastError);
-      await sleep(2000);
+      console.error(`Polling failed; retrying in ${pollingDelayMs} ms:`, polling.lastError);
+      await sleepWithSignal(pollingDelayMs, signal).catch(() => undefined);
+      pollingDelayMs = Math.min(pollingDelayMs * 2, 30_000);
     } finally {
       if (pollAbortController === controller) pollAbortController = null;
     }
+  }
+
+  try {
+    await pipeline.drain();
+  } catch (error) {
+    if (polling.desired && error?.name !== 'AbortError') {
+      polling.lastError = error?.message || String(error);
+      console.error('Update pipeline drain failed:', polling.lastError);
+      pipelineFailure ||= error;
+    }
+  }
+
+  if (pipelineFailure && polling.desired && !signal.aborted) {
+    polling.lastError = pipelineFailure?.message || String(pipelineFailure);
+    throw pipelineFailure;
   }
 }
 
@@ -942,6 +1204,14 @@ async function handleAdminRequest(req, res) {
     return;
   }
 
+  if (!isUsableAdminToken(config.adminToken)) {
+    sendJson(req, res, 503, {
+      ok: false,
+      message: 'ADMIN_TOKEN 未配置或仍为示例值，管理接口已锁定',
+    });
+    return;
+  }
+
   if (!isAdminAuthorized(req)) {
     sendJson(req, res, 401, {
       ok: false,
@@ -958,16 +1228,13 @@ async function handleAdminRequest(req, res) {
     const body = await readJson(req);
     const updates = configUpdatesFromBody(body);
     if (Object.keys(updates).length) {
-      writeEnvFile(envPath, updates);
-      reloadRuntime();
-      await restartPolling();
+      await runtimeCoordinator.reconfigure(() => writeEnvFile(envPath, updates));
     }
     sendJson(req, res, 200, buildStatus());
     return;
   }
   if (url.pathname === '/api/polling/restart' && req.method === 'POST') {
-    reloadRuntime();
-    await restartPolling();
+    await runtimeCoordinator.reconfigure();
     sendJson(req, res, 200, buildStatus());
     return;
   }
@@ -1011,8 +1278,13 @@ function configUpdatesFromBody(body) {
   if (typeof body.allowedUserIds === 'string') {
     updates.TELEGRAM_ALLOWED_USER_IDS = normalizeCsv(body.allowedUserIds);
   }
-  if (typeof body.stBaseUrl === 'string' && body.stBaseUrl.trim()) {
-    updates.ST_BASE_URL = normalizeBaseUrl(body.stBaseUrl);
+  if (typeof body.stUserHandle === 'string') {
+    updates.ST_USER_HANDLE = body.stUserHandle.trim();
+  }
+  if (body.clearStUserPassword) {
+    updates.ST_USER_PASSWORD = '';
+  } else if (typeof body.stUserPassword === 'string' && body.stUserPassword) {
+    updates.ST_USER_PASSWORD = body.stUserPassword;
   }
   if (typeof body.modelProfileId === 'string') {
     updates.AIBAR_MODEL_PROFILE_ID = body.modelProfileId.trim();
@@ -1061,17 +1333,23 @@ async function debugTelegram(body = {}) {
 
 async function debugSt(body = {}) {
   const startedAt = Date.now();
-  const baseUrl = normalizeBaseUrl(body.stBaseUrl || config.stBaseUrl);
+  const baseUrl = config.stBaseUrl;
   try {
-    const client = new StClient(baseUrl);
+    const client = new StClient(baseUrl, {
+      handle: String(body.stUserHandle || config.stUserHandle || '').trim(),
+      password: typeof body.stUserPassword === 'string' ? body.stUserPassword : config.stUserPassword,
+    });
     await client.boot();
-    const [characters, rawSettings] = await Promise.all([
+    const [characters, rawSettings, sharedModelResult] = await Promise.all([
       client.post('/api/characters/all'),
       client.post('/api/settings/get'),
+      client.post('/api/aibar/models/list'),
     ]);
     const settings = parseSettings(rawSettings?.settings);
     const aibar = settings.aibar || {};
-    const profiles = Array.isArray(aibar.simple_ui_model_profiles) ? aibar.simple_ui_model_profiles : [];
+    const profiles = Array.isArray(sharedModelResult?.models)
+      ? sharedModelResult.models.filter((item) => item?.enabled !== false)
+      : [];
     return {
       ok: true,
       message: 'ST 后端连接正常',
@@ -1099,6 +1377,8 @@ function buildStatus() {
       tokenPreview: maskToken(config.token),
       allowedUserIds: [...config.allowedUserIds],
       stBaseUrl: config.stBaseUrl,
+      stUserHandle: config.stUserHandle,
+      stPasswordConfigured: Boolean(config.stUserPassword),
       modelProfileId: config.modelProfileId,
       maxCompletionTokens: config.maxCompletionTokens,
       pollTimeoutSeconds: config.pollTimeoutSeconds,
@@ -1106,11 +1386,11 @@ function buildStatus() {
       admin: {
         host: adminServerInfo?.host || config.adminHost,
         port: adminServerInfo?.port || config.adminPort,
-        tokenConfigured: Boolean(config.adminToken),
+        tokenConfigured: isUsableAdminToken(config.adminToken),
       },
     },
     polling: {
-      configured: Boolean(config.token),
+      configured: pollingReadiness(config).ready,
       desired: polling.desired,
       running: polling.running,
       startedAt: polling.startedAt,
@@ -1119,6 +1399,7 @@ function buildStatus() {
       lastError: polling.lastError,
       bot: polling.bot,
       offset: state.offset,
+      pendingUpdates: state.pendingUpdates.length,
       sessions: Object.keys(state.sessions || {}).length,
       activeUsers: activeUsers.size,
     },
@@ -1126,11 +1407,20 @@ function buildStatus() {
 }
 
 function reloadRuntime() {
-  config = loadConfig();
-  fs.mkdirSync(config.dataDir, { recursive: true });
-  statePath = path.join(config.dataDir, 'state.json');
-  state = loadState(statePath);
-  st = new StClient(config.stBaseUrl);
+  const nextConfig = loadConfig();
+  fs.mkdirSync(nextConfig.dataDir, { recursive: true });
+  const identity = createRuntimeIdentity(nextConfig.token, nextConfig.stUserHandle);
+  const nextStatePath = runtimeStatePath(nextConfig.dataDir, identity);
+  const nextState = loadRuntimeState(nextStatePath, identity);
+  const nextSt = new StClient(nextConfig.stBaseUrl, {
+    handle: nextConfig.stUserHandle,
+    password: nextConfig.stUserPassword,
+  });
+
+  config = nextConfig;
+  statePath = nextStatePath;
+  state = nextState;
+  st = nextSt;
 }
 
 function getSession(userId, chatId) {
@@ -1146,7 +1436,7 @@ function getSession(userId, chatId) {
 }
 
 function isAllowed(userId) {
-  return !config.allowedUserIds.size || config.allowedUserIds.has(String(userId));
+  return config.allowedUserIds.size > 0 && config.allowedUserIds.has(String(userId));
 }
 
 function parseSettings(raw) {
@@ -1173,6 +1463,8 @@ function loadConfig() {
     token: String(env.TELEGRAM_BOT_TOKEN || '').trim(),
     allowedUserIds: setFromCsv(env.TELEGRAM_ALLOWED_USER_IDS || ''),
     stBaseUrl: normalizeBaseUrl(env.ST_BASE_URL || 'http://127.0.0.1:8001'),
+    stUserHandle: String(env.ST_USER_HANDLE || '').trim(),
+    stUserPassword: String(env.ST_USER_PASSWORD || ''),
     modelProfileId: String(env.AIBAR_MODEL_PROFILE_ID || '').trim(),
     maxCompletionTokens: clampNumber(env.AIBAR_MAX_COMPLETION_TOKENS, 4096, 256, 65536),
     pollTimeoutSeconds: clampNumber(env.POLL_TIMEOUT_SECONDS, 25, 5, 60),
@@ -1194,7 +1486,15 @@ function readEnvFile(filePath) {
     if (index === -1) continue;
     const key = trimmed.slice(0, index).trim();
     let value = trimmed.slice(index + 1).trim();
-    value = value.replace(/^['"]|['"]$/g, '');
+    if (value.startsWith('"') && value.endsWith('"')) {
+      try {
+        value = JSON.parse(value);
+      } catch {
+        value = value.slice(1, -1);
+      }
+    } else {
+      value = value.replace(/^'|'$/g, '');
+    }
     env[key] = value;
   }
   return env;
@@ -1219,7 +1519,8 @@ function writeEnvFile(filePath, updates) {
     nextLines.push(`${key}=${formatEnvValue(updates[key])}`);
   }
 
-  fs.writeFileSync(filePath, `${nextLines.join('\n').replace(/\n+$/, '')}\n`);
+  fs.writeFileSync(filePath, `${nextLines.join('\n').replace(/\n+$/, '')}\n`, { mode: 0o600 });
+  fs.chmodSync(filePath, 0o600);
 }
 
 function formatEnvValue(value) {
@@ -1252,23 +1553,6 @@ function clampNumber(value, fallback, min, max) {
   return Math.min(max, Math.max(min, Math.round(number)));
 }
 
-function loadState(filePath) {
-  try {
-    const parsed = JSON.parse(fs.readFileSync(filePath, 'utf8'));
-    return {
-      offset: Number(parsed.offset || 0),
-      sessions: parsed.sessions && typeof parsed.sessions === 'object' ? parsed.sessions : {},
-    };
-  } catch {
-    return { offset: 0, sessions: {} };
-  }
-}
-
-function saveState(filePath, nextState) {
-  fs.mkdirSync(path.dirname(filePath), { recursive: true });
-  fs.writeFileSync(filePath, JSON.stringify(nextState, null, 2));
-}
-
 function maskToken(token) {
   const text = String(token || '');
   if (!text) return '';
@@ -1296,33 +1580,23 @@ function adminServerUrl() {
 }
 
 function isAdminAuthorized(req) {
-  if (!config.adminToken) return true;
+  if (!isUsableAdminToken(config.adminToken)) return false;
   const direct = req.headers['x-aibar-admin-token'];
   const authorization = req.headers.authorization || '';
   const bearer = authorization.toLowerCase().startsWith('bearer ')
     ? authorization.slice(7).trim()
     : '';
-  return direct === config.adminToken || bearer === config.adminToken;
+  return constantTimeEqual(direct, config.adminToken) || constantTimeEqual(bearer, config.adminToken);
 }
 
 function setCors(req, res) {
-  const origin = req.headers.origin;
-  if (!origin || isLocalOrigin(origin)) {
-    res.setHeader('Access-Control-Allow-Origin', origin || '*');
-  }
   res.setHeader('Vary', 'Origin');
-  res.setHeader('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type,Authorization,X-AIBAR-Admin-Token');
-  res.setHeader('Access-Control-Max-Age', '600');
 }
 
-function isLocalOrigin(origin) {
-  try {
-    const url = new URL(origin);
-    return ['localhost', '127.0.0.1', '::1'].includes(url.hostname);
-  } catch {
-    return false;
-  }
+function constantTimeEqual(left, right) {
+  const leftDigest = crypto.createHash('sha256').update(String(left || '')).digest();
+  const rightDigest = crypto.createHash('sha256').update(String(right || '')).digest();
+  return crypto.timingSafeEqual(leftDigest, rightDigest) && Boolean(left) && Boolean(right);
 }
 
 function sendJson(req, res, statusCode, body) {
@@ -1348,7 +1622,24 @@ function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-main().catch((error) => {
-  console.error(error);
-  process.exit(1);
-});
+function sleepWithSignal(ms, signal) {
+  if (signal?.aborted) return Promise.reject(Object.assign(new Error('Aborted'), { name: 'AbortError' }));
+  return new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      signal?.removeEventListener('abort', abort);
+      resolve();
+    }, ms);
+    const abort = () => {
+      clearTimeout(timeout);
+      reject(Object.assign(new Error('Aborted'), { name: 'AbortError' }));
+    };
+    signal?.addEventListener('abort', abort, { once: true });
+  });
+}
+
+if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  main().catch((error) => {
+    console.error(error);
+    process.exit(1);
+  });
+}

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import type { ModItem } from '@/stores/mods'
+import SearchInput from '@/components/ui/SearchInput.vue'
 
 const props = withDefaults(defineProps<{
   modelValue: string[]
@@ -73,11 +74,7 @@ function toggleMod(id: string) {
         <p v-if="description" class="mt-1 text-xs text-ink-muted leading-relaxed max-w-xl">{{ description }}</p>
       </div>
       <div class="w-full sm:w-56">
-        <input
-          v-model="search"
-          class="w-full h-9 rounded-lg border border-border-subtle bg-surface px-3 text-sm text-ink-primary placeholder:text-ink-muted focus:border-brand-500 focus:outline-none"
-          placeholder="搜索 MOD"
-        />
+        <SearchInput v-model="search" placeholder="搜索 MOD" />
       </div>
     </div>
 
@@ -93,7 +90,7 @@ function toggleMod(id: string) {
       >
         <span class="inline-flex items-center gap-1.5">
           {{ tab.label }}
-          <span class="rounded-full bg-ink-primary/5 px-1.5 py-0.5 text-[10px] leading-none text-ink-muted">{{ tab.count }}</span>
+          <span class="rounded-full bg-ink-primary/5 px-1.5 py-0.5 text-[11px] leading-none text-ink-muted">{{ tab.count }}</span>
         </span>
         <span v-if="activeTab === tab.key" class="absolute inset-x-2 -bottom-px h-0.5 rounded-full bg-brand-500" />
       </button>
@@ -103,7 +100,7 @@ function toggleMod(id: string) {
       {{ emptyText }}
     </div>
 
-    <div v-else :class="compact ? 'space-y-2' : 'grid md:grid-cols-2 gap-2.5'">
+    <div v-else :class="compact ? 'space-y-3' : 'grid gap-4 md:grid-cols-2'">
       <label
         v-for="mod in filteredMods"
         :key="mod.id"
@@ -126,9 +123,9 @@ function toggleMod(id: string) {
           <div class="min-w-0 flex-1">
             <div class="flex flex-wrap items-center gap-1.5">
               <span class="truncate text-sm font-medium text-ink-primary">{{ mod.name }}</span>
-              <span class="rounded bg-ink-primary/5 px-1.5 py-0.5 text-[10px] text-ink-muted">{{ mod.builtin ? '公用' : '我的' }}</span>
-              <span v-if="mod.enabled" class="rounded bg-emerald-500/10 px-1.5 py-0.5 text-[10px] text-emerald-600">全局</span>
-              <span class="rounded bg-ink-primary/5 px-1.5 py-0.5 text-[10px] text-ink-muted">{{ positionLabel(mod.position) }}</span>
+              <span class="rounded bg-ink-primary/5 px-1.5 py-0.5 text-[11px] text-ink-muted">{{ mod.builtin ? '公用' : '我的' }}</span>
+              <span v-if="mod.enabled" class="rounded bg-emerald-500/10 px-1.5 py-0.5 text-[11px] text-emerald-600">全局</span>
+              <span class="rounded bg-ink-primary/5 px-1.5 py-0.5 text-[11px] text-ink-muted">{{ positionLabel(mod.position) }}</span>
             </div>
             <p v-if="mod.description" class="mt-1 line-clamp-2 text-xs leading-relaxed text-ink-secondary">
               {{ mod.description }}

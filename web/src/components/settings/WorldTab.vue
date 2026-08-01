@@ -6,6 +6,7 @@ import AppButton from '@/components/ui/AppButton.vue'
 import AppTextarea from '@/components/ui/AppTextarea.vue'
 import AppCard from '@/components/ui/AppCard.vue'
 import AppEmpty from '@/components/ui/AppEmpty.vue'
+import AppDialog from '@/components/ui/AppDialog.vue'
 import type { WorldInfoEntry, WorldInfoFile } from '@/api/types'
 import {
   deleteWorldInfo,
@@ -14,6 +15,7 @@ import {
   listWorldInfo,
   saveWorldInfo,
 } from '@/api/worldinfo'
+import { getApiErrorMessage } from '@/api/client'
 import WorldInfoEditor from '@/components/world/WorldInfoEditor.vue'
 import { worlds } from './shared'
 
@@ -25,6 +27,7 @@ const worldFile = ref<WorldInfoFile | null>(null)
 const worldLoading = ref(false)
 const worldMode = ref<'entry' | 'json'>('entry')
 const worldJson = ref('')
+const deleteDialogOpen = ref(false)
 
 const worldJsonValid = computed(() => {
   if (!worldJson.value.trim()) return true
@@ -70,8 +73,8 @@ async function loadWorlds() {
     if (!selectedWorld.value && worlds.value[0]) {
       await selectWorld(worlds.value[0].file_id)
     }
-  } catch (e: any) {
-    ui.addToast(`世界书加载失败：${e.message}`, 'error')
+  } catch (e: unknown) {
+    ui.addToast(`世界书加载失败：${getApiErrorMessage(e)}`, 'error')
   } finally {
     worldLoading.value = false
   }
@@ -83,8 +86,8 @@ async function selectWorld(name: string) {
     const data = await getWorldInfo(name)
     worldFile.value = data
     worldJson.value = JSON.stringify(data, null, 2)
-  } catch (e: any) {
-    ui.addToast(`读取失败：${e.message}`, 'error')
+  } catch (e: unknown) {
+    ui.addToast(`读取失败：${getApiErrorMessage(e)}`, 'error')
   }
 }
 
@@ -93,7 +96,7 @@ async function saveCurrentWorld(payload?: WorldInfoFile) {
     ui.addToast('未选择世界书', 'warning')
     return
   }
-  let data: WorldInfoFile | null = null
+  let data: WorldInfoFile | null
   if (payload) {
     data = payload
     worldFile.value = payload
@@ -116,14 +119,19 @@ async function saveCurrentWorld(payload?: WorldInfoFile) {
     await saveWorldInfo(selectedWorld.value, data)
     ui.addToast('世界书已保存', 'success')
     await loadWorlds()
-  } catch (e: any) {
-    ui.addToast(`保存失败：${e.message}`, 'error')
+  } catch (e: unknown) {
+    ui.addToast(`保存失败：${getApiErrorMessage(e)}`, 'error')
   }
+}
+
+function requestDeleteWorld() {
+  if (!selectedWorld.value) return
+  deleteDialogOpen.value = true
 }
 
 async function deleteWorld() {
   if (!selectedWorld.value) return
-  if (!window.confirm(`删除世界书「${selectedWorld.value}」？`)) return
+  deleteDialogOpen.value = false
   try {
     await deleteWorldInfo(selectedWorld.value)
     ui.addToast('世界书已删除', 'success')
@@ -131,8 +139,8 @@ async function deleteWorld() {
     worldFile.value = null
     worldJson.value = ''
     await loadWorlds()
-  } catch (e: any) {
-    ui.addToast(`删除失败：${e.message}`, 'error')
+  } catch (e: unknown) {
+    ui.addToast(`删除失败：${getApiErrorMessage(e)}`, 'error')
   }
 }
 
@@ -148,8 +156,8 @@ async function importWorldClick() {
       ui.addToast(`已导入世界书：${result.name}`, 'success')
       await loadWorlds()
       await selectWorld(result.name)
-    } catch (e: any) {
-      ui.addToast(`导入失败：${e.message}`, 'error')
+    } catch (e: unknown) {
+      ui.addToast(`导入失败：${getApiErrorMessage(e)}`, 'error')
     }
   }
   input.click()
@@ -171,8 +179,8 @@ async function createWorld() {
     worldJson.value = JSON.stringify(data, null, 2)
     await loadWorlds()
     await selectWorld(trimmed)
-  } catch (e: any) {
-    ui.addToast(`创建失败：${e.message}`, 'error')
+  } catch (e: unknown) {
+    ui.addToast(`创建失败：${getApiErrorMessage(e)}`, 'error')
   }
 }
 
@@ -208,8 +216,8 @@ async function writeSampleWorld() {
     ui.addToast('已写入示例世界书', 'success')
     await loadWorlds()
     await selectWorld(name)
-  } catch (e: any) {
-    ui.addToast(`写入失败：${e.message}`, 'error')
+  } catch (e: unknown) {
+    ui.addToast(`写入失败：${getApiErrorMessage(e)}`, 'error')
   }
 }
 
@@ -250,7 +258,7 @@ onMounted(async () => {
     <AppCard padding="md" tone="glow" class="space-y-4">
       <div class="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <p class="text-xs uppercase tracking-[0.18em] text-brand-300 font-semibold">世界书使用向导</p>
+          <p class="text-xs text-brand-300 font-semibold">世界书使用向导</p>
           <h2 class="mt-2 text-xl font-semibold text-ink-primary">把长期设定做成会自动命中的资料库。</h2>
           <p class="mt-1 text-sm text-ink-secondary max-w-2xl leading-relaxed">
             世界书适合放地点、组织、术语、规则、历史和暗线。绑定到角色、故事或当前聊天后，每次生成会扫描最近对话和角色设定，命中关键词才把对应条目注入提示词。
@@ -296,9 +304,9 @@ onMounted(async () => {
       </div>
     </AppCard>
 
-    <div class="grid lg:grid-cols-[280px_1fr] gap-4">
+    <div class="grid gap-4 lg:grid-cols-[300px_1fr]">
     <AppCard padding="md">
-      <div class="flex flex-wrap gap-2 mb-4">
+      <div class="flex flex-wrap gap-2 mb-3">
         <AppButton size="sm" @click="createWorld">+ 新建</AppButton>
         <AppButton size="sm" @click="importWorldClick">导入</AppButton>
         <AppButton size="sm" variant="secondary" @click="router.push('/hub')">社区导入</AppButton>
@@ -351,7 +359,7 @@ onMounted(async () => {
             >JSON</button>
           </div>
           <AppButton size="sm" variant="secondary" @click="exportWorld">导出</AppButton>
-          <AppButton size="sm" variant="danger" @click="deleteWorld">删除</AppButton>
+          <AppButton size="sm" variant="danger" @click="requestDeleteWorld">删除</AppButton>
           <AppButton size="sm" @click="() => saveCurrentWorld()">保存</AppButton>
         </div>
       </div>
@@ -376,5 +384,15 @@ onMounted(async () => {
       </template>
     </AppCard>
     </div>
+
+    <AppDialog v-model="deleteDialogOpen" title="删除世界书" size="sm">
+      <p class="text-sm leading-relaxed text-ink-secondary">
+        确认删除世界书「{{ selectedWorld }}」？此操作不可撤销。
+      </p>
+      <template #footer>
+        <AppButton size="sm" variant="secondary" @click="deleteDialogOpen = false">取消</AppButton>
+        <AppButton size="sm" variant="danger" @click="deleteWorld">确认删除</AppButton>
+      </template>
+    </AppDialog>
   </div>
 </template>

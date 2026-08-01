@@ -1,13 +1,15 @@
 <script setup lang="ts">
-import { onMounted, ref, watch, type Component } from 'vue'
+import { computed, onMounted, ref, watch, type Component } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useModelProfilesStore } from '@/stores/modelProfiles'
 import { usePresetsStore } from '@/stores/presets'
 import { usePersonasStore } from '@/stores/personas'
 import { useTtsStore } from '@/stores/tts'
 import { useImageGenStore } from '@/stores/imageGen'
+import { useSessionStore } from '@/stores/session'
 import AppPageHeader from '@/components/ui/AppPageHeader.vue'
 import AppTabs from '@/components/ui/AppTabs.vue'
+import AppCard from '@/components/ui/AppCard.vue'
 import ModelTab from '@/components/settings/ModelTab.vue'
 import PresetsTab from '@/components/settings/PresetsTab.vue'
 import PersonasTab from '@/components/settings/PersonasTab.vue'
@@ -22,13 +24,14 @@ const presets = usePresetsStore()
 const personas = usePersonasStore()
 const tts = useTtsStore()
 const imageGen = useImageGenStore()
+const session = useSessionStore()
 const route = useRoute()
 const router = useRouter()
 
 function initialTab(): string {
   const raw = String(route.query.tab || '')
-  if (['model', 'presets', 'personas', 'image', 'tts', 'telegram', 'about'].includes(raw)) return raw
-  return 'model'
+  if (availableTabKeys.value.includes(raw)) return raw
+  return session.isAdmin ? 'model' : 'presets'
 }
 
 function syncTabFromRoute() {
@@ -36,19 +39,25 @@ function syncTabFromRoute() {
   if (activeTab.value !== next) {
     activeTab.value = next
   }
+  if (route.path === '/settings' && route.query.tab !== next) {
+    void router.replace({ query: { ...route.query, tab: next } })
+  }
 }
 
-const activeTab = ref(initialTab())
-
-const tabs = [
-  { key: 'model', label: '模型连接' },
-  { key: 'presets', label: '生成参数' },
+const tabs = computed(() => [
+  ...(session.isAdmin ? [{ key: 'model', label: '模型连接' }] : []),
+  { key: 'presets', label: '提示词预设' },
   { key: 'personas', label: '我的身份' },
-  { key: 'image', label: '图像生成' },
-  { key: 'tts', label: '语音 (TTS)' },
-  { key: 'telegram', label: 'Telegram Bot' },
+  ...(session.isAdmin ? [
+    { key: 'image', label: '图像生成' },
+    { key: 'tts', label: '语音 (TTS)' },
+    { key: 'telegram', label: 'Telegram Bot' },
+  ] : []),
   { key: 'about', label: '关于' },
-]
+])
+
+const availableTabKeys = computed(() => tabs.value.map((tab) => tab.key))
+const activeTab = ref(initialTab())
 
 const tabComponents: Record<string, Component> = {
   model: ModelTab,
@@ -65,8 +74,7 @@ onMounted(async () => {
     models.loadSecrets(),
     presets.load(),
     personas.load(),
-    tts.load(),
-    imageGen.load(),
+    ...(session.isAdmin ? [tts.load(), imageGen.load()] : []),
   ])
   await loadImageHistory()
 })
@@ -77,53 +85,57 @@ watch(activeTab, (tab) => {
   }
 })
 
-watch(() => [route.path, route.query.tab], syncTabFromRoute)
+watch(
+  [() => route.path, () => route.query.tab, () => session.isAdmin],
+  syncTabFromRoute,
+  { immediate: true },
+)
 </script>
 
 <template>
-  <div class="min-h-screen flex flex-col bg-bg">
+  <div class="min-h-[100dvh] flex flex-col bg-bg">
     <AppPageHeader title="设置" back-to="/browse" mobile-only-back />
 
-    <div class="max-w-6xl mx-auto w-full px-5 py-6 flex-1 animate-fade-in-up">
-      <section class="relative overflow-hidden rounded-2xl ring-1 ring-border-subtle bg-hero-radial mb-6">
-        <div class="absolute -top-12 -right-12 w-56 h-56 rounded-full bg-brand-500/20 blur-3xl pointer-events-none" />
-        <div class="absolute -bottom-16 -left-8 w-56 h-56 rounded-full bg-accent-500/15 blur-3xl pointer-events-none" />
-        <div class="relative grid md:grid-cols-[1fr_auto] gap-6 items-end p-5 md:p-7">
-          <div>
-            <p class="text-[11px] uppercase tracking-[0.2em] text-brand-300/80 mb-2">配置中心</p>
-            <h2 class="text-xl md:text-2xl font-semibold text-ink-primary">
-              管理 <span class="text-brand-300">模型 · 参数 · 图像 · 语音 · Telegram</span>
-            </h2>
-            <p class="mt-1.5 text-xs md:text-sm text-ink-secondary max-w-xl">
-              模型连接、生成参数、身份、图像、语音和外部入口在这里配置。世界书和提示词 MOD 已移到左侧资料库单独管理。
-            </p>
-          </div>
-          <div class="grid grid-cols-2 gap-2.5 md:min-w-[420px] md:grid-cols-4">
-            <div class="rounded-xl bg-surface/70 backdrop-blur ring-1 ring-border-subtle p-3 text-center">
-              <p class="text-[10px] uppercase tracking-wider text-ink-muted">模型</p>
-              <p class="mt-1 text-xl font-semibold text-ink-primary tabular-nums">{{ models.profiles.length }}</p>
-            </div>
-            <div class="rounded-xl bg-surface/70 backdrop-blur ring-1 ring-border-subtle p-3 text-center">
-              <p class="text-[10px] uppercase tracking-wider text-ink-muted">预设</p>
-              <p class="mt-1 text-xl font-semibold text-ink-primary tabular-nums">{{ presets.presets.length }}</p>
-            </div>
-            <div class="rounded-xl bg-surface/70 backdrop-blur ring-1 ring-border-subtle p-3 text-center">
-              <p class="text-[10px] uppercase tracking-wider text-ink-muted">身份</p>
-              <p class="mt-1 text-xl font-semibold text-ink-primary tabular-nums">{{ personas.personas.length }}</p>
-            </div>
-            <div class="rounded-xl bg-surface/70 backdrop-blur ring-1 ring-border-subtle p-3 text-center">
-              <p class="text-[10px] uppercase tracking-wider text-ink-muted">图片</p>
-              <p class="mt-1 text-xl font-semibold text-ink-primary tabular-nums">{{ imageHistory.length }}</p>
-            </div>
-          </div>
-        </div>
-      </section>
+    <div class="max-w-6xl mx-auto w-full px-5 py-6 md:px-8 lg:px-10 flex-1 animate-fade-in-up">
+      <div class="space-y-6">
+        <AppTabs v-model="activeTab" :tabs="tabs" />
 
-      <AppTabs v-model="activeTab" :tabs="tabs" class="mb-6" />
+        <!-- 移动端没有常驻侧栏，用快捷入口补齐资料库导航 -->
+        <nav class="grid grid-cols-3 gap-3 md:hidden" aria-label="资料库快捷入口">
+          <button class="rounded-lg border border-border bg-surface px-2 py-3 text-sm font-medium text-ink-secondary" @click="router.push('/characters')">角色库</button>
+          <button class="rounded-lg border border-border bg-surface px-2 py-3 text-sm font-medium text-ink-secondary" @click="router.push('/worlds')">世界书</button>
+          <button class="rounded-lg border border-border bg-surface px-2 py-3 text-sm font-medium text-ink-secondary" @click="router.push('/mods')">提示词 MOD</button>
+        </nav>
 
-      <KeepAlive>
-        <component :is="tabComponents[activeTab]" />
-      </KeepAlive>
+        <!-- 概览计数：紧凑一条，标题与说明已由页面标题栏和侧栏承载 -->
+        <AppCard padding="sm">
+          <div class="grid grid-cols-2 gap-3 lg:grid-cols-4">
+            <div class="rounded-lg bg-surface-sunken px-3 py-2.5 text-center">
+              <p class="text-[11px] text-ink-muted">模型</p>
+              <p class="mt-0.5 text-lg font-semibold text-ink-primary tabular-nums">{{ models.profiles.length }}</p>
+            </div>
+            <div class="rounded-lg bg-surface-sunken px-3 py-2.5 text-center">
+              <p class="text-[11px] text-ink-muted">预设</p>
+              <p class="mt-0.5 text-lg font-semibold text-ink-primary tabular-nums">{{ presets.presets.length }}</p>
+            </div>
+            <div class="rounded-lg bg-surface-sunken px-3 py-2.5 text-center">
+              <p class="text-[11px] text-ink-muted">身份</p>
+              <p class="mt-0.5 text-lg font-semibold text-ink-primary tabular-nums">{{ personas.personas.length }}</p>
+            </div>
+            <div class="rounded-lg bg-surface-sunken px-3 py-2.5 text-center">
+              <p class="text-[11px] text-ink-muted">图片</p>
+              <p class="mt-0.5 text-lg font-semibold text-ink-primary tabular-nums">{{ imageHistory.length }}</p>
+            </div>
+          </div>
+        </AppCard>
+
+        <KeepAlive :max="1">
+          <component
+            :is="tabComponents[activeTab]"
+            :key="[session.sessionEpoch, session.user?.handle || '', activeTab].join(':')"
+          />
+        </KeepAlive>
+      </div>
     </div>
   </div>
 </template>
