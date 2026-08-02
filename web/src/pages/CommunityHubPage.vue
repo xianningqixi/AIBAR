@@ -214,8 +214,8 @@ onBeforeUnmount(() => {
 <template>
   <div class="min-h-[100dvh] bg-bg">
     <AppPageHeader
-      :title="source === 'discord' ? 'Discord 角色卡' : '社区作品'"
-      :subtitle="source === 'discord' ? '今日热门候选与私人导入队列' : '角色卡、故事与提示词'"
+      :title="source === 'discord' ? 'Discord 资源' : '社区作品'"
+      :subtitle="source === 'discord' ? '热门角色卡与隔离网页应用' : '角色卡、故事与提示词'"
       :show-back="false"
     >
       <template #actions>

@@ -14,6 +14,8 @@ import {
   clearDiscordImportQueue,
   getDiscordImportQueueStorageKey,
   isDiscordCdnPreviewUrl,
+  isDiscordWebAppCard,
+  isImportableDiscordCharacterCard,
   loadDiscordImportQueue,
   mergeDiscordImportQueue,
   parseDiscordImportManifest,
@@ -49,20 +51,29 @@ const manifestError = ref('')
 const rowMessages = ref<Record<string, string>>({})
 const cardUrlDrafts = ref<Record<string, string>>({})
 const urlFetchingCardId = ref('')
+const failedPreviewIds = ref(new Set<string>())
 
 const allowedCardExtensions = new Set(['png', 'json', 'yaml', 'yml', 'charx', 'byaf'])
-const maxCardFileBytes = 20 * 1024 * 1024
+const maxCardFileBytes = 64 * 1024 * 1024
 let accountEpoch = 0
 
 function normalizeBrowserItems(value: DiscordImportQueue, recoverInterrupted = false): DiscordImportQueue {
-  const availabilityById = new Map(value.manifest.cards.map((card) => [card.id, card.resource.availability]))
+  const cardById = new Map(value.manifest.cards.map((card) => [card.id, card]))
   return {
     ...value,
     items: value.items.map((item) => {
+      const card = cardById.get(item.id)
+      if (card && !isImportableDiscordCharacterCard(card)) {
+        return {
+          id: item.id,
+          status: card.resource.availability === 'unsupported' ? 'unsupported' as const : 'ready' as const,
+          selected: false,
+        }
+      }
       if (recoverInterrupted && item.status === 'importing') {
         return { ...item, status: 'failed' as const, error: '上次导入已中断，请重试' }
       }
-      return availabilityById.get(item.id) === 'browser' && item.status === 'unsupported'
+      return card?.resource.availability === 'browser' && item.status === 'unsupported'
         ? { ...item, status: 'ready' as const }
         : item
     }),
@@ -88,6 +99,7 @@ watch(accountHandle, (handle) => {
   rowMessages.value = {}
   cardUrlDrafts.value = {}
   urlFetchingCardId.value = ''
+  failedPreviewIds.value = new Set()
 })
 
 onMounted(() => window.addEventListener('storage', onQueueStorage))
@@ -103,7 +115,7 @@ const rows = computed<DiscordImportRow[]>(() => {
 })
 
 const selectableRows = computed(() => rows.value.filter(({ card, item }) => (
-  card.resource.availability !== 'unsupported'
+  isImportableDiscordCharacterCard(card)
   && item.status !== 'imported'
   && item.status !== 'importing'
 )))
@@ -161,6 +173,7 @@ function clearQueue() {
   manifestDraft.value = ''
   manifestDraftOpen.value = false
   rowMessages.value = {}
+  failedPreviewIds.value = new Set()
   ui.addToast('Discord 导入队列已清空', 'success')
 }
 
@@ -168,6 +181,17 @@ function chooseManifest() {
   if (controlsLocked.value || !manifestInput.value) return
   manifestInput.value.value = ''
   manifestInput.value.click()
+}
+
+function toggleManifestDraft() {
+  if (manifestDraftOpen.value) {
+    manifestDraftOpen.value = false
+    return
+  }
+  manifestDraft.value = queue.value
+    ? JSON.stringify(queue.value.manifest, null, 2)
+    : ''
+  manifestDraftOpen.value = true
 }
 
 async function onManifestSelected(event: Event) {
@@ -200,12 +224,16 @@ function applyManifest(input: unknown) {
   manifestError.value = ''
   try {
     const manifest = parseDiscordImportManifest(input)
-    commitQueue(mergeDiscordImportQueue(queue.value, manifest))
+    if (!commitQueue(mergeDiscordImportQueue(queue.value, manifest))) {
+      manifestError.value = '无法保存 Discord 导入队列'
+      return
+    }
+    failedPreviewIds.value = new Set()
     const currentIds = new Set(manifest.cards.map((card) => card.id))
     rowMessages.value = Object.fromEntries(
       Object.entries(rowMessages.value).filter(([id]) => currentIds.has(id)),
     )
-    ui.addToast(`已载入 ${manifest.cards.length} 张 Discord 候选卡`, 'success')
+    ui.addToast(`已载入 ${manifest.cards.length} 项 Discord 资源`, 'success')
   } catch (error: any) {
     manifestError.value = error?.message || '同步清单格式无效'
     ui.addToast(`清单载入失败：${manifestError.value}`, 'error')
@@ -220,9 +248,13 @@ function applyManifestDraft() {
 }
 
 function canSelect(row: DiscordImportRow): boolean {
-  return row.card.resource.availability !== 'unsupported'
+  return isImportableDiscordCharacterCard(row.card)
     && row.item.status !== 'imported'
     && row.item.status !== 'importing'
+}
+
+function markPreviewFailed(id: string) {
+  failedPreviewIds.value = new Set([...failedPreviewIds.value, id])
 }
 
 function isRequested(row: DiscordImportRow): boolean {
@@ -250,6 +282,7 @@ function failRequestedImport(row: DiscordImportRow) {
   const message = '浏览器未获取到受支持的角色卡文件，已跳过此项'
   commitQueue(resolveDiscordImportBatchItem(queue.value, row.card.id, {
     status: 'failed',
+    selected: false,
     error: message,
   }))
   setRowMessage(row.card.id, message)
@@ -344,7 +377,7 @@ async function importCardFile(
     return
   }
   if (file.size === 0 || file.size > maxCardFileBytes) {
-    const message = file.size === 0 ? '角色卡文件为空' : '角色卡文件不能超过 20 MB'
+    const message = file.size === 0 ? '角色卡文件为空' : '角色卡文件不能超过 64 MB'
     commitQueue(resolveDiscordImportBatchItem(queue.value, card.id, { status: 'failed', error: message }), context)
     setRowMessage(card.id, message)
     ui.addToast(message, 'error')
@@ -489,7 +522,7 @@ async function importCardUrl(row: DiscordImportRow) {
     const blob = await apiPostBlob('/api/aibar/discord-import/fetch', { url: sourceUrl })
     if (!isCurrentImportContext(context)) return
     if (blob.size === 0) throw new Error('Discord 返回的角色卡文件为空')
-    if (blob.size > maxCardFileBytes) throw new Error('角色卡文件不能超过 20 MB')
+    if (blob.size > maxCardFileBytes) throw new Error('角色卡文件不能超过 64 MB')
 
     await importCardFile(row.card, new File([blob], fileName, {
       type: blob.type || 'application/octet-stream',
@@ -539,6 +572,9 @@ function sortLabel(value: DiscordImportQueue['manifest']['sort']): string {
 }
 
 function availabilityLabel(card: DiscordImportCard): string {
+  if (isDiscordWebAppCard(card)) {
+    return card.resource.runtime === 'aibar-bridge' ? 'AIBAR 应用' : '独立网页'
+  }
   if (card.resource.availability === 'ready') return '卡体就绪'
   if (card.resource.availability === 'browser') return '浏览器获取'
   return '暂不支持'
@@ -553,6 +589,10 @@ function statusLabel(status: DiscordImportQueueItemStatus): string {
     failed: '导入失败',
   }
   return labels[status]
+}
+
+function rowStatusLabel(row: DiscordImportRow): string {
+  return isDiscordWebAppCard(row.card) ? '可启动' : statusLabel(row.item.status)
 }
 
 function statusClass(status: DiscordImportQueueItemStatus): string {
@@ -588,7 +628,7 @@ function statusClass(status: DiscordImportQueueItemStatus): string {
     <div class="flex flex-col gap-3 border-b border-border pb-5 sm:flex-row sm:items-end sm:justify-between">
       <div class="min-w-0">
         <p class="text-xs font-semibold text-emerald-700">Discord 同步清单</p>
-        <h2 class="mt-1 text-lg font-semibold text-ink-primary">今日热门角色卡</h2>
+        <h2 class="mt-1 text-lg font-semibold text-ink-primary">Discord 热门资源</h2>
         <p v-if="queue" data-testid="discord-sync-meta" class="mt-1 text-xs text-ink-muted">
           {{ queue.manifest.channelName }} · {{ periodLabel(queue.manifest.period) }} · {{ sortLabel(queue.manifest.sort) }} · 同步于 {{ formatTimestamp(queue.manifest.syncedAt) }}
         </p>
@@ -639,7 +679,7 @@ function statusClass(status: DiscordImportQueueItemStatus): string {
             size="sm"
             variant="secondary"
             :disabled="controlsLocked"
-            @click="manifestDraftOpen = !manifestDraftOpen"
+            @click="toggleManifestDraft"
           >{{ manifestDraftOpen ? '收起粘贴' : '粘贴清单' }}</AppButton>
           <AppButton
             v-if="queue"
@@ -651,6 +691,26 @@ function statusClass(status: DiscordImportQueueItemStatus): string {
           >清空</AppButton>
         </div>
       </div>
+    </div>
+
+    <div class="border-y border-border bg-surface-sunken/60 px-3 py-3" aria-label="Discord 角色卡导入流程">
+      <ol class="grid gap-3 text-xs text-ink-secondary sm:grid-cols-3 sm:gap-4">
+        <li class="flex min-w-0 items-start gap-2">
+          <span class="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-surface text-xs font-semibold text-emerald-700">1</span>
+          <span class="pt-1 font-medium">勾选要导入的角色卡</span>
+        </li>
+        <li class="flex min-w-0 items-start gap-2">
+          <span class="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-surface text-xs font-semibold text-emerald-700">2</span>
+          <span class="pt-1 font-medium">点击“导入已选”授权处理</span>
+        </li>
+        <li class="flex min-w-0 items-start gap-2">
+          <span class="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-surface text-xs font-semibold text-emerald-700">3</span>
+          <span class="min-w-0 pt-1">
+            <span class="font-medium">保持当前 Codex 任务运行</span>
+            <span class="mt-1 block text-ink-muted">任务已结束时，回到 Codex 说“导入刚刚勾选的项目”。</span>
+          </span>
+        </li>
+      </ol>
     </div>
 
     <div v-if="manifestDraftOpen" class="border-b border-border pb-5" data-testid="discord-manifest-paste-panel">
@@ -675,7 +735,7 @@ function statusClass(status: DiscordImportQueueItemStatus): string {
       v-if="!queue"
       icon="box"
       title="尚未载入 Discord 清单"
-      description="载入今日同步清单后，可勾选候选并导入卡体。"
+      description="载入同步清单后，可导入角色卡或启动隔离的网页应用。"
     >
       <template #actions>
         <AppButton size="sm" @click="chooseManifest">载入 JSON 清单</AppButton>
@@ -685,7 +745,7 @@ function statusClass(status: DiscordImportQueueItemStatus): string {
     <AppEmpty
       v-else-if="!rows.length"
       icon="search"
-      title="今日暂无候选卡"
+      title="暂无候选资源"
       description="可以稍后载入更新后的同步清单。"
     />
 
@@ -708,7 +768,11 @@ function statusClass(status: DiscordImportQueueItemStatus): string {
           :data-testid="`discord-card-file-${row.card.id}`"
           @change="onCardFileSelected(row.card, $event)"
         />
-        <label class="absolute left-4 top-4 z-10 flex h-6 w-6 items-center justify-center rounded bg-surface/90 shadow-sm" :title="canSelect(row) ? '选择角色卡' : statusLabel(row.item.status)">
+        <label
+          v-if="!isDiscordWebAppCard(row.card)"
+          class="absolute left-4 top-4 z-10 flex h-6 w-6 items-center justify-center rounded bg-surface/90 shadow-sm"
+          :title="canSelect(row) ? '选择角色卡' : statusLabel(row.item.status)"
+        >
           <input
             type="checkbox"
             class="h-4 w-4 accent-emerald-600"
@@ -722,14 +786,17 @@ function statusClass(status: DiscordImportQueueItemStatus): string {
 
         <div class="h-20 w-14 overflow-hidden rounded bg-surface-sunken sm:h-28 sm:w-[88px]">
           <img
-            v-if="row.card.previewUrl"
+            v-if="row.card.previewUrl && !failedPreviewIds.has(row.card.id)"
             :src="row.card.previewUrl"
             :alt="row.card.title"
             class="h-full w-full object-cover"
             loading="lazy"
             referrerpolicy="no-referrer"
+            @error="markPreviewFailed(row.card.id)"
           />
-          <div v-else class="flex h-full items-center justify-center px-2 text-center text-[11px] text-ink-muted">无预览</div>
+          <div v-else class="flex h-full items-center justify-center px-2 text-center text-[11px] text-ink-muted">
+            {{ isDiscordWebAppCard(row.card) ? '网页应用' : '无预览' }}
+          </div>
         </div>
 
         <div class="min-w-0">
@@ -739,7 +806,7 @@ function statusClass(status: DiscordImportQueueItemStatus): string {
               :data-testid="`discord-status-${row.card.id}`"
               class="shrink-0 rounded px-2 py-0.5 text-[11px] font-semibold"
               :class="isRequested(row) ? 'bg-amber-50 text-amber-700' : statusClass(row.item.status)"
-            >{{ isRequested(row) ? '等待浏览器' : statusLabel(row.item.status) }}</span>
+            >{{ isRequested(row) ? '等待浏览器' : rowStatusLabel(row) }}</span>
             <span class="shrink-0 rounded bg-surface-sunken px-2 py-0.5 text-[11px] text-ink-muted">
               {{ availabilityLabel(row.card) }}
             </span>
@@ -779,7 +846,14 @@ function statusClass(status: DiscordImportQueueItemStatus): string {
             class="inline-flex min-h-8 items-center justify-center text-center text-xs font-medium text-emerald-700 hover:text-emerald-800 sm:justify-end"
             :data-testid="`discord-source-${row.card.id}`"
           >打开来源帖</a>
-          <template v-if="isRequested(row)">
+          <AppButton
+            v-if="isDiscordWebAppCard(row.card)"
+            :data-testid="`discord-launch-${row.card.id}`"
+            size="sm"
+            class="w-full sm:w-auto"
+            @click="$router.push(`/web-app/${encodeURIComponent(row.card.id)}`)"
+          >启动应用</AppButton>
+          <template v-else-if="isRequested(row)">
             <input
               type="url"
               :data-testid="`discord-card-url-${row.card.id}`"

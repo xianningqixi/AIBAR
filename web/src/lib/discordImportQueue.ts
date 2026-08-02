@@ -18,13 +18,21 @@ export const DISCORD_IMPORT_TIMEZONE = 'Asia/Shanghai'
 export type DiscordImportPeriod = 'today' | 'rolling-24h'
 export type DiscordImportSort = 'reactions' | 'activity'
 export type DiscordCardResourceAvailability = 'ready' | 'browser' | 'unsupported'
+export type DiscordCardResourceKind = 'character-card' | 'web-app'
+export type DiscordWebAppRuntime = 'standalone' | 'aibar-bridge'
+export type DiscordWebAppPermission = 'generation' | 'storage'
 export type DiscordImportQueueStatus = 'ready' | 'importing' | 'imported' | 'unsupported' | 'failed'
 export type DiscordImportQueueItemStatus = DiscordImportQueueStatus
 
 export interface DiscordCardResource {
   availability: DiscordCardResourceAvailability
+  kind: DiscordCardResourceKind
   fileName?: string
   note?: string
+  launchUrl?: string
+  runtime?: DiscordWebAppRuntime
+  bridgeVersion?: 1
+  permissions?: DiscordWebAppPermission[]
 }
 
 export interface DiscordImportCard {
@@ -101,6 +109,7 @@ const MAX_IMPORTED_HASHES = 2_000
 const MAX_COUNT = 1_000_000_000
 const MAX_SOURCE_URL_LENGTH = 2_048
 const MAX_PREVIEW_URL_LENGTH = 4_096
+const MAX_WEB_APP_URL_LENGTH = 2_048
 const MIN_DISCORD_DATE = Date.parse('2015-01-01T00:00:00.000Z')
 const MAX_SAFE_DATE = Date.parse('2100-01-01T00:00:00.000Z')
 const SNOWFLAKE_PATTERN = /^[1-9]\d{16,19}$/
@@ -119,6 +128,9 @@ const RESOURCE_AVAILABILITIES = new Set<DiscordCardResourceAvailability>([
   'browser',
   'unsupported',
 ])
+const RESOURCE_KINDS = new Set<DiscordCardResourceKind>(['character-card', 'web-app'])
+const WEB_APP_RUNTIMES = new Set<DiscordWebAppRuntime>(['standalone', 'aibar-bridge'])
+const WEB_APP_PERMISSIONS = new Set<DiscordWebAppPermission>(['generation', 'storage'])
 const SUPPORTED_CARD_EXTENSIONS = new Set(['png', 'json', 'yaml', 'yml', 'charx', 'byaf'])
 const PERIODS = new Set<DiscordImportPeriod>(['today', 'rolling-24h'])
 const SORTS = new Set<DiscordImportSort>(['reactions', 'activity'])
@@ -273,6 +285,57 @@ export function isDiscordCdnPreviewUrl(value: string): boolean {
   }
 }
 
+function isPrivateWebAppHostname(hostname: string): boolean {
+  const host = hostname.toLowerCase().replace(/^\[|\]$/g, '').replace(/\.$/, '')
+  if (host === 'localhost' || host.endsWith('.localhost') || host.endsWith('.local')) return true
+
+  if (host.includes(':')) {
+    return host === '::'
+      || host === '::1'
+      || host.startsWith('::ffff:')
+      || /^(?:fc|fd)/.test(host)
+      || /^fe[89ab]/.test(host)
+  }
+
+  const ipv4 = host.split('.').map(Number)
+  if (ipv4.length !== 4 || ipv4.some((part) => !Number.isInteger(part) || part < 0 || part > 255)) return false
+  return ipv4[0] === 0
+    || ipv4[0] === 10
+    || ipv4[0] === 127
+    || (ipv4[0] === 169 && ipv4[1] === 254)
+    || (ipv4[0] === 172 && ipv4[1] >= 16 && ipv4[1] <= 31)
+    || (ipv4[0] === 192 && ipv4[1] === 168)
+}
+
+export function isSafeWebAppLaunchUrl(value: string): boolean {
+  if (!value || value.length > MAX_WEB_APP_URL_LENGTH) return false
+  try {
+    const url = new URL(value)
+    return url.protocol === 'https:'
+      && !url.username
+      && !url.password
+      && !url.port
+      && !isPrivateWebAppHostname(url.hostname)
+  } catch {
+    return false
+  }
+}
+
+function parseWebAppPermissions(value: unknown, path: string): DiscordWebAppPermission[] {
+  if (!Array.isArray(value)) validationError(path, 'expected an array')
+  if (value.length > WEB_APP_PERMISSIONS.size) validationError(path, 'array contains too many permissions')
+  const seen = new Set<DiscordWebAppPermission>()
+  return value.map((permission, index) => {
+    if (typeof permission !== 'string' || !WEB_APP_PERMISSIONS.has(permission as DiscordWebAppPermission)) {
+      validationError(`${path}[${index}]`, 'unsupported web app permission')
+    }
+    const parsed = permission as DiscordWebAppPermission
+    if (seen.has(parsed)) validationError(`${path}[${index}]`, 'duplicate permission')
+    seen.add(parsed)
+    return parsed
+  })
+}
+
 function parseTags(value: unknown, path: string): string[] {
   if (!Array.isArray(value)) validationError(path, 'expected an array')
   if (value.length > MAX_TAGS_PER_CARD) {
@@ -291,16 +354,34 @@ function parseTags(value: unknown, path: string): string[] {
 
 function parseResource(value: unknown, path: string): DiscordCardResource {
   const record = asRecord(value, path)
-  assertExactKeys(record, ['availability', 'fileName', 'note'], path)
+  assertExactKeys(record, [
+    'availability',
+    'kind',
+    'fileName',
+    'note',
+    'launchUrl',
+    'runtime',
+    'bridgeVersion',
+    'permissions',
+  ], path)
 
   if (typeof record.availability !== 'string' || !RESOURCE_AVAILABILITIES.has(record.availability as DiscordCardResourceAvailability)) {
     validationError(`${path}.availability`, 'unsupported resource availability')
   }
+  const kind = 'kind' in record
+    ? record.kind
+    : 'character-card'
+  if (typeof kind !== 'string' || !RESOURCE_KINDS.has(kind as DiscordCardResourceKind)) {
+    validationError(`${path}.kind`, 'unsupported resource kind')
+  }
+  const parsedKind = kind as DiscordCardResourceKind
 
   const fileName = 'fileName' in record
     ? asSafeFileName(record.fileName, `${path}.fileName`)
     : undefined
   if (
+    parsedKind === 'character-card'
+    &&
     record.availability === 'ready'
     && fileName
     && !SUPPORTED_CARD_EXTENSIONS.has(fileName.split('.').pop()?.toLowerCase() || '')
@@ -309,11 +390,58 @@ function parseResource(value: unknown, path: string): DiscordCardResource {
   }
   const note = asOptionalString(record, 'note', path, { max: 500, allowEmpty: true })
 
+  if (parsedKind === 'character-card') {
+    for (const field of ['launchUrl', 'runtime', 'bridgeVersion', 'permissions']) {
+      if (field in record) validationError(`${path}.${field}`, 'field is only valid for web apps')
+    }
+    return {
+      availability: record.availability as DiscordCardResourceAvailability,
+      kind: parsedKind,
+      ...(fileName !== undefined ? { fileName } : {}),
+      ...(note !== undefined ? { note } : {}),
+    }
+  }
+
+  if (record.availability !== 'ready') {
+    validationError(`${path}.availability`, 'web apps must be ready to launch')
+  }
+  if (fileName !== undefined) validationError(`${path}.fileName`, 'web apps do not use character-card files')
+
+  const launchUrl = asString(record.launchUrl, `${path}.launchUrl`, { max: MAX_WEB_APP_URL_LENGTH })
+  if (!isSafeWebAppLaunchUrl(launchUrl)) {
+    validationError(`${path}.launchUrl`, 'expected a public HTTPS URL without credentials or a custom port')
+  }
+  const runtime = 'runtime' in record ? record.runtime : 'standalone'
+  if (typeof runtime !== 'string' || !WEB_APP_RUNTIMES.has(runtime as DiscordWebAppRuntime)) {
+    validationError(`${path}.runtime`, 'unsupported web app runtime')
+  }
+  const permissions = 'permissions' in record
+    ? parseWebAppPermissions(record.permissions, `${path}.permissions`)
+    : []
+  if (runtime === 'standalone' && permissions.length) {
+    validationError(`${path}.permissions`, 'standalone web apps cannot request AIBAR permissions')
+  }
+  if (runtime === 'aibar-bridge' && record.bridgeVersion !== 1) {
+    validationError(`${path}.bridgeVersion`, 'AIBAR bridge apps require bridgeVersion 1')
+  }
+
   return {
     availability: record.availability as DiscordCardResourceAvailability,
-    ...(fileName !== undefined ? { fileName } : {}),
+    kind: parsedKind,
     ...(note !== undefined ? { note } : {}),
+    launchUrl,
+    runtime: runtime as DiscordWebAppRuntime,
+    ...(runtime === 'aibar-bridge' ? { bridgeVersion: 1 as const } : {}),
+    permissions,
   }
+}
+
+export function isDiscordWebAppCard(card: DiscordImportCard): boolean {
+  return card.resource.kind === 'web-app'
+}
+
+export function isImportableDiscordCharacterCard(card: DiscordImportCard): boolean {
+  return card.resource.kind === 'character-card' && card.resource.availability !== 'unsupported'
 }
 
 function parseCard(value: unknown, index: number): DiscordImportCard {
@@ -495,7 +623,11 @@ function parseImportRequest(
   const cardIds = record.cardIds.map((value, index) => {
     const id = asSnowflake(value, `${path}.cardIds[${index}]`)
     if (seen.has(id)) validationError(`${path}.cardIds[${index}]`, 'duplicate card id')
-    if (!cardById.has(id)) validationError(`${path}.cardIds[${index}]`, 'card is missing from the manifest')
+    const card = cardById.get(id)
+    if (!card) validationError(`${path}.cardIds[${index}]`, 'card is missing from the manifest')
+    if (!isImportableDiscordCharacterCard(card)) {
+      validationError(`${path}.cardIds[${index}]`, 'resource is not an importable character card')
+    }
     seen.add(id)
     return id
   })
@@ -525,6 +657,13 @@ function parseQueue(input: unknown, resetImporting: boolean): DiscordImportQueue
     const card = cardById.get(item.id)
     if (!card) validationError(`queue.items[${index}].id`, 'queue item is missing from the manifest')
 
+    if (!isImportableDiscordCharacterCard(card)) {
+      return {
+        id: item.id,
+        status: defaultStatus(card),
+        selected: false,
+      }
+    }
     if (!resetImporting || item.status !== 'importing') return item
     return {
       id: item.id,
@@ -547,7 +686,7 @@ function parseQueue(input: unknown, resetImporting: boolean): DiscordImportQueue
           return Boolean(
             card
             && item?.selected
-            && card.resource.availability !== 'unsupported'
+            && isImportableDiscordCharacterCard(card)
             && item.status !== 'imported'
             && item.status !== 'unsupported'
             && item.status !== 'failed',
@@ -599,6 +738,7 @@ export function mergeDiscordImportQueue(
   const items = manifest.cards.map((card): DiscordImportQueueItem => {
     const old = previousById.get(card.id)
     if (!old) return createQueueItem(card)
+    if (!isImportableDiscordCharacterCard(card)) return createQueueItem(card)
 
     if (old.status === 'imported') {
       return {
@@ -644,6 +784,11 @@ export function updateDiscordImportQueueItem(
   if (itemIndex === -1) validationError('id', 'queue item not found')
 
   const current = queue.items[itemIndex]
+  const card = queue.manifest.cards.find((item) => item.id === targetId)
+  if (!card) validationError('id', 'manifest card not found')
+  if (patch.selected === true && !isImportableDiscordCharacterCard(card)) {
+    validationError('patch.selected', 'resource is not an importable character card')
+  }
   const status = patch.status ?? current.status
   if (!QUEUE_STATUSES.has(status)) validationError('patch.status', 'unsupported queue status')
   if (patch.selected !== undefined && typeof patch.selected !== 'boolean') {
@@ -697,7 +842,7 @@ export function requestDiscordImportBatch(
       const card = cardById.get(item.id)
       return card !== undefined
         && item.selected
-        && card.resource.availability !== 'unsupported'
+        && isImportableDiscordCharacterCard(card)
         && item.status !== 'imported'
         && item.status !== 'importing'
     })

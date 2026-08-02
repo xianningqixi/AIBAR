@@ -127,8 +127,12 @@ async function parseByContentType<T>(r: Response): Promise<T> {
   return ct.includes('json') ? r.json() : ((await r.text()) as T)
 }
 
-export async function apiPost<T = unknown>(url: string, body: unknown = {}): Promise<T> {
-  return parseByContentType<T>(await postJson(url, body))
+export async function apiPost<T = unknown>(
+  url: string,
+  body: unknown = {},
+  init?: { signal?: AbortSignal },
+): Promise<T> {
+  return parseByContentType<T>(await postJson(url, body, init))
 }
 
 export async function apiGet<T = unknown>(url: string): Promise<T> {

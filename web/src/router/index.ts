@@ -42,6 +42,11 @@ const router = createRouter({
       component: () => import('@/pages/CommunityWorkPage.vue'),
     },
     {
+      path: '/web-app/:cardId',
+      name: 'webApp',
+      component: () => import('@/pages/WebAppPage.vue'),
+    },
+    {
       path: '/publish',
       name: 'publish',
       component: () => import('@/pages/PublishPage.vue'),

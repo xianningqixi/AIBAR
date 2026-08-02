@@ -35,10 +35,10 @@ const mods = useModsStore()
 const personas = usePersonasStore()
 const presets = usePresetsStore()
 const tts = useTtsStore()
-// 聊天页全屏沉浸：不显示侧栏和底部导航
-const isChat = computed(() => route.name === 'chat')
+// 聊天和独立网页应用全屏沉浸：不显示侧栏和底部导航
+const isImmersive = computed(() => route.name === 'chat' || route.name === 'webApp')
 const isAuth = computed(() => route.name === 'login' || route.name === 'register')
-const chromeHidden = computed(() => isChat.value || isAuth.value)
+const chromeHidden = computed(() => isImmersive.value || isAuth.value)
 
 watch(
   [() => session.user?.handle || '', () => session.isAdmin],

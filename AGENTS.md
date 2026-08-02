@@ -16,7 +16,9 @@ This repo is two coupled parts:
 Frontend (`cd web`):
 - `npm install` — install deps
 - `npm run dev` — Vite dev server on :5173 (proxies to the ST backend)
-- `npm run build` — `vue-tsc -b && vite build` (type-check then bundle to `dist/`). This is also the only typecheck/lint gate — there is **no test suite**.
+- `npm run test` — run the Vitest unit suite
+- `npm run check` — run ESLint, Vitest, type-checking, and the production build
+- `npm run build` — `vue-tsc -b && vite build` (type-check then bundle to `dist/`)
 - `npm run build:install` — build, then deploy `dist/` into `SillyTavern/public/aibar/` for same-origin production serving
 
 Backend (`cd SillyTavern`, Node >= 20):
@@ -47,3 +49,9 @@ There is no AIBAR database. State lives in three places:
 - **Stories & generated images**: served by **custom endpoints added to the ST fork** — `SillyTavern/src/endpoints/aibar.js` (mounted at `/api/aibar` in `src/server-startup.js`). Stories live under the user dir `aibar/stories`, images under `aibar/images`. These routes (`/api/aibar/stories/*`, `/api/aibar/images/*`) do not exist in upstream SillyTavern, so backend changes for stories/media go here.
 
 When changing anything story/image/media-related end to end, expect to touch both `web/src/api/{stories,imageGen}.ts` and `SillyTavern/src/endpoints/aibar.js` (the submodule is on its own branch and committed separately).
+
+## Discord hot-resource workflow
+
+When the user asks to refresh Discord hot resources, import selected cards, retry failed imports, or classify standalone frontends, read and follow [`docs/discord-hot-import-runbook.md`](docs/discord-hot-import-runbook.md) before operating the browser. It is the executable runbook for the fixed Discord source, manifest handoff, `/下载` interaction, card validation, web-app classification, retries, and final QA.
+
+Never persist Discord passwords, cookies, tokens, authorization headers, or signed CDN URLs in the repository. Use only the visible logged-in browser session, and treat attachment URLs as short-lived handoff data.

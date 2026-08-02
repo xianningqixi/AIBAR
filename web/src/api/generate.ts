@@ -76,11 +76,12 @@ function contentText(value: unknown): string {
     .join('')
 }
 
-export async function generateReply(payload: Record<string, unknown>): Promise<string> {
+export async function generateReply(payload: Record<string, unknown>, signal?: AbortSignal): Promise<string> {
   try {
     const data = await apiPost<ChatCompletionResponse>(
       '/api/aibar/models/generate',
       payload,
+      { signal },
     )
     const apiError = responseError(data)
     if (apiError) throw new Error(apiError)
