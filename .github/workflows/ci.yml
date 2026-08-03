@@ -37,5 +37,7 @@ jobs:
         working-directory: SillyTavern
         run: |
           npm ci
+          # .npmrc 默认 ignore-scripts=true，需要定向编译 better-sqlite3 原生模块
+          npm rebuild better-sqlite3 --ignore-scripts=false
           npm run test:aibar
           npm run lint

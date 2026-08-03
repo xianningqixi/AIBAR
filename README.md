@@ -53,6 +53,9 @@ git submodule update --init --recursive
 ```bash
 cd SillyTavern
 npm install
+# .npmrc 默认 ignore-scripts=true（不执行依赖的安装脚本），
+# 首次安装后需定向编译 SQLite 原生模块，否则社区功能会报 bindings 错误：
+npm rebuild better-sqlite3 --ignore-scripts=false
 npm start          # node server.js
 ```
 
