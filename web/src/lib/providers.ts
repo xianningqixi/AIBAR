@@ -16,6 +16,13 @@ export const providerConfigs: Record<string, ProviderConfig> = {
     endpointKey: 'reverse_proxy',
     defaultModel: 'gpt-4o-mini',
   },
+  claude: {
+    label: 'Anthropic Messages API',
+    secretKey: 'api_key_claude',
+    modelKey: 'claude_model',
+    endpointKey: 'reverse_proxy',
+    defaultModel: 'claude-sonnet-4-5',
+  },
   openrouter: {
     label: 'OpenRouter',
     secretKey: 'api_key_openrouter',
@@ -157,6 +164,7 @@ export const providerConfigs: Record<string, ProviderConfig> = {
 export const sharedModelProviderSources = [
   'custom',
   'openai',
+  'claude',
   'openrouter',
   'makersuite',
   'deepseek',

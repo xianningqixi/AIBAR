@@ -1,16 +1,18 @@
 # AIBAR 服务器部署方案
 
-> 状态：Draft，等待 review。本文中的部署命令尚未执行。
+> 状态：已于 2026-08-03 完成首次部署，并补充外挂域名源站入口。
 >
 > 目标服务器：`172.86.116.166`
 >
-> 目标入口：`https://172.86.116.166/aibar/`
+> 直接入口：`https://172.86.116.166/aibar/`
+>
+> 外挂域名源站：`http://172.86.116.166:8001`
 
 ## 1. Review 决策
 
 执行前需要确认以下决策：
 
-1. 使用 `https://172.86.116.166/aibar/` 作为第一版正式入口，后续如有域名再迁移证书和 `server_name`。
+1. 保留 `https://172.86.116.166/aibar/` 直接入口，同时由受限 Nginx 在 `172.86.116.166:8001` 提供 HTTP 源站，供外部域名平台反向代理。
 2. 部署时生成独立的随机管理员密码，只在交付时展示一次，不复用 root 密码。
 3. 本次只部署 AIBAR Web 和 SillyTavern 后端，不部署 `telegram-bot/`，也不改动服务器上现有的 Sub2API、AnyTLS、sing-box 和 OpenClaw 服务。
 
@@ -23,6 +25,7 @@
 - 以独立低权限账号运行 SillyTavern。
 - 使用 systemd 管理 Node 服务。
 - 使用 Docker Nginx 和现有 IP 证书提供 HTTPS。
+- 提供只转发 AIBAR 必要路径的公网 HTTP 源站端口，供外挂域名使用。
 - 初始化并保护 `default-user` 管理员账号。
 - 建立数据持久化、备份、验收和回滚流程。
 
@@ -67,6 +70,7 @@
 ```mermaid
 flowchart LR
     Browser["用户浏览器"] -->|"HTTPS 172.86.116.166:443"| Proxy["AIBAR Nginx 容器"]
+    Domain["外挂域名平台"] -->|"HTTP 172.86.116.166:8001"| Proxy
     Proxy -->|"HTTP 127.0.0.1:8001"| App["SillyTavern + AIBAR API"]
     App --> Data["/opt/aibar/data"]
     App --> Release["/opt/aibar/current"]
@@ -76,8 +80,9 @@ flowchart LR
 
 安全边界：
 
-- SillyTavern 只监听 `127.0.0.1:8001`，公网无法直接连接该端口。
-- Nginx 只在主 IP `172.86.116.166:443` 上监听，不影响第二 IP 和现有容器。
+- SillyTavern 只监听 `127.0.0.1:8001`，不绑定公网地址。
+- Nginx 分别监听主 IP 的 `172.86.116.166:443` 和 `172.86.116.166:8001`；相同端口可同时用于公网 Nginx 和回环后端，因为监听地址不同。
+- `8001` 公网入口是受限 Nginx 源站，不是 SillyTavern 裸端口；仍只允许 AIBAR 页面、API 和必要媒体路径。
 - 公网入口只转发 AIBAR 页面、API 和必要媒体路径。
 - 原生 SillyTavern 首页不作为公开入口。
 - CSRF 必须保持开启，所有用户必须经过 SillyTavern 多账号会话认证。
@@ -323,7 +328,7 @@ User=aibar
 Group=aibar
 WorkingDirectory=/opt/aibar/current
 Environment=NODE_ENV=production
-ExecStart=/usr/bin/node /opt/aibar/current/server.js --port 8001 --browserLaunchEnabled false
+ExecStart=/usr/local/bin/node /opt/aibar/current/server.js --port 8001 --browserLaunchEnabled false
 Restart=on-failure
 RestartSec=5
 TimeoutStopSec=30
@@ -438,7 +443,7 @@ http {
 
 ```nginx
 proxy_http_version 1.1;
-proxy_set_header Host $host;
+proxy_set_header Host 172.86.116.166;
 proxy_set_header X-Real-IP $remote_addr;
 proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
 proxy_set_header X-Forwarded-Proto https;
@@ -457,7 +462,8 @@ proxy_buffering off;
 
 ```nginx
 server {
-    listen 172.86.116.166:443 ssl http2;
+    listen 172.86.116.166:443 ssl;
+    http2 on;
     server_name 172.86.116.166;
 
     ssl_certificate /etc/letsencrypt/live/172.86.116.166/fullchain.pem;
@@ -519,6 +525,50 @@ server {
 
 路径清单与 `web/vite.config.ts` 的开发代理边界保持一致。`/api/` 仍由 SillyTavern 自己执行登录、管理员、CSRF 和共享模型权限检查。
 
+外挂域名源站在同一个 `default.conf` 中增加第二个 `server`。其中的六个代理 `location` 与上面的 HTTPS 块完全一致，继续引用 `proxy-common.conf`；不能使用兜底代理把原生 SillyTavern 首页暴露出去：
+
+```nginx
+server {
+    listen 172.86.116.166:8001;
+    server_name _;
+    absolute_redirect off;
+
+    client_max_body_size 70m;
+
+    location = / { return 302 /aibar/; }
+    location = /aibar { return 301 /aibar/; }
+
+    location ^~ /aibar/ {
+        proxy_pass http://127.0.0.1:8001;
+        include /etc/nginx/proxy-common.conf;
+    }
+    location ^~ /api/ {
+        proxy_pass http://127.0.0.1:8001;
+        include /etc/nginx/proxy-common.conf;
+    }
+    location = /csrf-token {
+        proxy_pass http://127.0.0.1:8001;
+        include /etc/nginx/proxy-common.conf;
+    }
+    location ^~ /thumbnail/ {
+        proxy_pass http://127.0.0.1:8001;
+        include /etc/nginx/proxy-common.conf;
+    }
+    location ^~ /characters/ {
+        proxy_pass http://127.0.0.1:8001;
+        include /etc/nginx/proxy-common.conf;
+    }
+    location ^~ "/User Avatars/" {
+        proxy_pass http://127.0.0.1:8001;
+        include /etc/nginx/proxy-common.conf;
+    }
+
+    location / { return 404; }
+}
+```
+
+`absolute_redirect off` 防止源站把 `http://IP:8001` 写进 `Location`，确保最终用户继续停留在外挂域名的 HTTPS 地址。固定上游 `Host` 为服务器 IP，是为了让外部平台保留访客域名时仍能通过 SillyTavern 的 host whitelist。
+
 ### 11.5 启动代理
 
 启动前只做配置验证：
@@ -545,7 +595,7 @@ docker logs --tail 100 aibar-proxy
 
 ## 12. 证书续期
 
-现有证书使用 Certbot standalone HTTP-01。Nginx 只绑定 443，保持主 IP 的 80 端口空闲，避免干扰续期。
+现有证书使用 Certbot standalone HTTP-01。Nginx 绑定 443 和外挂源站 8001，主 IP 的 80 端口保持空闲，避免干扰续期。
 
 需要为续期增加 deploy hook，在证书真正更新后 reload 所有使用该证书的 Nginx 容器：
 
@@ -585,6 +635,7 @@ certbot renew --dry-run --cert-name 172.86.116.166
 | `systemctl is-active aibar` | `active` |
 | `docker inspect` proxy health | `healthy` |
 | `127.0.0.1:8001` | 正在监听 |
+| `172.86.116.166:8001` | 由 `aibar-proxy` 监听，作为外挂域名 HTTP 源站 |
 | `0.0.0.0:8001` | 未监听 |
 | `172.86.116.166:443` | 由 `aibar-proxy` 监听 |
 | 现有 `3000/8443/9443` | 保持原状 |
@@ -593,6 +644,7 @@ certbot renew --dry-run --cert-name 172.86.116.166
 
 ```bash
 curl --fail --silent --show-error --head https://172.86.116.166/aibar/
+curl --fail --silent --show-error --head --header 'Host: example.external-domain.test' http://172.86.116.166:8001/aibar/
 curl --fail --silent --show-error https://172.86.116.166/csrf-token
 curl --silent --show-error --output /dev/null --write-out '%{http_code}\n' https://172.86.116.166/api/aibar/admin/discord-import/batches/latest
 ```
@@ -600,6 +652,7 @@ curl --silent --show-error --output /dev/null --write-out '%{http_code}\n' https
 期望：
 
 - 证书域名/IP 校验通过。
+- 公网 `8001` 在保留任意外挂域名 Host 时返回 AIBAR，根路径使用相对地址跳转到 `/aibar/`。
 - `/` 跳转到 `/aibar/`。
 - 未登录管理 API 返回 `403`，不能返回 `503` 或 `200`。
 - 未列入白名单的原生 SillyTavern静态页面返回 `404`。
@@ -1057,7 +1110,7 @@ _aibar/works/
 只有同时满足以下条件，部署才算完成：
 
 - HTTPS 正常，证书续期路径已验证。
-- 公网只能进入 AIBAR，不暴露原生 SillyTavern 首页或 8001 端口。
+- 公网 443 和 8001 只能进入 AIBAR；8001 由 Nginx 限制路径，不暴露原生 SillyTavern 首页或裸后端。
 - `default-user` 已设置独立强密码。
 - 前端、API、社区、聊天和 Discord 入库主流程通过。
 - 重启后数据不丢失。

@@ -41,11 +41,21 @@ function explainGenerateError(error: unknown, payload?: Record<string, unknown>)
 }
 
 type ChatCompletionResponse = {
+  type?: unknown
   choices?: Array<{
     message?: { content?: unknown }
     text?: unknown
     delta?: { content?: unknown; reasoning?: unknown; reasoning_content?: unknown }
   }>
+  delta?: {
+    type?: unknown
+    text?: unknown
+    thinking?: unknown
+    content?: unknown
+    reasoning?: unknown
+    reasoning_content?: unknown
+  }
+  content_block?: { type?: unknown; text?: unknown }
   content?: unknown
   response?: unknown
   error?: unknown
@@ -74,6 +84,37 @@ function contentText(value: unknown): string {
       return typeof text === 'string' ? text : ''
     })
     .join('')
+}
+
+export function parseStreamChunk(data: ChatCompletionResponse): { content?: string; reasoning?: string } {
+  const choice = data?.choices?.[0]
+  const choiceDelta = choice?.delta
+  const anthropicDelta = data?.delta
+  const anthropicBlockText = data?.type === 'content_block_start'
+    && data.content_block?.type === 'text'
+    ? data.content_block.text
+    : undefined
+  const content = contentText(
+    choiceDelta?.content
+    ?? choice?.message?.content
+    ?? choice?.text
+    ?? anthropicDelta?.text
+    ?? anthropicDelta?.content
+    ?? anthropicBlockText
+    ?? data?.content
+    ?? data?.response,
+  )
+  const reasoning = contentText(
+    choiceDelta?.reasoning
+    ?? choiceDelta?.reasoning_content
+    ?? anthropicDelta?.thinking
+    ?? anthropicDelta?.reasoning
+    ?? anthropicDelta?.reasoning_content,
+  )
+  return {
+    content: content || undefined,
+    reasoning: reasoning || undefined,
+  }
 }
 
 export async function generateReply(payload: Record<string, unknown>, signal?: AbortSignal): Promise<string> {
@@ -138,22 +179,8 @@ export async function* generateReplyStream(
         throw new Error(explainGenerateError(new Error(apiError), payload))
       }
 
-      const choice = data?.choices?.[0]
-      const delta = choice?.delta
-      const content = contentText(
-        delta?.content
-        ?? choice?.message?.content
-        ?? choice?.text
-        ?? data?.content
-        ?? data?.response,
-      )
-      const reasoning = contentText(delta?.reasoning ?? delta?.reasoning_content)
-      if (content || reasoning) {
-        yield {
-          content: content || undefined,
-          reasoning: reasoning || undefined,
-        }
-      }
+      const chunk = parseStreamChunk(data)
+      if (chunk.content || chunk.reasoning) yield chunk
     }
   } finally {
     refreshPointBalance()

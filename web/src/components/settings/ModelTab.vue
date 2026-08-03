@@ -46,6 +46,11 @@ const setupSources = [
     description: '官方 OpenAI Key，不需要填写自定义端点。',
   },
   {
+    value: 'claude',
+    title: 'Anthropic / Claude',
+    description: '原生 Messages API；官方直连或填写兼容中转的 /v1 基础地址。',
+  },
+  {
     value: 'deepseek',
     title: 'DeepSeek 官方',
     description: '官方 DeepSeek Key；如果是中转，请选 OpenAI 兼容。',
@@ -66,8 +71,22 @@ const setupDraft = reactive({
 })
 const setupResult = ref<TestResult | null>(null)
 
-const setupNeedsEndpoint = computed(() => setupDraft.source === 'custom')
 const canManageSelectedCredentials = computed(() => selectedProfile.value?.canManageCredentials !== false)
+const setupShowsEndpoint = computed(() => (
+  setupDraft.source === 'custom'
+  || providerConfigs[setupDraft.source]?.endpointKey === 'reverse_proxy'
+))
+const setupRequiresEndpoint = computed(() => setupDraft.source === 'custom')
+const setupEndpointHint = computed(() => {
+  if (!canManageSelectedCredentials.value) return '凭据由其他管理员维护'
+  if (setupDraft.source === 'claude') {
+    return '官方直连可留空；兼容中转填写到 /v1，系统会调用 /messages。'
+  }
+  if (setupDraft.source === 'custom') {
+    return '填写 OpenAI 兼容基础地址，一般以 /v1 结尾。'
+  }
+  return '官方直连可留空；使用中转时一般填写到 /v1。'
+})
 
 const currentDefaultProfile = computed(() => models.getProfile(models.activeProfileId))
 
@@ -128,7 +147,7 @@ async function saveSetupProfile() {
     ui.addToast('请填写模型名', 'warning')
     return
   }
-  if (canManageSelectedCredentials.value && setupNeedsEndpoint.value && !endpoint) {
+  if (canManageSelectedCredentials.value && setupRequiresEndpoint.value && !endpoint) {
     ui.addToast('请填写兼容接口端点，通常以 /v1 结尾', 'warning')
     return
   }
@@ -145,7 +164,7 @@ async function saveSetupProfile() {
     name: setupDraft.name.trim() || cfg.label,
     source: setupDraft.source,
     model,
-    endpoint: setupNeedsEndpoint.value ? endpoint : '',
+    endpoint: setupShowsEndpoint.value ? endpoint : '',
     maxTokens: setupDraft.maxTokens || 4096,
     temperature: profile.temperature ?? 0.7,
     topP: profile.topP ?? 1,
@@ -359,7 +378,7 @@ watch(selectedProfileId, () => {
         </div>
       </div>
 
-      <div class="grid gap-4 md:grid-cols-3">
+      <div class="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
         <button
           v-for="source in setupSources"
           :key="source.value"
@@ -387,11 +406,15 @@ watch(selectedProfileId, () => {
           <AppInput v-model="setupDraft.model" placeholder="例如：deepseek-v4-pro / gpt-5.5" />
         </AppFormField>
         <AppFormField
-          v-if="setupNeedsEndpoint"
-          label="接口端点"
-          :hint="canManageSelectedCredentials ? '一般填写到 /v1，例如 https://example.com/v1' : '凭据由其他管理员维护'"
+          v-if="setupShowsEndpoint"
+          :label="setupDraft.source === 'claude' ? 'Anthropic 基础地址' : '接口端点'"
+          :hint="setupEndpointHint"
         >
-          <AppInput v-model="setupDraft.endpoint" :disabled="!canManageSelectedCredentials" placeholder="https://你的中转地址/v1" />
+          <AppInput
+            v-model="setupDraft.endpoint"
+            :disabled="!canManageSelectedCredentials"
+            :placeholder="setupDraft.source === 'claude' ? 'https://api.anthropic.com/v1' : 'https://你的中转地址/v1'"
+          />
         </AppFormField>
         <AppFormField label="API Key" :hint="canManageSelectedCredentials ? '' : '凭据由其他管理员维护'">
           <AppInput v-model="setupDraft.apiKey" type="password" :disabled="!canManageSelectedCredentials" placeholder="保存到 ST secrets，留空则沿用已保存 Key" />
@@ -563,13 +586,15 @@ watch(selectedProfileId, () => {
 
         <AppFormField
           v-if="selectedProfile.source === 'custom' || providerConfigs[selectedProfile.source]?.endpointKey === 'reverse_proxy'"
-          label="自定义/反代端点"
-          hint="例如：http://127.0.0.1:11434/v1"
+          :label="selectedProfile.source === 'claude' ? 'Anthropic 基础地址' : '自定义/反代端点'"
+          :hint="selectedProfile.source === 'claude'
+            ? '官方直连留空；兼容中转填写到 /v1，不要包含 /messages。'
+            : '例如：http://127.0.0.1:11434/v1'"
         >
           <AppInput
             :model-value="selectedProfile.endpoint || ''"
             :disabled="selectedProfile.canManageCredentials === false"
-            placeholder="http://127.0.0.1:11434/v1"
+            :placeholder="selectedProfile.source === 'claude' ? 'https://api.anthropic.com/v1' : 'http://127.0.0.1:11434/v1'"
             @update:model-value="(value) => models.updateProfile(selectedProfile!.id, { endpoint: value })"
           />
         </AppFormField>
