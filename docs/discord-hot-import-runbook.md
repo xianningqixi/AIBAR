@@ -1,10 +1,10 @@
 # Discord 热门资源同步与导入 Runbook
 
-本文是 AIBAR Discord 热门资源的可执行操作手册。任何新的 Codex 任务在执行“刷新热门榜”“导入已选”“重试失败项”或“支持帖子自带前端”之前，都应先读完本文和 [`discord-browser-import.md`](./discord-browser-import.md)。
+本文是 AIBAR Discord 热门资源的可执行操作手册，面向任何“浏览器助手”——即能在用户已登录的 Chrome 中执行可见页面操作的 AI 代理（如 Claude Code；历史上也用过 Codex）。助手在执行“刷新热门榜”“导入已选”“重试失败项”或“支持帖子自带前端”之前，都应先读完本文和 [`discord-browser-import.md`](./discord-browser-import.md)。没有助手时，用户也可以按本文流程手动操作：自行整理 manifest 粘贴进面板，再逐项粘贴 CDN 链接或上传本地文件。
 
 ## 快速启动
 
-用户可以在新的 Codex 任务中直接说：
+在 Claude Code 中执行 `/discord-import`，或向任意浏览器助手直接说：
 
 ```text
 按 docs/discord-hot-import-runbook.md 刷新 Discord 热门资源，至少同步 100 项；等待我在页面勾选后，完成所有下载、导入、网页应用分类和失败重试，直到失败数归零或每项都有明确的不可处理原因。
@@ -21,8 +21,8 @@
 - 工作目录：AIBAR 仓库根目录。
 - Discord guild：`1380075940285124724`。
 - Discord forum channel：`1478612237869519021`。
-- AIBAR 页面：`http://127.0.0.1:5173/#/hub?source=discord`。
-- 前端代理目标：`http://127.0.0.1:8001`。
+- AIBAR 页面：本地开发为 `http://127.0.0.1:5173/#/hub?source=discord`；目标是已部署的正式环境时，改用 `https://<服务器地址>/aibar/#/hub?source=discord`。
+- 前端代理目标（仅本地开发）：`http://127.0.0.1:8001`。
 - 默认同步数量：100 项；用户要求更多时按用户数量执行。
 - 角色卡支持：`.png`、`.json`、`.yaml`、`.yml`、`.charx`、`.byaf`。
 - Discord 卡体上限：64 MB。通用 ZIP/RAR、APK、安装器、扩展包和普通图片不属于角色卡。
@@ -30,6 +30,8 @@
 只使用用户已经登录的 Chrome 可见页面。禁止读取或记录 Cookie、token、Authorization header、浏览器密码、localStorage 或其他会话存储；禁止调用 Discord 私有 API 或使用 self-bot。密码只能从帖子可见内容中临时读取并立即用于对应下载，不得写入仓库、聊天、日志或长期变量文件。
 
 ## 1. 启动与预检
+
+目标是已部署的正式环境时，跳过本节第 2、3 步的本地启动，直接打开正式入口并以管理员登录；其余预检相同。
 
 1. 检查主仓库和 `SillyTavern/` 子模块的工作树，保留已有本地改动。
 2. 启动后端：
@@ -58,7 +60,7 @@
    - `web-app`：帖子提供可直接运行的公网 HTTPS 页面。
    - `unsupported`：只有压缩包、客户端、APK、源码、文档、截图或普通图片。
 4. 生成版本 1 manifest。结构、安全约束和字段定义以 [`discord-browser-import.md`](./discord-browser-import.md) 为准。
-5. 在 AIBAR 中点击“粘贴清单”，将 JSON 放入 `discord-manifest-json`，点击 `discord-manifest-apply`。不要通过读取或改写浏览器存储绕过页面。
+5. 使用管理员账号在 AIBAR 中点击“粘贴清单”，将 JSON 放入 `discord-manifest-json`，点击 `discord-manifest-apply`。页面会同时创建或更新服务端导入批次；不要通过读取或改写浏览器存储绕过页面。
 6. 确认列表数量、排序、预览和来源帖链接正确。预览失败只能回退为“无预览/网页应用”，不能让整行崩溃。
 
 ## 3. 等待用户授权
@@ -73,7 +75,7 @@
 - 接收链接：`discord-import-url-<cardId>`
 - 跳过：`discord-skip-<cardId>`
 
-任务应保持运行并观察页面请求。若上一个 Codex 任务已结束，新的任务应重新打开 AIBAR，从可见页面重建待处理列表，不依赖上一个任务的临时 JavaScript 变量。
+助手任务应保持运行并观察页面请求。若上一个助手任务已结束，新的任务应重新打开 AIBAR，从可见页面重建待处理列表，不依赖上一个任务的临时 JavaScript 变量。
 
 ## 4. Discord 下载流程
 
@@ -116,11 +118,11 @@ CDN 返回 `200`、文件名为 `.png` 或图片能显示，都不能证明它�
 有效性由 AIBAR/SillyTavern 导入链路最终确认：
 
 1. 后端代理只允许 Discord CDN、受支持扩展名、最多 3 次重定向、15 秒超时和 64 MB 上限。
-2. 前端计算 SHA-256，并以 `threadId:fileSha256` 去重。
+2. 服务端按原始字节计算 SHA-256，将卡体归档到 `_aibar/imports/discord/sha256/`；前端只消费服务端返回的可信哈希。
 3. SillyTavern 解析角色卡元数据。出现 `PNG metadata does not contain any character data.` 或响应体 `{error:true}` 时必须标记失败，不能当成功。
-4. 成功导入后写入 Discord 来源标记。
+4. 成功导入私人库后写入 Discord 来源标记，并自动发布为社区作品；同一 thread 的新内容形成新版本，全局相同文件关联已有作品。
 5. 如果角色包含有效开场白，自动生成故事卡。
-6. 同一卡体已存在时标记“已导入/已去重”，不重复写文件。
+6. 最终状态为“已入库”或“已去重”，并出现“查看入库作品”入口；社区发布失败时保留私人角色，重试时不得重复解析写入。
 
 完成一项后，等待它的 URL 输入框消失且后续故事生成消息稳定，再处理下一项。否则全局导入锁仍在释放过程中，下一行可能暂时不可填写。
 
@@ -194,6 +196,7 @@ git -C SillyTavern diff --check
 - AIBAR 页面身份和目标 URL 正确。
 - 清单非空，没有框架错误覆盖层。
 - 所有授权项都有逐项结果。
+- 所有成功角色卡都显示“已入库”并能打开对应社区作品。
 - 最终失败数为 0，或每个残留失败都有无法继续的外部原因。
 - 至少一个网页应用通过“确认权限 -> 允许启动 -> iframe 真实内容”全流程。
 - 控制台没有相关应用错误。

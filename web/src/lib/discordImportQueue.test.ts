@@ -112,6 +112,31 @@ describe('Discord import queue', () => {
     expect(queue.importRequest?.cardIds).toEqual([readyId])
   })
 
+  it('keeps the private avatar available when a server publication retry is needed', () => {
+    let queue = createDiscordImportQueue(manifest, new Date(timestamp))
+    queue = updateDiscordImportQueueItem(queue, readyId, { selected: true }, new Date(timestamp))
+    queue = requestDiscordImportBatch(queue, new Date(timestamp))
+    queue = resolveDiscordImportBatchItem(queue, readyId, {
+      status: 'failed',
+      selected: false,
+      error: 'community publication failed',
+      importedAvatar: 'ready-card.png',
+      importedHash: `${readyId}:abc123`,
+    }, new Date(timestamp))
+
+    expect(queue.items.find((item) => item.id === readyId)).toMatchObject({
+      status: 'failed',
+      importedAvatar: 'ready-card.png',
+    })
+    queue = updateDiscordImportQueueItem(queue, readyId, { selected: true }, new Date(timestamp))
+    queue = requestDiscordImportBatch(queue, new Date(timestamp))
+    expect(queue.items.find((item) => item.id === readyId)).toMatchObject({
+      status: 'ready',
+      selected: true,
+      importedAvatar: 'ready-card.png',
+    })
+  })
+
   it('only accepts public HTTPS launch URLs without credentials or custom ports', () => {
     expect(isSafeWebAppLaunchUrl('https://fc-example.com/app')).toBe(true)
     expect(isSafeWebAppLaunchUrl('https://fd-tools.example/app')).toBe(true)

@@ -754,6 +754,7 @@ export function mergeDiscordImportQueue(
         status: 'failed',
         selected: old.selected,
         ...(old.error !== undefined ? { error: old.error } : {}),
+        ...(old.importedAvatar ? { importedAvatar: old.importedAvatar } : {}),
       }
     }
     return {
@@ -806,7 +807,7 @@ export function updateDiscordImportQueueItem(
     status,
     selected: patch.selected ?? current.selected,
     ...(status === 'failed' && error !== undefined ? { error } : {}),
-    ...(status === 'imported' && importedAvatar !== undefined ? { importedAvatar } : {}),
+    ...(importedAvatar !== undefined ? { importedAvatar } : {}),
   }
   const items = [...queue.items]
   items[itemIndex] = nextItem
@@ -853,11 +854,12 @@ export function requestDiscordImportBatch(
   const requestedAt = nowTimestamp(now)
   return {
     ...queue,
-    items: queue.items.map((item) => (
-      requestedIds.has(item.id) && item.status === 'failed'
-        ? { id: item.id, status: 'ready', selected: true }
-        : item
-    )),
+    items: queue.items.map((item) => {
+      if (!requestedIds.has(item.id) || item.status !== 'failed') return item
+      const retryItem = { ...item }
+      delete retryItem.error
+      return { ...retryItem, status: 'ready' as const, selected: true }
+    }),
     importRequest: { requestedAt, cardIds },
     updatedAt: requestedAt,
   }

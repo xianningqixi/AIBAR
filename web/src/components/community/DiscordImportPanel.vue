@@ -1,7 +1,18 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { apiPostBlob } from '@/api/client'
+import { ApiError, apiPostBlob, getApiErrorMessage } from '@/api/client'
 import { fetchCharacter, importCharacter, mergeAttributes } from '@/api/characters'
+import {
+  clearDiscordImportBatch,
+  failDiscordImportItem,
+  getLatestDiscordImportBatch,
+  publishDiscordImportItem,
+  registerDiscordImportBatch,
+  resolveDiscordImportItem,
+  uploadDiscordImportItem,
+  type ServerDiscordImportBatch,
+  type ServerDiscordImportItem,
+} from '@/api/discordImport'
 import { useCharactersStore } from '@/stores/characters'
 import { useSessionStore } from '@/stores/session'
 import { useUiStore } from '@/stores/ui'
@@ -41,6 +52,11 @@ interface ImportAccountContext {
   epoch: number
 }
 
+interface ServerFileContext {
+  itemId: string
+  fileSha256: string
+}
+
 const chars = useCharactersStore()
 const session = useSessionStore()
 const ui = useUiStore()
@@ -52,6 +68,8 @@ const rowMessages = ref<Record<string, string>>({})
 const cardUrlDrafts = ref<Record<string, string>>({})
 const urlFetchingCardId = ref('')
 const failedPreviewIds = ref(new Set<string>())
+const serverBatch = ref<ServerDiscordImportBatch | null>(null)
+const serverSyncing = ref(false)
 
 const allowedCardExtensions = new Set(['png', 'json', 'yaml', 'yml', 'charx', 'byaf'])
 const maxCardFileBytes = 64 * 1024 * 1024
@@ -86,6 +104,64 @@ const storedQueue = loadDiscordImportQueue(accountHandle.value)
 const queue = ref<DiscordImportQueue | null>(storedQueue ? normalizeBrowserItems(storedQueue, true) : null)
 if (queue.value) saveDiscordImportQueue(queue.value, accountHandle.value)
 
+const serverItemByCardId = computed(() => new Map(
+  (serverBatch.value?.items || []).map((item) => [item.cardId, item]),
+))
+
+function mergeServerStatuses(
+  value: DiscordImportQueue,
+  batch: ServerDiscordImportBatch,
+): DiscordImportQueue {
+  let next = value
+  for (const serverItem of batch.items) {
+    if (!next.items.some((item) => item.id === serverItem.cardId)) continue
+    if (serverItem.status === 'published' || serverItem.status === 'duplicate') {
+      next = resolveDiscordImportBatchItem(next, serverItem.cardId, {
+        status: 'imported',
+        ...(serverItem.fileSha256
+          ? { importedHash: `${serverItem.threadId}:${serverItem.fileSha256}` }
+          : {}),
+      })
+    } else if (serverItem.status === 'failed') {
+      next = resolveDiscordImportBatchItem(next, serverItem.cardId, {
+        status: 'failed',
+        error: serverItem.error || '服务端导入失败',
+      })
+    }
+  }
+  return next
+}
+
+function updateServerItem(item: ServerDiscordImportItem) {
+  if (!serverBatch.value) return
+  serverBatch.value = {
+    ...serverBatch.value,
+    items: serverBatch.value.items.map((current) => current.id === item.id ? item : current),
+    updatedAt: item.updatedAt,
+  }
+}
+
+async function hydrateServerBatch() {
+  if (!session.isAdmin || !accountHandle.value) return
+  const context = captureImportContext()
+  serverSyncing.value = true
+  try {
+    const batch = await getLatestDiscordImportBatch()
+    if (!isCurrentImportContext(context)) return
+    const manifest = parseDiscordImportManifest(batch.manifest)
+    serverBatch.value = { ...batch, manifest }
+    const merged = mergeDiscordImportQueue(queue.value, manifest)
+    commitQueue(mergeServerStatuses(merged, serverBatch.value), context)
+  } catch (error) {
+    if (!isCurrentImportContext(context)) return
+    if (!(error instanceof ApiError && error.status === 404)) {
+      ui.addToast(`服务端 Discord 队列加载失败：${getApiErrorMessage(error)}`, 'warning')
+    }
+  } finally {
+    if (isCurrentImportContext(context)) serverSyncing.value = false
+  }
+}
+
 function onQueueStorage(event: StorageEvent) {
   if (event.storageArea !== window.localStorage || event.key !== queueStorageKey.value) return
   const stored = loadDiscordImportQueue(accountHandle.value)
@@ -100,9 +176,14 @@ watch(accountHandle, (handle) => {
   cardUrlDrafts.value = {}
   urlFetchingCardId.value = ''
   failedPreviewIds.value = new Set()
+  serverBatch.value = null
+  void hydrateServerBatch()
 })
 
-onMounted(() => window.addEventListener('storage', onQueueStorage))
+onMounted(() => {
+  window.addEventListener('storage', onQueueStorage)
+  void hydrateServerBatch()
+})
 onBeforeUnmount(() => window.removeEventListener('storage', onQueueStorage))
 
 const rows = computed<DiscordImportRow[]>(() => {
@@ -134,7 +215,9 @@ const hasActiveImport = computed(() => (
 const requestedCardIds = computed(() => new Set(queue.value?.importRequest?.cardIds || []))
 const requestedCount = computed(() => requestedCardIds.value.size)
 const hasPendingBrowserRequest = computed(() => requestedCount.value > 0)
-const controlsLocked = computed(() => hasActiveImport.value || hasPendingBrowserRequest.value)
+const controlsLocked = computed(() => (
+  serverSyncing.value || hasActiveImport.value || hasPendingBrowserRequest.value
+))
 
 function captureImportContext(): ImportAccountContext | null {
   const handle = accountHandle.value
@@ -162,8 +245,17 @@ function commitQueue(next: DiscordImportQueue, context: ImportAccountContext | n
   return true
 }
 
-function clearQueue() {
+async function clearQueue() {
   if (controlsLocked.value) return
+  if (session.isAdmin && serverBatch.value) {
+    try {
+      await clearDiscordImportBatch(serverBatch.value.id)
+      serverBatch.value = null
+    } catch (error) {
+      ui.addToast(`清空服务端队列失败：${getApiErrorMessage(error)}`, 'error')
+      return
+    }
+  }
   if (!clearDiscordImportQueue(accountHandle.value)) {
     ui.addToast('清空本地队列失败', 'error')
     return
@@ -203,7 +295,7 @@ async function onManifestSelected(event: Event) {
   try {
     const text = await file.text()
     if (!isCurrentImportContext(context)) return
-    applyManifest(text)
+    await applyManifest(text)
   } catch (error: any) {
     if (!isCurrentImportContext(context)) return
     manifestError.value = error?.message || '无法读取同步清单'
@@ -213,20 +305,29 @@ async function onManifestSelected(event: Event) {
   }
 }
 
-function applyManifest(input: unknown) {
+async function applyManifest(input: unknown): Promise<boolean> {
   if (controlsLocked.value) {
     manifestError.value = hasPendingBrowserRequest.value
       ? '已有浏览器导入请求，请先取消或等待处理完成'
       : '有角色卡正在导入，请等待当前项目完成'
     ui.addToast(manifestError.value, 'warning')
-    return
+    return false
   }
+  const context = captureImportContext()
   manifestError.value = ''
   try {
     const manifest = parseDiscordImportManifest(input)
-    if (!commitQueue(mergeDiscordImportQueue(queue.value, manifest))) {
+    let next = mergeDiscordImportQueue(queue.value, manifest)
+    if (session.isAdmin) {
+      serverSyncing.value = true
+      const batch = await registerDiscordImportBatch(manifest)
+      if (!isCurrentImportContext(context)) return false
+      serverBatch.value = batch
+      next = mergeServerStatuses(next, batch)
+    }
+    if (!commitQueue(next, context)) {
       manifestError.value = '无法保存 Discord 导入队列'
-      return
+      return false
     }
     failedPreviewIds.value = new Set()
     const currentIds = new Set(manifest.cards.map((card) => card.id))
@@ -234,17 +335,38 @@ function applyManifest(input: unknown) {
       Object.entries(rowMessages.value).filter(([id]) => currentIds.has(id)),
     )
     ui.addToast(`已载入 ${manifest.cards.length} 项 Discord 资源`, 'success')
+    return true
   } catch (error: any) {
+    if (!isCurrentImportContext(context)) return false
     manifestError.value = error?.message || '同步清单格式无效'
     ui.addToast(`清单载入失败：${manifestError.value}`, 'error')
+    return false
+  } finally {
+    if (isCurrentImportContext(context)) serverSyncing.value = false
   }
 }
 
-function applyManifestDraft() {
-  applyManifest(manifestDraft.value)
-  if (manifestError.value) return
+async function applyManifestDraft() {
+  if (!await applyManifest(manifestDraft.value)) return
   manifestDraft.value = ''
   manifestDraftOpen.value = false
+}
+
+async function ensureServerItem(cardId: string): Promise<ServerDiscordImportItem | null> {
+  if (!session.isAdmin) return null
+  let item = serverItemByCardId.value.get(cardId)
+  if (item) return item
+  if (!queue.value) throw new Error('Discord 导入清单尚未载入')
+  serverSyncing.value = true
+  try {
+    const batch = await registerDiscordImportBatch(queue.value.manifest)
+    serverBatch.value = batch
+    item = batch.items.find((candidate) => candidate.cardId === cardId)
+    if (!item) throw new Error('服务端没有创建对应的 Discord 导入项目')
+    return item
+  } finally {
+    serverSyncing.value = false
+  }
 }
 
 function canSelect(row: DiscordImportRow): boolean {
@@ -277,9 +399,17 @@ function cancelSelectedImport() {
   ui.addToast('已取消浏览器导入请求', 'info')
 }
 
-function failRequestedImport(row: DiscordImportRow) {
+async function failRequestedImport(row: DiscordImportRow) {
   if (!queue.value || hasActiveImport.value || !isRequested(row)) return
   const message = '浏览器未获取到受支持的角色卡文件，已跳过此项'
+  const serverItem = serverItemByCardId.value.get(row.card.id)
+  if (session.isAdmin && serverItem) {
+    try {
+      updateServerItem(await failDiscordImportItem(serverItem.id, message))
+    } catch (error) {
+      ui.addToast(`服务端状态更新失败：${getApiErrorMessage(error)}`, 'warning')
+    }
+  }
   commitQueue(resolveDiscordImportBatchItem(queue.value, row.card.id, {
     status: 'failed',
     selected: false,
@@ -366,6 +496,7 @@ async function importCardFile(
   card: DiscordImportCard,
   file: File,
   context: ImportAccountContext | null = captureImportContext(),
+  serverFile: ServerFileContext | null = null,
 ) {
   if (!queue.value || !isCurrentImportContext(context)) return
   const extension = cardFileExtension(file)
@@ -388,21 +519,53 @@ async function importCardFile(
   setRowMessage(card.id, '正在校验并导入卡体…')
 
   let roleImported = false
+  let avatar = ''
+  let importedHash = ''
+  let communityComplete = !session.isAdmin
   try {
-    const fileSha256 = await sha256(file)
+    const fileSha256 = serverFile?.fileSha256 || await sha256(file)
+    if (session.isAdmin && (!serverFile?.itemId || !serverFile.fileSha256)) {
+      throw new Error('服务端没有返回角色卡指纹，已停止导入')
+    }
     if (!isCurrentImportContext(context)) return
-    const importedHash = `${card.threadId}:${fileSha256}`
+    importedHash = `${card.threadId}:${fileSha256}`
     if (!chars.characters.length) await chars.load()
     if (!isCurrentImportContext(context)) return
-    const existingAvatar = findImportedAvatar(card.threadId, fileSha256)
-    if (queue.value.importedHashes.includes(importedHash) || existingAvatar) {
+    const queueItem = queue.value.items.find((item) => item.id === card.id)
+    const existingAvatar = queueItem?.importedAvatar || findImportedAvatar(card.threadId, fileSha256)
+    const privateDuplicate = Boolean(existingAvatar)
+      || (!session.isAdmin && queue.value.importedHashes.includes(importedHash))
+    if (privateDuplicate) {
+      let publishNote = ''
+      if (serverFile?.itemId && existingAvatar) {
+        try {
+          const published = await publishDiscordImportItem(serverFile.itemId, existingAvatar)
+          updateServerItem(published.item)
+          communityComplete = true
+          publishNote = published.item.status === 'duplicate'
+            ? '；社区已有相同卡体，已关联现有作品'
+            : '；已发布到社区'
+        } catch (error) {
+          const message = `私人库已有该卡，但社区发布失败：${getApiErrorMessage(error)}`
+          commitQueue(resolveDiscordImportBatchItem(queue.value, card.id, {
+            status: 'failed',
+            selected: false,
+            ...(existingAvatar ? { importedAvatar: existingAvatar } : {}),
+            importedHash,
+            error: message,
+          }), context)
+          setRowMessage(card.id, message)
+          ui.addToast(message, 'warning', 5000)
+          return
+        }
+      }
       commitQueue(resolveDiscordImportBatchItem(queue.value, card.id, {
         status: 'imported',
         selected: false,
         ...(existingAvatar ? { importedAvatar: existingAvatar } : {}),
         importedHash,
       }), context)
-      const message = '该帖子中的同一卡体已经导入，已跳过重复写入'
+      const message = `该帖子中的同一卡体已经导入，已跳过重复写入${publishNote}`
       setRowMessage(card.id, message)
       ui.addToast(message, 'info')
       return
@@ -411,16 +574,10 @@ async function importCardFile(
     if (!isCurrentImportContext(context)) return
     const imported = await importCharacter(file)
     if (!isCurrentImportContext(context)) return
-    const avatar = imported.file_name ? `${imported.file_name}.png` : ''
+    avatar = imported.file_name ? `${imported.file_name}.png` : ''
     if (!avatar) throw new Error('后端没有返回已导入角色文件名')
 
     const importedAt = new Date().toISOString()
-    commitQueue(resolveDiscordImportBatchItem(queue.value, card.id, {
-      status: 'imported',
-      selected: false,
-      importedAvatar: avatar,
-      importedHash,
-    }), context)
     roleImported = true
 
     const issues: string[] = []
@@ -450,6 +607,22 @@ async function importCardFile(
     }
     if (!isCurrentImportContext(context)) return
 
+    let communityNote = ''
+    if (serverFile?.itemId) {
+      try {
+        const published = await publishDiscordImportItem(serverFile.itemId, avatar)
+        if (!isCurrentImportContext(context)) return
+        updateServerItem(published.item)
+        communityComplete = true
+        communityNote = published.item.status === 'duplicate'
+          ? '；社区已有相同卡体，已关联现有作品'
+          : '；已发布到社区'
+      } catch (error) {
+        if (!isCurrentImportContext(context)) return
+        issues.push(`社区发布失败：${getApiErrorMessage(error)}`)
+      }
+    }
+
     let storyCreated = false
     let hasGreeting = false
     try {
@@ -470,12 +643,32 @@ async function importCardFile(
     }
     if (!isCurrentImportContext(context)) return
 
+    if (!communityComplete) {
+      const message = `角色卡已导入私人库，但${issues.find((issue) => issue.startsWith('社区发布失败')) || '社区发布未完成'}`
+      commitQueue(resolveDiscordImportBatchItem(queue.value, card.id, {
+        status: 'failed',
+        selected: false,
+        importedAvatar: avatar,
+        importedHash,
+        error: message,
+      }), context)
+      setRowMessage(card.id, message)
+      ui.addToast(message, 'warning', 5000)
+      return
+    }
+
+    commitQueue(resolveDiscordImportBatchItem(queue.value, card.id, {
+      status: 'imported',
+      selected: false,
+      importedAvatar: avatar,
+      importedHash,
+    }), context)
     const baseMessage = storyCreated
       ? '角色卡已导入，并生成了故事卡'
       : hasGreeting
         ? '角色卡已导入，但故事卡生成失败'
         : '角色卡已导入；没有开场白，未生成故事卡'
-    const message = issues.length ? `${baseMessage}；${issues.join('；')}` : baseMessage
+    const message = `${baseMessage}${communityNote}${issues.length ? `；${issues.join('；')}` : ''}`
     setRowMessage(card.id, message)
     ui.addToast(message, issues.length ? 'warning' : 'success', issues.length ? 5000 : 3000)
   } catch (error: any) {
@@ -485,6 +678,14 @@ async function importCardFile(
       commitQueue(resolveDiscordImportBatchItem(queue.value, card.id, {
         status: 'failed',
         error: message,
+      }), context)
+    } else if (roleImported && queue.value) {
+      commitQueue(resolveDiscordImportBatchItem(queue.value, card.id, {
+        status: communityComplete ? 'imported' : 'failed',
+        selected: false,
+        ...(avatar ? { importedAvatar: avatar } : {}),
+        ...(importedHash ? { importedHash } : {}),
+        ...(!communityComplete ? { error: message } : {}),
       }), context)
     }
     setRowMessage(card.id, roleImported ? `角色卡已导入；后续处理失败：${message}` : message)
@@ -519,14 +720,36 @@ async function importCardUrl(row: DiscordImportRow) {
   urlFetchingCardId.value = row.card.id
   setRowMessage(row.card.id, '正在从 Discord 获取卡体…')
   try {
-    const blob = await apiPostBlob('/api/aibar/discord-import/fetch', { url: sourceUrl })
+    const serverItem = await ensureServerItem(row.card.id)
+    const resolved = serverItem
+      ? await resolveDiscordImportItem(serverItem.id, sourceUrl)
+      : {
+          blob: await apiPostBlob('/api/aibar/discord-import/fetch', { url: sourceUrl }),
+          itemId: '',
+          fileName,
+          fileSha256: '',
+        }
     if (!isCurrentImportContext(context)) return
-    if (blob.size === 0) throw new Error('Discord 返回的角色卡文件为空')
-    if (blob.size > maxCardFileBytes) throw new Error('角色卡文件不能超过 64 MB')
+    if (resolved.blob.size === 0) throw new Error('Discord 返回的角色卡文件为空')
+    if (resolved.blob.size > maxCardFileBytes) throw new Error('角色卡文件不能超过 64 MB')
+    const resolvedName = resolved.fileName || fileName
+    if (serverItem) {
+      const latestItem = {
+        ...serverItem,
+        status: 'validated' as const,
+        fileName: resolvedName,
+        fileSha256: resolved.fileSha256,
+        error: '',
+      }
+      updateServerItem(latestItem)
+    }
 
-    await importCardFile(row.card, new File([blob], fileName, {
-      type: blob.type || 'application/octet-stream',
-    }), context)
+    await importCardFile(row.card, new File([resolved.blob], resolvedName, {
+      type: resolved.blob.type || 'application/octet-stream',
+    }), context, resolved.itemId ? {
+      itemId: resolved.itemId,
+      fileSha256: resolved.fileSha256,
+    } : null)
   } catch (error: any) {
     if (!isCurrentImportContext(context)) return
     const message = error?.message || '无法从 Discord 获取角色卡文件'
@@ -548,7 +771,25 @@ async function onCardFileSelected(card: DiscordImportCard, event: Event) {
   const file = input.files?.[0]
   input.value = ''
   if (hasActiveImport.value || !file || !queue.value?.importRequest?.cardIds.includes(card.id)) return
-  await importCardFile(card, file, captureImportContext())
+  const context = captureImportContext()
+  try {
+    const serverItem = await ensureServerItem(card.id)
+    const uploaded = serverItem ? await uploadDiscordImportItem(serverItem.id, file) : null
+    if (uploaded) updateServerItem(uploaded)
+    await importCardFile(card, file, context, uploaded ? {
+      itemId: uploaded.id,
+      fileSha256: uploaded.fileSha256,
+    } : null)
+  } catch (error) {
+    if (!isCurrentImportContext(context) || !queue.value) return
+    const message = getApiErrorMessage(error, '角色卡上传失败')
+    commitQueue(resolveDiscordImportBatchItem(queue.value, card.id, {
+      status: 'failed',
+      error: message,
+    }), context)
+    setRowMessage(card.id, message)
+    ui.addToast(message, 'error')
+  }
 }
 
 function formatTimestamp(value?: string): string {
@@ -592,7 +833,11 @@ function statusLabel(status: DiscordImportQueueItemStatus): string {
 }
 
 function rowStatusLabel(row: DiscordImportRow): string {
-  return isDiscordWebAppCard(row.card) ? '可启动' : statusLabel(row.item.status)
+  if (isDiscordWebAppCard(row.card)) return '可启动'
+  const serverStatus = serverItemByCardId.value.get(row.card.id)?.status
+  return serverStatus === 'published' || serverStatus === 'duplicate'
+    ? '已入库'
+    : statusLabel(row.item.status)
 }
 
 function statusClass(status: DiscordImportQueueItemStatus): string {
@@ -636,6 +881,7 @@ function statusClass(status: DiscordImportQueueItemStatus): string {
       <div class="flex w-full flex-col gap-2 sm:w-auto sm:items-end">
         <div class="flex flex-wrap items-center gap-2">
           <span v-if="selectedCount" class="text-xs text-ink-muted">已选 {{ selectedCount }}</span>
+          <span v-if="serverSyncing" class="text-xs text-ink-muted">服务端同步中</span>
           <span v-if="hasPendingBrowserRequest" data-testid="discord-import-request-state" class="text-xs font-medium text-amber-700">
             等待浏览器自动导入 {{ requestedCount }} 项
           </span>
@@ -706,8 +952,8 @@ function statusClass(status: DiscordImportQueueItemStatus): string {
         <li class="flex min-w-0 items-start gap-2">
           <span class="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-surface text-xs font-semibold text-emerald-700">3</span>
           <span class="min-w-0 pt-1">
-            <span class="font-medium">保持当前 Codex 任务运行</span>
-            <span class="mt-1 block text-ink-muted">任务已结束时，回到 Codex 说“导入刚刚勾选的项目”。</span>
+            <span class="font-medium">保持浏览器助手任务运行</span>
+            <span class="mt-1 block text-ink-muted">助手任务已结束时，回到助手（如 Claude Code）说“导入刚刚勾选的项目”；也可手动在下方逐项粘贴链接或上传文件。</span>
           </span>
         </li>
       </ol>
@@ -896,6 +1142,14 @@ function statusClass(status: DiscordImportQueueItemStatus): string {
             @click="$router.push(`/character/${encodeURIComponent(row.item.importedAvatar || '')}`)"
           >查看角色</AppButton>
           <span v-else-if="row.card.resource.availability === 'unsupported'" class="text-center text-xs text-ink-muted sm:text-right">不可导入</span>
+          <AppButton
+            v-if="serverItemByCardId.get(row.card.id)?.workId"
+            :data-testid="`discord-open-work-${row.card.id}`"
+            size="sm"
+            variant="secondary"
+            class="w-full sm:w-auto"
+            @click="$router.push(`/work/${encodeURIComponent(serverItemByCardId.get(row.card.id)?.workId || '')}`)"
+          >查看入库作品</AppButton>
         </div>
       </article>
     </div>

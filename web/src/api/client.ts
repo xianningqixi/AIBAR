@@ -150,6 +150,10 @@ export async function apiPostBlob(url: string, body: unknown = {}): Promise<Blob
   return (await postJson(url, body)).blob()
 }
 
+export async function apiPostBlobResponse(url: string, body: unknown = {}): Promise<Response> {
+  return postJson(url, body)
+}
+
 export async function apiPostForm<T = unknown>(url: string, formData: FormData): Promise<T> {
   const r = await doFetch(url, {
     method: 'POST',
