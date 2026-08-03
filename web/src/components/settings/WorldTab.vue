@@ -14,7 +14,7 @@ import {
   importWorldInfo,
   listWorldInfo,
   saveWorldInfo,
-} from '@/api/worldinfo'
+} from '@/api/worldInfo'
 import { getApiErrorMessage } from '@/api/client'
 import WorldInfoEditor from '@/components/world/WorldInfoEditor.vue'
 import { worlds } from './shared'

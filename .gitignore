@@ -5,3 +5,5 @@ dist/
 *.tsbuildinfo
 *.log
 .pid
+.claude/settings.json
+.claude/settings.local.json

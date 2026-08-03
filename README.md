@@ -2,7 +2,7 @@
 
 AIBAR 是一个基于 **SillyTavern 多用户后端**的 Vue 3 + TypeScript 单页应用，提供 character.ai / aifuck.cc 风格的「浏览公共作品 -> 复制到私库 -> 进入私人聊天」体验。账号、角色、故事和聊天由 SillyTavern 隔离，共享作品、版本、收藏、评分、评论和邀请码审核由 AIBAR 的后端扩展提供。
 
-> 设计初衷：原生 SillyTavern 前端过重（主 `script.js` 一万两千行，前端源码约 8.7MB），早期的单文件简版 UI（`simple-ui.js`，4485 行 vanilla JS）又难以维护。AIBAR 用现代化的 Vue 3 组件架构重写这层 UI，只保留日常聊天与角色/故事管理的核心工作流。完整背景与设计取舍见 [`PLAN.md`](./PLAN.md)（中文）。
+> 设计初衷：原生 SillyTavern 前端过重（主 `script.js` 一万两千行，前端源码约 8.7MB），早期的单文件简版 UI（`simple-ui.js`，4485 行 vanilla JS）又难以维护。AIBAR 用现代化的 Vue 3 组件架构重写这层 UI，只保留日常聊天与角色/故事管理的核心工作流。完整背景与设计取舍见 [`docs/PLAN.md`](./docs/PLAN.md)（中文）。
 
 ## 仓库结构
 
@@ -11,11 +11,11 @@ AIBAR 是一个基于 **SillyTavern 多用户后端**的 Vue 3 + TypeScript 单�
 | 目录 | 说明 |
 |---|---|
 | `web/` | **AIBAR** 本体——独立的 Vue 3 SPA。日常开发几乎都在这里。 |
-| `SillyTavern/` | git **submodule**（fork `xianningqixi/SillyTavern`，分支 `codex/aibar-local-deploy`），提供后端 HTTP API。 |
+| `SillyTavern/` | git **submodule**（fork `xianningqixi/SillyTavern`，分支 `main`），提供后端 HTTP API。 |
 | `telegram-bot/` | 可选 companion；使用专用 AIBAR 账号把 Telegram 私聊接入共享模型和同一套 JSONL 聊天。 |
-| `docs/` | Discord 浏览器协作导入等跨组件契约。 |
-| `PLAN.md` | 原始实施/对照计划（中文），解释「为什么这样做」以及与旧 `simple-ui.js` 基线的差异。 |
-| `CLAUDE.md` | 给 Claude Code 的工作指引。 |
+| `docs/` | 跨组件契约、部署方案和历史资料，索引见 [`docs/README.md`](./docs/README.md)。 |
+| `CONTRIBUTING.md` | 团队协作规范：分支/PR、子模块两步提交、质量门禁、代码约定。 |
+| `AGENTS.md` | AI 编码代理（Claude Code、Codex 等）的统一工作指引；`CLAUDE.md` 只是它的引用。 |
 
 AIBAR 的私人数据沿用 SillyTavern 用户目录，共享社区数据使用 SQLite WAL（详见 [持久化模型](#持久化模型)）。
 
@@ -30,9 +30,15 @@ AIBAR 的私人数据沿用 SillyTavern 用户目录，共享社区数据使用 
 - **@vueuse/core**
 - **SQLite WAL（better-sqlite3）** — 共享作品、互动和邀请码审核
 
+## 参与开发
+
+分支与 PR 约定、SillyTavern 子模块的两步提交、CI 质量门禁和代码命名约定统一见 [`CONTRIBUTING.md`](./CONTRIBUTING.md)。
+
 ## 快速开始
 
 需要 **Node >= 20**。
+
+生产服务器的目录、systemd、HTTPS、备份和回滚方案见 [`docs/server-deployment-plan.md`](./docs/server-deployment-plan.md)。
 
 ### 1. 拉取代码（含 submodule）
 
@@ -126,14 +132,15 @@ src/
 │   ├── community.ts     # 社区作品发布、互动与启动
 │   ├── stories.ts       # 故事卡模板（自定义 /api/aibar 端点）
 │   ├── imageGen.ts      # 图像生成
+│   ├── discordImport.ts # Discord 导入批次管理（管理员）
 │   ├── telegramBot.ts   # Telegram companion 管理接口
 │   ├── tts.ts           # 文本转语音
-│   └── worldinfo.ts     # 世界书 CRUD
+│   └── worldInfo.ts     # 世界书 CRUD
 ├── stores/     # 每个领域一个 Pinia store
 │   # chat / characters / modelProfiles / presets / personas /
-│   # mods / imageGen / tts / session / ui
-├── pages/      # 路由懒加载的页面组件
-├── components/ # browse / chat / image / mods / world / ui
+│   # mods / imageGen / tts / session / billing / ui
+├── pages/      # 路由懒加载的页面组件（PascalCase，*Page.vue）
+├── components/ # chat / community / image / layout / mods / settings / ui / world
 ├── composables/
 ├── lib/        # 纯逻辑：buildPayload / providers / worldInfoMatch / storyStart 等
 ├── router/
@@ -177,7 +184,7 @@ AIBAR 状态分散在四处：
 1. **账号级应用设置**（预设、身份、MOD、图像和 TTS 等）：存在该账号 SillyTavern settings JSON 的 `aibar` key 下，经 `/api/settings/get|save`（`api/settings.ts`，`loadAibarSettings` / `saveAibarSettings`）。共享模型不存放在这里。
 2. **聊天**：以 SillyTavern 的 JSONL 聊天文件持久化。当前选中的模型 profile、预设、世界书、MOD 会写进该聊天 JSONL 的 **metadata**，刷新浏览器后不丢。
 3. **故事卡 & 生成的图像**：由 **ST fork 新增的自定义端点** 提供——`SillyTavern/src/endpoints/aibar.js`（挂载于 `/api/aibar`，见 `src/server-startup.js`）。故事存于用户目录 `aibar/stories`，图像存于 `aibar/images`。
-4. **共享社区数据**：`SillyTavern/src/aibar-community-db.js` 在 `DATA_ROOT/_aibar/community.sqlite` 创建 SQLite WAL 数据库，保存作品、不可变版本、标签、收藏、评分、评论、启动事件、邀请码和注册申请。作品快照资源位于同级 `works/` 目录。
+4. **共享社区数据**：`SillyTavern/src/aibar-community-db.js` 在 `DATA_ROOT/_aibar/community.sqlite` 创建 SQLite WAL 数据库，保存作品、不可变版本、标签、收藏、评分、评论、启动事件、邀请码、注册申请和 Discord 导入批次。作品快照资源位于同级 `works/` 目录，Discord 原始卡体按 SHA-256 归档到 `_aibar/imports/discord/sha256/`。
 
 公共作品不直接引用作者私库。发布时会复制角色卡、故事和依赖资源形成不可变版本；开始聊天时再把指定公共版本复制到当前账号的角色/故事目录，并创建该账号自己的 JSONL 会话。私人模型 Profile 不随作品复制。
 

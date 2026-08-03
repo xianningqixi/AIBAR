@@ -1,5 +1,5 @@
 import type { Character, ChatMessage, WorldInfoEntry, WorldInfoFile } from '@/api/types'
-import { getWorldInfo } from '@/api/worldinfo'
+import { getWorldInfo } from '@/api/worldInfo'
 
 const cache = new Map<string, WorldInfoFile>()
 let cacheGeneration = 0

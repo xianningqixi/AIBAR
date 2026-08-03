@@ -2,7 +2,7 @@
 import { computed, onMounted, reactive, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { createCharacter, editCharacter, editCharacterAvatar, fetchCharacter } from '@/api/characters'
-import { listWorldInfo } from '@/api/worldinfo'
+import { listWorldInfo } from '@/api/worldInfo'
 import { useCharactersStore } from '@/stores/characters'
 import { useUiStore } from '@/stores/ui'
 import { useModelProfilesStore } from '@/stores/modelProfiles'
