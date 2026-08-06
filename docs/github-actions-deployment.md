@@ -60,4 +60,10 @@ readlink -f /opt/aibar/current
 curl --fail --silent --show-error https://aibar.peakstar88.store/aibar/ >/dev/null
 ```
 
+社区列表使用独立的 384x512 WebP 预览图，发布新角色或故事版本时会自动生成。历史版本会在首次访问封面时自动补生成；也可以在部署后主动预热全部版本：
+
+```bash
+sudo -u aibar npm --prefix /opt/aibar/current run backfill:aibar-previews -- --data-root /opt/aibar/data
+```
+
 Actions 运行日志记录 release ID、部署阶段和回滚结果，但不得打印私钥、密码、Cookie 或生产配置内容。

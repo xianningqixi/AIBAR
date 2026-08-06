@@ -266,8 +266,8 @@ onBeforeUnmount(() => {
             <template #actions><AppButton @click="router.push('/publish')">发布作品</AppButton></template>
           </AppEmpty>
           <section v-else :class="noImage ? 'grid gap-4 sm:grid-cols-2 lg:grid-cols-3' : 'grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5'">
-            <button v-for="work in works" :key="work.id" class="h-full min-w-0 text-left" @click="router.push(`/work/${encodeURIComponent(work.id)}`)">
-              <WorkCard :work="work" :no-image="noImage" />
+            <button v-for="(work, index) in works" :key="work.id" class="h-full min-w-0 text-left" @click="router.push(`/work/${encodeURIComponent(work.id)}`)">
+              <WorkCard :work="work" :no-image="noImage" :eager="index < 5" />
             </button>
           </section>
           <div v-if="hasMore" class="flex justify-center">
