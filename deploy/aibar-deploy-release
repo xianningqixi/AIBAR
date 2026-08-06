@@ -1,0 +1,244 @@
+#!/usr/bin/env bash
+
+set -Eeuo pipefail
+umask 027
+
+PATH='/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin'
+
+readonly APP_ROOT='/opt/aibar'
+readonly RELEASES_DIR="$APP_ROOT/releases"
+readonly CURRENT_LINK="$APP_ROOT/current"
+readonly SHARED_CONFIG="$APP_ROOT/shared/config.yaml"
+readonly DATA_DIR="$APP_ROOT/data"
+readonly BACKUPS_DIR="$APP_ROOT/backups"
+readonly INCOMING_DIR='/var/lib/aibar-deploy/incoming'
+readonly STAGING_DIR='/var/lib/aibar-deploy/staging'
+readonly LOCK_FILE='/run/lock/aibar-deploy.lock'
+readonly SERVICE='aibar.service'
+readonly MAX_ARCHIVE_BYTES=$((512 * 1024 * 1024))
+
+release_id=''
+expected_sha=''
+incoming_archive=''
+working_archive=''
+release_stage=''
+release_path=''
+previous_release=''
+backup_dir=''
+service_stopped=0
+switched=0
+success=0
+
+log() {
+  printf '[aibar-deploy] %s\n' "$*"
+}
+
+fail() {
+  printf '[aibar-deploy] ERROR: %s\n' "$*" >&2
+  exit 1
+}
+
+database_is_valid() {
+  local database_path="$1"
+  local result
+
+  [[ ! -e "$database_path" ]] && return 0
+  [[ -f "$database_path" && ! -L "$database_path" ]] || return 1
+  result="$(sqlite3 -readonly "$database_path" 'PRAGMA integrity_check;' 2>&1)" || return 1
+  [[ "$result" == 'ok' ]]
+}
+
+wait_for_health() {
+  local attempt
+
+  for attempt in $(seq 1 30); do
+    if systemctl is-active --quiet "$SERVICE" \
+      && curl --fail --silent --show-error http://127.0.0.1:8001/csrf-token >/dev/null \
+      && curl --fail --silent --show-error http://127.0.0.1:8001/aibar/ >/dev/null; then
+      return 0
+    fi
+    sleep 2
+  done
+
+  journalctl -u "$SERVICE" -n 80 --no-pager >&2 || true
+  return 1
+}
+
+switch_release() {
+  local target="$1"
+  local next_link="$APP_ROOT/.current-${release_id}.next"
+
+  [[ -d "$target" && ! -L "$target" ]] || return 1
+  [[ "$target" == "$RELEASES_DIR/"* ]] || return 1
+  ln -s "$target" "$next_link"
+  mv -Tf "$next_link" "$CURRENT_LINK"
+}
+
+restore_data_backup() {
+  local rollback_stage="$APP_ROOT/.data-rollback-${release_id}"
+  local failed_data="$backup_dir/failed-data-after-${release_id}"
+
+  [[ -f "$backup_dir/data.tar.gz" ]] || return 1
+  [[ ! -e "$rollback_stage" && ! -e "$failed_data" ]] || return 1
+
+  install -d -o root -g root -m 0700 "$rollback_stage"
+  if ! tar -xzf "$backup_dir/data.tar.gz" -C "$rollback_stage"; then
+    rm -rf -- "$rollback_stage"
+    return 1
+  fi
+  [[ -d "$rollback_stage/data" && ! -L "$rollback_stage/data" ]] || return 1
+  database_is_valid "$rollback_stage/data/_aibar/community.sqlite" || return 1
+
+  mv "$DATA_DIR" "$failed_data"
+  if mv "$rollback_stage/data" "$DATA_DIR"; then
+    rmdir "$rollback_stage"
+    return 0
+  fi
+
+  mv "$failed_data" "$DATA_DIR" || true
+  return 1
+}
+
+rollback_deployment() {
+  local rollback_ok=1
+
+  log "Deployment failed; restoring the previous release."
+  systemctl stop "$SERVICE" || rollback_ok=0
+
+  if ! restore_data_backup; then
+    log 'Data restore failed; leaving the service stopped for manual recovery.'
+    rollback_ok=0
+  fi
+
+  if ! switch_release "$previous_release"; then
+    log 'Release symlink restore failed; leaving the service stopped.'
+    rollback_ok=0
+  fi
+
+  if (( rollback_ok )); then
+    systemctl start "$SERVICE" || rollback_ok=0
+    if (( rollback_ok )) && wait_for_health; then
+      log "Rollback completed: $previous_release"
+    else
+      log 'Rollback health check failed; inspect the service before retrying.'
+      rollback_ok=0
+    fi
+  fi
+
+  (( rollback_ok ))
+}
+
+on_exit() {
+  local exit_code="$1"
+
+  trap - EXIT
+  if (( ! success )); then
+    if (( switched )); then
+      rollback_deployment || true
+    elif (( service_stopped )); then
+      systemctl start "$SERVICE" || true
+    fi
+  fi
+
+  if [[ -n "$release_stage" && -d "$release_stage" ]]; then
+    rm -rf -- "$release_stage"
+  fi
+  if [[ -n "$working_archive" && -f "$working_archive" ]]; then
+    rm -f -- "$working_archive"
+  fi
+
+  exit "$exit_code"
+}
+
+trap 'on_exit $?' EXIT
+trap 'exit 130' INT TERM
+
+[[ "$(id -u)" -eq 0 ]] || fail 'This script must run as root.'
+[[ $# -eq 2 ]] || fail 'Usage: aibar-deploy-release <release-id> <sha256>'
+
+release_id="$1"
+expected_sha="$2"
+[[ "$release_id" =~ ^[0-9]{8}T[0-9]{6}Z-[0-9a-f]{7,40}$ ]] || fail 'Invalid release id.'
+[[ "$expected_sha" =~ ^[0-9a-f]{64}$ ]] || fail 'Invalid SHA-256.'
+
+exec 9>"$LOCK_FILE"
+flock -n 9 || fail 'Another production deployment is already running.'
+
+incoming_archive="$INCOMING_DIR/$release_id.tar.gz"
+working_archive="$STAGING_DIR/$release_id.tar.gz"
+release_stage="$RELEASES_DIR/.${release_id}.staging"
+release_path="$RELEASES_DIR/$release_id"
+
+[[ -f "$incoming_archive" && ! -L "$incoming_archive" ]] || fail 'Release archive is missing or not a regular file.'
+[[ "$(stat -c '%U' "$incoming_archive")" == 'aibar-deploy' ]] || fail 'Release archive has an unexpected owner.'
+[[ "$(stat -c '%s' "$incoming_archive")" -le "$MAX_ARCHIVE_BYTES" ]] || fail 'Release archive exceeds the size limit.'
+[[ ! -e "$working_archive" && ! -e "$release_stage" && ! -e "$release_path" ]] || fail 'Release id already exists.'
+
+previous_release="$(readlink -f "$CURRENT_LINK")"
+[[ -n "$previous_release" && -d "$previous_release" && ! -L "$previous_release" ]] || fail 'Current release is not valid.'
+[[ "$previous_release" == "$RELEASES_DIR/"* ]] || fail 'Current release is outside the release directory.'
+systemctl is-active --quiet "$SERVICE" || fail 'AIBAR is not healthy enough to deploy: service is inactive.'
+[[ -f "$SHARED_CONFIG" && ! -L "$SHARED_CONFIG" ]] || fail 'Shared production config is missing or is a symlink.'
+[[ -d "$DATA_DIR" && ! -L "$DATA_DIR" ]] || fail 'Shared data directory is missing or is a symlink.'
+
+log "Validating release $release_id"
+install -d -o root -g aibar -m 0750 "$STAGING_DIR"
+cp --reflink=auto -- "$incoming_archive" "$working_archive"
+chown root:aibar "$working_archive"
+chmod 0440 "$working_archive"
+[[ "$(sha256sum "$working_archive" | cut -d ' ' -f 1)" == "$expected_sha" ]] || fail 'Release checksum mismatch.'
+
+if ! tar -tzf "$working_archive" | awk '
+  /^\// { bad = 1 }
+  /(^|\/)\.\.($|\/)/ { bad = 1 }
+  END { exit bad }
+'; then
+  fail 'Release archive contains an unsafe path.'
+fi
+
+install -d -o aibar -g aibar -m 0750 "$release_stage"
+runuser -u aibar -- tar -xzf "$working_archive" -C "$release_stage" --no-same-owner --no-same-permissions
+
+[[ -z "$(find "$release_stage" -type l -print -quit)" ]] || fail 'Release archive must not contain symlinks.'
+[[ -f "$release_stage/server.js" && ! -L "$release_stage/server.js" ]] || fail 'Release is missing server.js.'
+[[ -f "$release_stage/package.json" && ! -L "$release_stage/package.json" ]] || fail 'Release is missing package.json.'
+[[ -f "$release_stage/package-lock.json" && ! -L "$release_stage/package-lock.json" ]] || fail 'Release is missing package-lock.json.'
+[[ -f "$release_stage/public/aibar/index.html" && ! -L "$release_stage/public/aibar/index.html" ]] || fail 'Release is missing the AIBAR frontend.'
+[[ ! -e "$release_stage/config.yaml" && ! -L "$release_stage/config.yaml" ]] || fail 'Release archive must not contain config.yaml.'
+
+log 'Installing locked production dependencies.'
+runuser -u aibar -- env HOME="$APP_ROOT" npm ci \
+  --omit=dev \
+  --ignore-scripts=false \
+  --prefix "$release_stage"
+runuser -u aibar -- env RELEASE_PATH="$release_stage" node --input-type=module -e \
+  "const { default: Database } = await import(process.env.RELEASE_PATH + '/node_modules/better-sqlite3/lib/index.js'); const db = new Database(':memory:'); db.close();"
+ln -s ../../shared/config.yaml "$release_stage/config.yaml"
+
+backup_dir="$BACKUPS_DIR/${release_id}-predeploy"
+[[ ! -e "$backup_dir" ]] || fail 'Backup directory already exists.'
+install -d -o root -g root -m 0700 "$backup_dir"
+printf '%s\n' "$previous_release" > "$backup_dir/previous-release"
+cp --preserve=mode,ownership,timestamps "$SHARED_CONFIG" "$backup_dir/config.yaml"
+
+log 'Stopping AIBAR for a consistent data backup.'
+systemctl stop "$SERVICE"
+service_stopped=1
+database_is_valid "$DATA_DIR/_aibar/community.sqlite" || fail 'The community database failed its pre-deploy integrity check.'
+tar -czf "$backup_dir/data.tar.gz" -C "$APP_ROOT" data
+tar -tzf "$backup_dir/data.tar.gz" >/dev/null
+sha256sum "$backup_dir/data.tar.gz" > "$backup_dir/data.tar.gz.sha256"
+
+mv "$release_stage" "$release_path"
+switched=1
+switch_release "$release_path"
+
+log "Starting release $release_id"
+systemctl start "$SERVICE"
+service_stopped=0
+wait_for_health || fail 'Production health checks failed.'
+
+printf '%s\n' "$expected_sha" > "$release_path/.archive-sha256"
+success=1
+rm -f -- "$incoming_archive" || log 'Warning: the uploaded archive could not be removed.'
+log "Deployment completed: $release_path"
