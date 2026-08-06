@@ -77,7 +77,7 @@ async function submit() {
 
         <div class="mt-6 border-t border-border-subtle pt-5 text-sm text-ink-muted">
           还没有账号？
-          <button class="font-medium text-brand-300 hover:text-brand-200" @click="router.push('/register')">使用邀请码申请</button>
+          <button class="font-medium text-brand-300 hover:text-brand-200" @click="router.push('/register')">注册账号</button>
         </div>
       </div>
     </section>

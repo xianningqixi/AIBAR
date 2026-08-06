@@ -51,6 +51,7 @@ async function savePassword() {
 }
 
 function ledgerLabel(kind: string): string {
+  if (kind === 'signup_bonus') return '新用户赠送'
   if (kind === 'redemption') return '额度卡兑换'
   if (kind === 'generation') return '模型生成'
   return kind

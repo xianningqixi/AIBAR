@@ -5,7 +5,7 @@ export interface PointLedgerEntry {
   id: string
   delta: number
   balanceAfter: number
-  kind: 'redemption' | 'generation' | string
+  kind: 'signup_bonus' | 'redemption' | 'generation' | string
   referenceId?: string
   detail: Record<string, unknown>
   createdAt: string

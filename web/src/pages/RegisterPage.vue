@@ -23,7 +23,7 @@ const error = ref('')
 const request = ref<RegistrationRequest | null>(null)
 
 const statusLabel = computed(() => {
-  if (request.value?.status === 'approved') return '审核已通过'
+  if (request.value?.status === 'approved') return '注册成功'
   if (request.value?.status === 'rejected') return '申请未通过'
   return '等待管理员审核'
 })
@@ -107,11 +107,11 @@ void refreshStatus()
         </template>
 
         <template v-else>
-          <p class="text-xs font-semibold text-brand-300">邀请码注册</p>
-          <h1 class="mt-2 text-2xl font-semibold text-ink-primary">申请 AIBAR 账号</h1>
+          <p class="text-xs font-semibold text-brand-300">创建账号</p>
+          <h1 class="mt-2 text-2xl font-semibold text-ink-primary">注册 AIBAR</h1>
           <form class="mt-8 space-y-4" @submit.prevent="submit">
-            <AppFormField label="邀请码" required>
-              <AppInput v-model="inviteCode" placeholder="AIBAR-XXXXXXXXXXXX" />
+            <AppFormField label="邀请码（选填）" hint="填写有效邀请码可直接注册；留空则由管理员审核">
+              <AppInput v-model="inviteCode" autocomplete="off" placeholder="AIBAR-XXXXXXXXXXXX" />
             </AppFormField>
             <div class="grid gap-4 sm:grid-cols-2">
               <AppFormField label="账号" hint="英文、数字或短横线" required>
@@ -129,7 +129,7 @@ void refreshStatus()
             </AppFormField>
             <p v-if="error" class="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{{ error }}</p>
             <AppButton class="w-full" type="submit" size="lg" :disabled="loading">
-              {{ loading ? '提交中…' : '提交审核' }}
+              {{ loading ? '提交中…' : inviteCode.trim() ? '使用邀请码注册' : '提交审核' }}
             </AppButton>
           </form>
         </template>

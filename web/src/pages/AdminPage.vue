@@ -319,7 +319,9 @@ watch(
       </section>
 
       <section v-if="overview">
-        <div class="mb-4 flex items-end justify-between gap-4 border-b border-border-subtle pb-3"><h2 class="text-lg font-semibold text-ink-primary">邀请码</h2></div>
+        <div class="mb-4 flex items-end justify-between gap-4 border-b border-border-subtle pb-3">
+          <div><h2 class="text-lg font-semibold text-ink-primary">邀请码</h2><p class="mt-1 text-sm text-ink-muted">使用有效邀请码注册将自动通过审核。</p></div>
+        </div>
         <form class="grid gap-4 sm:grid-cols-2 lg:grid-cols-[1fr_8rem_13rem_auto] lg:items-end" @submit.prevent="makeInvite">
           <AppFormField label="备注"><AppInput v-model="inviteForm.label" placeholder="朋友昵称" /></AppFormField>
           <AppFormField label="可用次数"><AppInput v-model="inviteForm.maxUses" type="number" min="1" max="100" /></AppFormField>
