@@ -3,6 +3,10 @@ name: CI
 on:
   push:
   pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
 
 jobs:
   verify:
@@ -41,3 +45,124 @@ jobs:
           npm rebuild better-sqlite3 --ignore-scripts=false
           npm run test:aibar
           npm run lint
+
+  deploy:
+    name: Deploy production
+    if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+    needs: verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    concurrency:
+      group: aibar-production
+      cancel-in-progress: false
+    environment:
+      name: production
+      url: https://aibar.peakstar88.store/aibar/
+    env:
+      DEPLOY_HOST: 172.86.116.166
+      DEPLOY_USER: aibar-deploy
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Build production frontend
+        working-directory: web
+        run: |
+          npm ci
+          npm run build:install
+
+      - name: Package release
+        id: release
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+
+          release_id="$(date -u +%Y%m%dT%H%M%SZ)-${GITHUB_SHA::7}"
+          stage_dir="${RUNNER_TEMP}/aibar-${release_id}"
+          archive="${RUNNER_TEMP}/${release_id}.tar.gz"
+          sillytavern_sha="$(git -C SillyTavern rev-parse HEAD)"
+
+          install -d -m 0755 "$stage_dir"
+          git -C SillyTavern archive --format=tar HEAD | tar -xf - -C "$stage_dir"
+          install -d -m 0755 "$stage_dir/public"
+          cp -R web/dist "$stage_dir/public/aibar"
+
+          {
+            printf 'main_sha=%s\n' "$GITHUB_SHA"
+            printf 'sillytavern_sha=%s\n' "$sillytavern_sha"
+            printf 'built_at=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            printf 'github_run=%s/actions/runs/%s\n' "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY" "$GITHUB_RUN_ID"
+          } > "$stage_dir/.aibar-release"
+
+          tar -czf "$archive" -C "$stage_dir" .
+          archive_sha="$(sha256sum "$archive" | cut -d ' ' -f 1)"
+
+          printf 'release_id=%s\n' "$release_id" >> "$GITHUB_OUTPUT"
+          printf 'archive=%s\n' "$archive" >> "$GITHUB_OUTPUT"
+          printf 'archive_sha=%s\n' "$archive_sha" >> "$GITHUB_OUTPUT"
+
+      - name: Configure deployment SSH key
+        shell: bash
+        env:
+          DEPLOY_SSH_KEY: ${{ secrets.AIBAR_DEPLOY_SSH_KEY }}
+          DEPLOY_KNOWN_HOSTS: ${{ secrets.AIBAR_DEPLOY_KNOWN_HOSTS }}
+        run: |
+          set -Eeuo pipefail
+
+          install -d -m 0700 "$HOME/.ssh"
+          printf '%s\n' "$DEPLOY_SSH_KEY" > "$HOME/.ssh/aibar_deploy"
+          printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > "$HOME/.ssh/known_hosts"
+          chmod 0600 "$HOME/.ssh/aibar_deploy" "$HOME/.ssh/known_hosts"
+          ssh-keygen -y -f "$HOME/.ssh/aibar_deploy" >/dev/null
+
+      - name: Upload and activate release
+        shell: bash
+        env:
+          RELEASE_ID: ${{ steps.release.outputs.release_id }}
+          ARCHIVE: ${{ steps.release.outputs.archive }}
+          ARCHIVE_SHA: ${{ steps.release.outputs.archive_sha }}
+        run: |
+          set -Eeuo pipefail
+
+          sftp \
+            -i "$HOME/.ssh/aibar_deploy" \
+            -o BatchMode=yes \
+            -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$HOME/.ssh/known_hosts" \
+            -b - "$DEPLOY_USER@$DEPLOY_HOST" <<SFTP
+          put $ARCHIVE $RELEASE_ID.tar.gz
+          SFTP
+
+          ssh \
+            -T \
+            -i "$HOME/.ssh/aibar_deploy" \
+            -o BatchMode=yes \
+            -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$HOME/.ssh/known_hosts" \
+            "$DEPLOY_USER@$DEPLOY_HOST" \
+            "deploy $RELEASE_ID $ARCHIVE_SHA"
+
+      - name: Verify public endpoint
+        run: |
+          curl \
+            --fail \
+            --silent \
+            --show-error \
+            --retry 6 \
+            --retry-all-errors \
+            --retry-delay 5 \
+            https://aibar.peakstar88.store/aibar/ \
+            >/dev/null
+
+      - name: Remove deployment key
+        if: always()
+        run: rm -f "$HOME/.ssh/aibar_deploy"

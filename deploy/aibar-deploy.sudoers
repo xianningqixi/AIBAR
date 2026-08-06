@@ -1,0 +1,2 @@
+Defaults:aibar-deploy !requiretty
+aibar-deploy ALL=(root) NOPASSWD: /usr/local/sbin/aibar-deploy-release

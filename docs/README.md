@@ -5,6 +5,7 @@
 | 文档 | 内容 | 读者 |
 |---|---|---|
 | [`server-deployment-plan.md`](./server-deployment-plan.md) | 生产服务器部署方案：目录布局、systemd、Nginx/HTTPS、证书续期、备份与回滚、Discord 数据存储边界 | 运维 / 部署执行者 |
+| [`github-actions-deployment.md`](./github-actions-deployment.md) | GitHub Actions 自动发布：受限 SSH、Secrets、release 切换、健康检查与失败回滚 | 运维 / 部署执行者 |
 | [`discord-hot-import-runbook.md`](./discord-hot-import-runbook.md) | Discord 热门角色卡同步与导入的可执行操作手册（浏览器助手或人工均可执行） | 浏览器助手 / 管理员 |
 | [`discord-browser-import.md`](./discord-browser-import.md) | Discord 浏览器协作导入的版本 1 契约：manifest schema、双阶段授权、安全红线、去重规则 | 前后端开发 / 浏览器助手 |
 | [`aibar-web-app-bridge.md`](./aibar-web-app-bridge.md) | 第三方网页应用在 AIBAR 隔离页运行的桥接协议 | 前端开发 / 应用作者 |
