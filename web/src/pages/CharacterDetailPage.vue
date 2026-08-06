@@ -16,7 +16,8 @@ import { createChatFromCharacter, createChatFromStory } from '@/lib/storyStart'
 import { characterGreetings, saveStoryFromCharacterGreeting } from '@/lib/storyFromCharacter'
 import { stripJsonlName } from '@/lib/format'
 import { getApiErrorMessage } from '@/api/client'
-import type { Character, ChatEntry, StoryCard } from '@/api/types'
+import type { Character, CharacterStartSelection, ChatEntry, StoryCard } from '@/api/types'
+import CharacterStartDialog from '@/components/chat/CharacterStartDialog.vue'
 import AppButton from '@/components/ui/AppButton.vue'
 import AppCard from '@/components/ui/AppCard.vue'
 import AppPageHeader from '@/components/ui/AppPageHeader.vue'
@@ -37,6 +38,7 @@ const chatList = ref<ChatEntry[]>([])
 const startModIds = ref<string[]>([])
 const loading = ref(false)
 const startingWithMods = ref(false)
+const startDialogOpen = ref(false)
 const savingGreetingIndex = ref<number | null>(null)
 
 const tags = computed(() => {
@@ -117,13 +119,21 @@ async function startStory(story: StoryCard) {
   }
 }
 
-async function startCharacterWithMods() {
-  if (!character.value) return
+function startCharacterWithMods() {
+  startDialogOpen.value = true
+}
+
+async function confirmCharacterStart(selection: CharacterStartSelection) {
+  if (!character.value || startingWithMods.value) return
   startingWithMods.value = true
   try {
     const fileName = await createChatFromCharacter(character.value, {
       modIds: startModIds.value,
+      greeting: selection.greeting,
+      greetingIndex: selection.greetingIndex,
+      persona: selection.persona,
     })
+    startDialogOpen.value = false
     ui.addToast(startModIds.value.length ? '已创建带 MOD 的新聊天' : '已创建新聊天', 'success')
     router.push({
       path: `/chat/${encodeURIComponent(character.value.avatar)}`,
@@ -303,7 +313,7 @@ onMounted(loadData)
               </button>
             </div>
             <div class="flex flex-wrap gap-2 pt-1">
-              <AppButton variant="gradient" size="md" @click="openChat()">
+              <AppButton variant="gradient" size="md" @click="startCharacterWithMods">
                 <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
                 </svg>
@@ -467,6 +477,13 @@ onMounted(loadData)
           <AppButton size="sm" variant="danger" @click="removeCharacter">删除角色</AppButton>
         </div>
       </AppCard>
+
+      <CharacterStartDialog
+        v-model="startDialogOpen"
+        :character="character"
+        :busy="startingWithMods"
+        @start="confirmCharacterStart"
+      />
     </main>
   </div>
 </template>

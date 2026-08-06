@@ -1,7 +1,25 @@
 import { saveChat } from '@/api/chats'
 import { setCharacterChat } from '@/api/characters'
-import type { Character, ChatMessage, StoryCard } from '@/api/types'
+import type { Character, ChatMessage, ChatPersonaSnapshot, StoryCard } from '@/api/types'
 import { normalizeText } from './format'
+
+export interface CharacterChatStartOptions {
+  greeting?: string
+  greetingIndex?: number
+  modIds?: string[]
+  persona?: ChatPersonaSnapshot
+  profileId?: string
+  world?: string
+}
+
+function personaSnapshot(persona?: ChatPersonaSnapshot): ChatPersonaSnapshot | undefined {
+  if (!persona) return undefined
+  return {
+    id: persona.id.trim(),
+    name: persona.name.trim() || 'User',
+    description: persona.description.trim(),
+  }
+}
 
 function safeFileBase(value: string, fallback: string): string {
   return normalizeText(value)
@@ -19,6 +37,7 @@ export function createStoryChatName(story: StoryCard): string {
 export async function createChatFromStory(
   story: StoryCard,
   character: Character,
+  options: { persona?: ChatPersonaSnapshot } = {},
 ): Promise<string> {
   const now = new Date().toISOString()
   const fileName = createStoryChatName(story)
@@ -52,6 +71,7 @@ export async function createChatFromStory(
       profileId: story.modelProfileId || '',
       world: story.world || '',
       mods: story.modIds || [],
+      persona: personaSnapshot(options.persona),
       createdAt: now,
     },
   })
@@ -67,21 +87,23 @@ export function createCharacterChatName(character: Character): string {
 
 export async function createChatFromCharacter(
   character: Character,
-  options: {
-    modIds?: string[]
-    profileId?: string
-    world?: string
-  } = {},
+  options: CharacterChatStartOptions = {},
 ): Promise<string> {
   const now = new Date().toISOString()
   const fileName = createCharacterChatName(character)
-  await saveChat(character.name, fileName, character.avatar, [], {
+  const greeting = (options.greeting ?? character.data?.first_mes ?? '').trim()
+  const messages: ChatMessage[] = greeting
+    ? [{ role: 'assistant', content: greeting, date: now }]
+    : []
+  await saveChat(character.name, fileName, character.avatar, messages, {
     simple_ui: true,
     aibar: {
       kind: 'chat_session',
       profileId: options.profileId || '',
       world: options.world || '',
       mods: options.modIds || [],
+      persona: personaSnapshot(options.persona),
+      greetingIndex: Number.isInteger(options.greetingIndex) ? options.greetingIndex : 0,
       createdAt: now,
     },
   })

@@ -14,6 +14,7 @@ import { useSessionStore } from '@/stores/session'
 import ChatTopBar from '@/components/chat/ChatTopBar.vue'
 import MessageList from '@/components/chat/MessageList.vue'
 import ChatInput from '@/components/chat/ChatInput.vue'
+import CharacterStartDialog from '@/components/chat/CharacterStartDialog.vue'
 import AppDrawer from '@/components/ui/AppDrawer.vue'
 import AppDialog from '@/components/ui/AppDialog.vue'
 import AppButton from '@/components/ui/AppButton.vue'
@@ -22,6 +23,7 @@ import AppCard from '@/components/ui/AppCard.vue'
 import AppInput from '@/components/ui/AppInput.vue'
 import AppFormField from '@/components/ui/AppFormField.vue'
 import AppTabs from '@/components/ui/AppTabs.vue'
+import AppTextarea from '@/components/ui/AppTextarea.vue'
 import AppSpinner from '@/components/ui/AppSpinner.vue'
 import ModPicker from '@/components/mods/ModPicker.vue'
 import ImageGenerateBox from '@/components/image/ImageGenerateBox.vue'
@@ -35,7 +37,8 @@ import { saveStory } from '@/api/stories'
 import { getProviderLabel } from '@/lib/providers'
 import { buildChatMessageImagePrompt } from '@/lib/imagePrompts'
 import { formatModelPricing } from '@/lib/points'
-import type { ChatEntry, Character, ImageAsset, ModelProfile, TtsProvider, WorldInfoSummary } from '@/api/types'
+import { createChatFromCharacter } from '@/lib/storyStart'
+import type { CharacterStartSelection, ChatEntry, Character, ImageAsset, ModelProfile, TtsProvider, WorldInfoSummary } from '@/api/types'
 import type { ReplyDraftOption } from '@/lib/replyDraft'
 
 const route = useRoute()
@@ -63,12 +66,15 @@ const imageDrawerOpen = ref(false)
 const imageMessageIndex = ref(-1)
 const imagePrompt = ref('')
 const inputDraft = ref('')
+const newChatDialogOpen = ref(false)
+const creatingNewChat = ref(false)
 
-// 右侧高级抽屉分组：模型 / 记忆 / 世界与 MOD / 语音
+// 右侧高级抽屉分组：模型 / 身份 / 记忆 / 世界与 MOD / 语音
 const drawerTab = ref('model')
 const drawerTabs = computed(() => {
   const items = [
     { key: 'model', label: '模型' },
+    { key: 'persona', label: '身份' },
     { key: 'memory', label: '记忆' },
     { key: 'world', label: '世界与MOD' },
   ]
@@ -126,11 +132,78 @@ function openChat(fileName: string) {
 
 function createNewChat() {
   if (!character.value) return
-  const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)
-  router.push({
-    path: `/chat/${encodeURIComponent(character.value.avatar)}`,
-    query: { chat: `${character.value.name} - ${stamp}` },
-  })
+  ui.sidePanelOpen = false
+  newChatDialogOpen.value = true
+}
+
+async function confirmNewChat(selection: CharacterStartSelection) {
+  if (!character.value || creatingNewChat.value) return
+  creatingNewChat.value = true
+  try {
+    const fileName = await createChatFromCharacter(character.value, {
+      greeting: selection.greeting,
+      greetingIndex: selection.greetingIndex,
+      persona: selection.persona,
+      profileId: chat.selectedProfileId,
+      world: chat.selectedWorld,
+      modIds: chat.selectedModIds,
+    })
+    newChatDialogOpen.value = false
+    ui.addToast('已创建新聊天', 'success')
+    await router.push({
+      path: `/chat/${encodeURIComponent(character.value.avatar)}`,
+      query: { chat: fileName },
+    })
+  } catch (error: unknown) {
+    ui.addToast(`创建聊天失败：${getApiErrorMessage(error)}`, 'error')
+  } finally {
+    creatingNewChat.value = false
+  }
+}
+
+// 抽屉「身份」分组：查看/修改本聊天的玩家身份（写入聊天存档）
+const personaNameDraft = ref('')
+const personaDescriptionDraft = ref('')
+const personaSaving = ref(false)
+
+function syncPersonaDraft() {
+  const persona = chat.generationPersona
+  personaNameDraft.value = persona.name
+  personaDescriptionDraft.value = persona.description
+}
+
+watch(
+  () => [ui.modelDrawerOpen && drawerTab.value === 'persona', chat.currentChatFile] as const,
+  ([visible]) => {
+    if (visible) syncPersonaDraft()
+  },
+)
+
+async function saveChatPersona() {
+  if (personaSaving.value) return
+  personaSaving.value = true
+  try {
+    await chat.setChatPersona({
+      name: personaNameDraft.value,
+      description: personaDescriptionDraft.value,
+    })
+    syncPersonaDraft()
+    ui.addToast('本聊天的身份已更新', 'success')
+  } finally {
+    personaSaving.value = false
+  }
+}
+
+async function unfreezeChatPersona() {
+  if (personaSaving.value) return
+  personaSaving.value = true
+  try {
+    await chat.clearChatPersona()
+    syncPersonaDraft()
+    ui.addToast('已改为跟随全局身份', 'success')
+  } finally {
+    personaSaving.value = false
+  }
 }
 
 async function makeDefault(entry: ChatEntry) {
@@ -789,6 +862,54 @@ watch(() => route.fullPath, initChat)
           </AppCard>
         </template>
 
+        <template v-else-if="drawerTab === 'persona'">
+          <AppCard padding="sm" tone="sunken">
+            <div class="flex flex-wrap items-center gap-2">
+              <h4 class="text-xs font-medium text-ink-secondary">玩家身份</h4>
+              <span
+                class="rounded-full px-2 py-0.5 text-[11px]"
+                :class="chat.chatPersona ? 'bg-brand-500/15 text-brand-300' : 'bg-ink-primary/5 text-ink-muted'"
+              >
+                {{ chat.chatPersona ? '已固定到本聊天' : '跟随全局身份' }}
+              </span>
+            </div>
+            <p class="mt-1 text-xs text-ink-muted">
+              {{ chat.chatPersona
+                ? '本聊天使用下面的身份，切换全局身份不会影响它。'
+                : `本聊天暂未固定身份，生成时使用全局身份（当前：${chat.generationPersona.name}）。保存后将固定到本聊天。` }}
+            </p>
+          </AppCard>
+
+          <AppFormField label="玩家名称">
+            <AppInput v-model="personaNameDraft" placeholder="User" />
+          </AppFormField>
+          <AppFormField label="身份摘要" hint="身份、经历、与角色的关系；随每次生成送给模型。">
+            <AppTextarea
+              v-model="personaDescriptionDraft"
+              :rows="4"
+              auto-grow
+              :max-height="200"
+              placeholder="身份、经历、与角色的关系"
+            />
+          </AppFormField>
+
+          <div class="flex items-center justify-between gap-3">
+            <AppButton
+              v-if="chat.chatPersona"
+              size="sm"
+              variant="ghost"
+              :disabled="personaSaving"
+              @click="unfreezeChatPersona"
+            >
+              改为跟随全局身份
+            </AppButton>
+            <span v-else></span>
+            <AppButton size="sm" :disabled="personaSaving" @click="saveChatPersona">
+              {{ personaSaving ? '保存中…' : '保存到本聊天' }}
+            </AppButton>
+          </div>
+        </template>
+
         <template v-else-if="drawerTab === 'memory'">
           <AppCard padding="sm" tone="sunken">
             <div class="flex items-start justify-between gap-3">
@@ -965,6 +1086,13 @@ watch(() => route.fullPath, initChat)
         />
       </div>
     </AppDrawer>
+
+    <CharacterStartDialog
+      v-model="newChatDialogOpen"
+      :character="character"
+      :busy="creatingNewChat"
+      @start="confirmNewChat"
+    />
   </div>
 
   <!-- 载入占位：先撑出与真实布局一致的顶栏 + 内容区，避免打开聊天时整页跳动 -->

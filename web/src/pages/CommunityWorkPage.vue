@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useSessionStore } from '@/stores/session'
 import { useCharactersStore } from '@/stores/characters'
@@ -17,15 +17,18 @@ import {
   rateCommunityWork,
   setCommunityFavorite,
   setCommunityWorkStatus,
+  type CommunityLaunchResult,
   type CommunityWorkDetail,
 } from '@/api/community'
 import { createChatFromCharacter, createChatFromStory } from '@/lib/storyStart'
+import CharacterStartDialog from '@/components/chat/CharacterStartDialog.vue'
 import AppButton from '@/components/ui/AppButton.vue'
 import AppEmpty from '@/components/ui/AppEmpty.vue'
 import AppPageHeader from '@/components/ui/AppPageHeader.vue'
 import AppSpinner from '@/components/ui/AppSpinner.vue'
 import AppTextarea from '@/components/ui/AppTextarea.vue'
 import { getApiErrorMessage } from '@/api/client'
+import type { Character, CharacterStartSelection } from '@/api/types'
 
 const route = useRoute()
 const router = useRouter()
@@ -39,6 +42,12 @@ const starting = ref(false)
 const comment = ref('')
 const commenting = ref(false)
 const managing = ref(false)
+const startDialogOpen = ref(false)
+const pendingCharacterLaunch = ref<{
+  accountHandle: string
+  character: Character
+  launch: CommunityLaunchResult
+} | null>(null)
 
 const workId = computed(() => decodeURIComponent(String(route.params.id || '')))
 const isOwner = computed(() => work.value?.authorHandle === session.user?.handle)
@@ -134,6 +143,19 @@ async function removeWork() {
   }
 }
 
+async function finishLaunch(launch: CommunityLaunchResult, chatId: string) {
+  try {
+    await completeCommunityLaunch(launch.launchId, chatId)
+  } catch (error) {
+    console.warn('Community launch completion tracking failed', error)
+  }
+  ui.addToast('已复制到私人资料库并创建聊天', 'success')
+  await router.push({
+    path: `/chat/${encodeURIComponent(launch.avatar || '')}`,
+    query: { chat: chatId },
+  })
+}
+
 async function useWork(versionId?: string) {
   if (!work.value || starting.value) return
   const accountHandle = session.user?.handle || ''
@@ -168,26 +190,62 @@ async function useWork(versionId?: string) {
     if (!accountIsCurrent()) return
     const character = await fetchCharacter(launched.avatar)
     if (!accountIsCurrent()) return
-    const chatId = launched.story
-      ? await createChatFromStory(launched.story, character)
-      : await createChatFromCharacter(character)
-    if (!accountIsCurrent()) return
-    try {
-      await completeCommunityLaunch(launched.launchId, chatId)
-    } catch (error) {
-      console.warn('Community launch completion tracking failed', error)
+    if (!launched.story) {
+      pendingCharacterLaunch.value = { accountHandle, character, launch: launched }
+      startDialogOpen.value = true
+      return
     }
-    ui.addToast('已复制到私人资料库并创建聊天', 'success')
-    router.push({
-      path: `/chat/${encodeURIComponent(launched.avatar)}`,
-      query: { chat: chatId },
-    })
+    const chatId = await createChatFromStory(launched.story, character)
+    if (!accountIsCurrent()) return
+    await finishLaunch(launched, chatId)
   } catch (e: unknown) {
     ui.addToast(`${isMod.value ? '导入提示词' : '开始聊天'}失败：${getApiErrorMessage(e)}`, 'error')
   } finally {
     starting.value = false
   }
 }
+
+function abortCommunityStart(message: string) {
+  pendingCharacterLaunch.value = null
+  startDialogOpen.value = false
+  ui.addToast(message, 'warning')
+}
+
+async function confirmCommunityStart(selection: CharacterStartSelection) {
+  const pending = pendingCharacterLaunch.value
+  if (!pending || starting.value) return
+  const accountIsCurrent = () => pending.accountHandle && session.user?.handle === pending.accountHandle
+  starting.value = true
+  try {
+    if (!accountIsCurrent()) {
+      abortCommunityStart('登录账号已变化，请重新打开该作品')
+      return
+    }
+    const chatId = await createChatFromCharacter(pending.character, {
+      greeting: selection.greeting,
+      greetingIndex: selection.greetingIndex,
+      persona: selection.persona,
+    })
+    if (!accountIsCurrent()) {
+      abortCommunityStart('登录账号已变化，请重新打开该作品')
+      return
+    }
+    startDialogOpen.value = false
+    pendingCharacterLaunch.value = null
+    await finishLaunch(pending.launch, chatId)
+  } catch (error: unknown) {
+    ui.addToast(`开始聊天失败：${getApiErrorMessage(error)}`, 'error')
+  } finally {
+    starting.value = false
+  }
+}
+
+// 取消开局对话框：作品此时已复制进私人资料库，提示用户并清掉待启动状态
+watch(startDialogOpen, (open) => {
+  if (open || starting.value || !pendingCharacterLaunch.value) return
+  pendingCharacterLaunch.value = null
+  ui.addToast('角色已复制到私人资料库，可稍后在「角色」页开始聊天')
+})
 
 onMounted(load)
 </script>
@@ -288,5 +346,11 @@ onMounted(load)
         </aside>
       </div>
     </main>
+    <CharacterStartDialog
+      v-model="startDialogOpen"
+      :character="pendingCharacterLaunch?.character || null"
+      :busy="starting"
+      @start="confirmCommunityStart"
+    />
   </div>
 </template>

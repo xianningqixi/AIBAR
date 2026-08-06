@@ -5,7 +5,8 @@ import { useCharactersStore } from '@/stores/characters'
 import { useUiStore } from '@/stores/ui'
 import { useModelProfilesStore } from '@/stores/modelProfiles'
 import { useSessionStore } from '@/stores/session'
-import type { Character, ChatEntry, ModelProfile, StoryCard } from '@/api/types'
+import type { Character, CharacterStartSelection, ChatEntry, ModelProfile, StoryCard } from '@/api/types'
+import CharacterStartDialog from '@/components/chat/CharacterStartDialog.vue'
 import AppButton from '@/components/ui/AppButton.vue'
 import AppDrawer from '@/components/ui/AppDrawer.vue'
 import AppEmpty from '@/components/ui/AppEmpty.vue'
@@ -40,6 +41,8 @@ const activeTab = ref<BrowseTab>(normalizeTab(route.query.tab))
 const charFilter = ref<'all' | 'recent' | 'favorites' | 'withChat'>('all')
 const noImage = ref(false)
 const startingNewChat = ref(false)
+const startDialogOpen = ref(false)
+const startCharacter = ref<Character | null>(null)
 const modelPickerOpen = ref(false)
 const searchQuery = ref('')
 
@@ -216,7 +219,8 @@ const popularTags = computed(() => {
 })
 
 function openCharacter(character: Character) {
-  router.push(`/chat/${encodeURIComponent(character.avatar)}`)
+  startCharacter.value = character
+  startDialogOpen.value = true
 }
 
 function getChatCharacter(entry: ChatEntry): Character | undefined {
@@ -266,7 +270,7 @@ function pickRandom() {
   openCharacter(pool[Math.floor(Math.random() * pool.length)])
 }
 
-async function startNewChat() {
+function startNewChat() {
   const pool = store.characters
   if (!pool.length) {
     ui.addToast('先导入或新建一个角色，再开始新聊天', 'warning')
@@ -274,10 +278,21 @@ async function startNewChat() {
     return
   }
 
+  openCharacter(pool[Math.floor(Math.random() * pool.length)])
+}
+
+async function confirmCharacterStart(selection: CharacterStartSelection) {
+  const character = startCharacter.value
+  if (!character || startingNewChat.value) return
   startingNewChat.value = true
   try {
-    const character = pool[Math.floor(Math.random() * pool.length)]
-    const fileName = await createChatFromCharacter(character)
+    const fileName = await createChatFromCharacter(character, {
+      greeting: selection.greeting,
+      greetingIndex: selection.greetingIndex,
+      persona: selection.persona,
+      profileId: models.activeProfileId,
+    })
+    startDialogOpen.value = false
     ui.addToast(`已为「${character.name}」创建新聊天`, 'success')
     router.push({
       path: `/chat/${encodeURIComponent(character.avatar)}`,
@@ -922,6 +937,12 @@ onMounted(async () => {
           </div>
         </template>
       </AppDrawer>
+      <CharacterStartDialog
+        v-model="startDialogOpen"
+        :character="startCharacter"
+        :busy="startingNewChat"
+        @start="confirmCharacterStart"
+      />
     </main>
   </div>
 </template>

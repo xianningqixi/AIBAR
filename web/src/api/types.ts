@@ -127,6 +127,18 @@ export interface Persona {
   avatar?: string
 }
 
+export interface ChatPersonaSnapshot {
+  id: string
+  name: string
+  description: string
+}
+
+export interface CharacterStartSelection {
+  greeting: string
+  greetingIndex: number
+  persona: ChatPersonaSnapshot
+}
+
 export type TtsProvider =
   | 'alltalk'
   | 'azure'

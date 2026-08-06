@@ -1,6 +1,13 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
-import type { ChatMessage, StreamState, Character, ImageAsset, ModelProfile } from '@/api/types'
+import type {
+  ChatMessage,
+  ChatPersonaSnapshot,
+  StreamState,
+  Character,
+  ImageAsset,
+  ModelProfile,
+} from '@/api/types'
 import { fetchChat, saveChat } from '@/api/chats'
 import { generateReply, generateReplyStream } from '@/api/generate'
 import { getApiErrorMessage } from '@/api/client'
@@ -260,6 +267,52 @@ export const useChatStore = defineStore('chat', () => {
 
   function writeMetadataModIds(ids: string[]) {
     mergeMetadataAibar({ mods: ids })
+  }
+
+  function getMetadataPersona(): ChatPersonaSnapshot | null {
+    const value = getMetadataAibar().persona
+    if (!value || typeof value !== 'object') return null
+    const data = value as Record<string, unknown>
+    const name = typeof data.name === 'string' ? data.name.trim() : ''
+    if (!name) return null
+    return {
+      id: typeof data.id === 'string' ? data.id : '',
+      name,
+      description: typeof data.description === 'string' ? data.description : '',
+    }
+  }
+
+  function getGenerationPersona(): ChatPersonaSnapshot {
+    const stored = getMetadataPersona()
+    if (stored) return stored
+    const active = usePersonasStore().activePersona
+    return {
+      id: active?.id || '',
+      name: active?.name || 'User',
+      description: active?.description || '',
+    }
+  }
+
+  /** 本聊天冻结的玩家身份快照；null 表示未固定，生成时跟随全局 persona */
+  const chatPersona = computed(() => getMetadataPersona())
+  /** 生成实际使用的身份：优先快照，否则全局 persona */
+  const generationPersona = computed(() => getGenerationPersona())
+
+  async function setChatPersona(persona: { name: string; description: string }) {
+    const stored = getMetadataPersona()
+    mergeMetadataAibar({
+      persona: {
+        id: stored?.id || '',
+        name: persona.name.trim() || 'User',
+        description: persona.description.trim(),
+      },
+    })
+    await persistSafe()
+  }
+
+  async function clearChatPersona() {
+    mergeMetadataAibar({ persona: undefined })
+    await persistSafe()
   }
 
   function getMemoryState(): ChatMemoryState {
@@ -534,9 +587,7 @@ export const useChatStore = defineStore('chat', () => {
     try {
       const config = selectedProfile.value
       const effectiveCharacter = getEffectiveCharacter() || character.value
-      const personas = usePersonasStore()
-      const personaName = personas.activePersona?.name || 'User'
-      const personaDescription = personas.activePersona?.description || ''
+      const persona = getGenerationPersona()
 
       let worldInfoText = ''
       try {
@@ -547,8 +598,8 @@ export const useChatStore = defineStore('chat', () => {
       if (!isCurrentRequest()) return
 
       const payload = buildReplyDraftPayload(config, effectiveCharacter, messages.value, {
-        userName: personaName,
-        personaDescription,
+        userName: persona.name,
+        personaDescription: persona.description,
         memorySummary: getMemoryState().summary,
         worldInfoText,
         userNote,
@@ -610,9 +661,7 @@ export const useChatStore = defineStore('chat', () => {
     }
     if (!isCurrentRequest()) return
 
-    const personas = usePersonasStore()
-    const personaName = personas.activePersona?.name || 'User'
-    const personaDescription = personas.activePersona?.description || ''
+    const persona = getGenerationPersona()
     // 本轮直接使用已存下来的记忆；新的整理在回复结束后异步进行
     const memorySummaryForPrompt = getMemoryState().summary
 
@@ -625,8 +674,8 @@ export const useChatStore = defineStore('chat', () => {
       worldInfoText,
       allMods,
       selectedPreset.value,
-      personaName,
-      personaDescription,
+      persona.name,
+      persona.description,
       memorySummaryForPrompt,
     )
 
@@ -690,7 +739,7 @@ export const useChatStore = defineStore('chat', () => {
         streaming.value = { active: false, controller: null, partial: { content: '' } }
         await persistSafe()
         if (options.updateMemory) {
-          scheduleMemoryRefresh(config, effectiveCharacter, personaName, isCurrentRequest)
+          scheduleMemoryRefresh(config, effectiveCharacter, persona.name, isCurrentRequest)
         }
       }
     }
@@ -889,6 +938,8 @@ export const useChatStore = defineStore('chat', () => {
     selectedPreset,
     selectedWorld,
     selectedModIds,
+    chatPersona,
+    generationPersona,
     loading,
     ready,
     error,
@@ -921,6 +972,8 @@ export const useChatStore = defineStore('chat', () => {
     setSelectedPresetId,
     setSelectedWorld,
     setSelectedModIds,
+    setChatPersona,
+    clearChatPersona,
     reset,
   }
 })
