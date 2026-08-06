@@ -1,10 +1,23 @@
 <script setup lang="ts">
+import { ref, watch } from 'vue'
 import type { CommunityWork } from '@/api/community'
 
-defineProps<{
+const props = defineProps<{
   work: CommunityWork
   noImage?: boolean
+  eager?: boolean
 }>()
+
+const imageLoaded = ref(false)
+const imageFailed = ref(false)
+
+watch(
+  () => props.work.coverUrl,
+  () => {
+    imageLoaded.value = false
+    imageFailed.value = false
+  },
+)
 
 function typeLabel(type: CommunityWork['type']): string {
   if (type === 'story') return '故事'
@@ -20,7 +33,25 @@ function typeLabel(type: CommunityWork['type']): string {
         <span class="font-mono text-5xl font-semibold text-brand-300">{ }</span>
         <span class="mt-3 text-xs text-ink-muted">提示词 MOD</span>
       </div>
-      <img v-else :src="work.coverUrl" :alt="work.title" class="h-full w-full object-cover transition-transform duration-300 group-hover:scale-[1.025]" loading="lazy" />
+      <template v-else>
+        <div
+          v-if="!imageLoaded"
+          class="absolute inset-0 flex items-center justify-center bg-surface-sunken text-3xl font-semibold text-ink-muted"
+          aria-hidden="true"
+        >{{ work.title.trim().slice(0, 1) || '?' }}</div>
+        <img
+          v-if="!imageFailed"
+          :src="work.coverUrl"
+          :alt="work.title"
+          class="h-full w-full object-cover transition-[opacity,transform] duration-300 group-hover:scale-[1.025]"
+          :class="imageLoaded ? 'opacity-100' : 'opacity-0'"
+          :loading="eager ? 'eager' : 'lazy'"
+          :fetchpriority="eager ? 'high' : 'auto'"
+          decoding="async"
+          @load="imageLoaded = true"
+          @error="imageFailed = true"
+        />
+      </template>
       <div class="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/80 to-transparent px-3 pb-3 pt-10 text-white">
         <p class="truncate text-sm font-semibold">{{ work.title }}</p>
         <p class="mt-0.5 truncate text-[11px] text-white/75">{{ work.authorName }}</p>
