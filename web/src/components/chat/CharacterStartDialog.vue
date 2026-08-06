@@ -1,7 +1,11 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import { usePersonasStore } from '@/stores/personas'
-import { characterGreetings } from '@/lib/storyFromCharacter'
+import {
+  characterGreetingPreview,
+  characterGreetings,
+  isInteractiveCharacterGreeting,
+} from '@/lib/storyFromCharacter'
 import type { Character, CharacterStartSelection } from '@/api/types'
 import AppButton from '@/components/ui/AppButton.vue'
 import AppDialog from '@/components/ui/AppDialog.vue'
@@ -33,12 +37,19 @@ const playerDescription = ref('')
 let initializeEpoch = 0
 
 const greetings = computed(() => characterGreetings(props.character))
-const selectedGreeting = computed(() => {
-  const greeting = greetings.value[selectedGreetingIndex.value] || ''
+const selectedGreetingSource = computed(() => greetings.value[selectedGreetingIndex.value] || '')
+const interactiveGreeting = computed(() => (
+  isInteractiveCharacterGreeting(props.character, selectedGreetingSource.value)
+))
+const selectedGreetingPreview = computed(() => replaceGreetingPlaceholders(
+  characterGreetingPreview(props.character, selectedGreetingSource.value),
+))
+
+function replaceGreetingPlaceholders(greeting: string) {
   return greeting
     .replace(/\{\{char\}\}/gi, props.character?.name || '角色')
     .replace(/\{\{user\}\}/gi, playerName.value.trim() || 'User')
-})
+}
 const background = computed(() => {
   const character = props.character
   const explicitScenario = (character?.data?.scenario || character?.scenario || '').trim()
@@ -81,7 +92,7 @@ function updateOpen(open: boolean) {
 function confirmStart() {
   if (!props.character || props.busy) return
   emit('start', {
-    greeting: selectedGreeting.value,
+    greeting: replaceGreetingPlaceholders(selectedGreetingSource.value),
     greetingIndex: selectedGreetingIndex.value,
     persona: {
       id: selectedPersonaId.value === CUSTOM_PERSONA_ID ? '' : selectedPersonaId.value,
@@ -127,12 +138,13 @@ watch(
         >
           <option v-for="(_, index) in greetings" :key="index" :value="index">开局 {{ index + 1 }}</option>
         </AppSelect>
-        <p
-          v-if="selectedGreeting"
+        <div
+          v-if="selectedGreetingSource"
           class="max-h-44 overflow-y-auto whitespace-pre-wrap rounded-md bg-surface-sunken px-3 py-2.5 text-sm leading-6 text-ink-secondary ring-1 ring-border-subtle"
         >
-          {{ selectedGreeting }}
-        </p>
+          <p>{{ selectedGreetingPreview }}</p>
+          <p v-if="interactiveGreeting" class="mt-1 text-xs text-ink-muted">完整内容会在进入故事后加载。</p>
+        </div>
         <p v-else class="text-sm text-ink-muted">这个角色没有预置开场白，将从玩家的第一条消息开始。</p>
       </section>
 

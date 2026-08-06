@@ -20,6 +20,15 @@ export const useCharactersStore = defineStore('characters', () => {
     return list.value.find((c) => c.avatar === avatar)
   }
 
+  function upsertCharacter(character: Character) {
+    const index = list.value.findIndex(item => item.avatar === character.avatar)
+    if (index === -1) {
+      list.value = [...list.value, character]
+      return
+    }
+    list.value[index] = character
+  }
+
   async function load() {
     const version = ++requestVersion
     loading.value = true
@@ -64,5 +73,17 @@ export const useCharactersStore = defineStore('characters', () => {
     error.value = ''
   }
 
-  return { list, loading, error, characters, favorites, findCharacter, load, toggleFav, updateTags, reset }
+  return {
+    list,
+    loading,
+    error,
+    characters,
+    favorites,
+    findCharacter,
+    upsertCharacter,
+    load,
+    toggleFav,
+    updateTags,
+    reset,
+  }
 })

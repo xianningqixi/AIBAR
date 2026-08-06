@@ -186,10 +186,9 @@ async function useWork(versionId?: string) {
       return
     }
     if (!launched.avatar) throw new Error('社区没有返回角色卡')
-    await chars.load()
-    if (!accountIsCurrent()) return
     const character = await fetchCharacter(launched.avatar)
     if (!accountIsCurrent()) return
+    chars.upsertCharacter(character)
     if (!launched.story) {
       pendingCharacterLaunch.value = { accountHandle, character, launch: launched }
       startDialogOpen.value = true
