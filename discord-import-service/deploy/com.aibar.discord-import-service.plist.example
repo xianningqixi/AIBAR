@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.aibar.discord-import-service</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/absolute/path/to/node</string>
+    <string>/absolute/path/to/AIBAR/discord-import-service/src/server.js</string>
+  </array>
+  <key>WorkingDirectory</key>
+  <string>/absolute/path/to/AIBAR/discord-import-service</string>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+  <key>StandardOutPath</key>
+  <string>/absolute/path/to/AIBAR/discord-import-service/data/service.log</string>
+  <key>StandardErrorPath</key>
+  <string>/absolute/path/to/AIBAR/discord-import-service/data/service.error.log</string>
+</dict>
+</plist>

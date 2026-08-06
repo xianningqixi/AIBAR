@@ -4,11 +4,12 @@ Canonical guidance for AI coding agents (Claude Code, Codex, etc.) working in th
 
 ## Repository layout
 
-This repo is two coupled parts plus an optional companion:
+This repo is two coupled parts plus local/optional companions:
 
 - `web/` — **AIBAR**, a standalone Vue 3 + TypeScript SPA. This is the app you'll almost always be editing. It is a character.ai / aifuck.cc-style "browse cards → enter chat" frontend.
 - `SillyTavern/` — a git submodule (fork `xianningqixi/SillyTavern`, branch `main`) that provides the **backend HTTP API**. AIBAR has no backend of its own; it reuses SillyTavern's routes plus custom `/api/aibar` endpoints added in the fork.
 - `telegram-bot/` — optional Telegram companion using a dedicated AIBAR account.
+- `discord-import-service/` — local-only Node 20 T+1 orchestrator for Discord discovery coverage and manifest generation. It runs on the administrator's computer, never on the deployed AIBAR server, and never owns Discord credentials.
 
 `docs/PLAN.md` (Chinese) is the original implementation/parity plan and is the best source for *why* things are built the way they are. The app UI, code comments, and LLM prompts are in Chinese.
 
@@ -23,6 +24,11 @@ Backend (`cd SillyTavern`, Node >= 20):
 - `npm start` — `node server.js`
 - `npm run test:aibar` — Node test suite for the AIBAR backend extensions
 - `npm run lint` / `npm run lint:fix` — ESLint
+
+Local Discord import service (`cd discord-import-service`, Node >= 20):
+- `npm start` — loopback service on `127.0.0.1:4317`
+- `npm run client -- latest` — inspect the latest local T+1 job
+- `npm run check` — Node tests and syntax check
 
 ## How the frontend reaches the backend
 
@@ -55,5 +61,7 @@ None of these custom routes exist in upstream SillyTavern. When changing anythin
 ## Discord hot-resource workflow
 
 When the user asks to refresh Discord hot resources, import selected cards, retry failed imports, or classify standalone frontends (e.g. via `/discord-import`), read and follow [`docs/discord-hot-import-runbook.md`](docs/discord-hot-import-runbook.md) before operating the browser. It is the executable runbook for the fixed Discord source, manifest handoff, `/下载` interaction, card validation, web-app classification, retries, and final QA.
+
+For scheduled T+1 discovery, the local service contract and ownership boundary are defined in [`docs/local-discord-import-service.md`](docs/local-discord-import-service.md). Keep browser automation local and visible; do not move its scheduler, state, or Discord session into SillyTavern.
 
 Never persist Discord passwords, cookies, tokens, authorization headers, or signed CDN URLs in the repository. Use only the visible logged-in browser session, and treat attachment URLs as short-lived handoff data.

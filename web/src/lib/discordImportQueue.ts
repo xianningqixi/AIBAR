@@ -15,8 +15,9 @@ export {
 export const DISCORD_IMPORT_MANIFEST_VERSION = 1 as const
 export const DISCORD_IMPORT_TIMEZONE = 'Asia/Shanghai'
 
-export type DiscordImportPeriod = 'today' | 'rolling-24h'
+export type DiscordImportPeriod = 'today' | 'previous-day' | 'rolling-24h'
 export type DiscordImportSort = 'reactions' | 'activity'
+export type DiscordImportTagMatch = 'any' | 'all'
 export type DiscordCardResourceAvailability = 'ready' | 'browser' | 'unsupported'
 export type DiscordCardResourceKind = 'character-card' | 'web-app'
 export type DiscordWebAppRuntime = 'standalone' | 'aibar-bridge'
@@ -59,6 +60,10 @@ export interface DiscordImportManifest {
   timezone: typeof DISCORD_IMPORT_TIMEZONE
   period: DiscordImportPeriod
   sort: DiscordImportSort
+  filters: {
+    tags: string[]
+    tagMatch: DiscordImportTagMatch
+  }
   cards: DiscordImportCard[]
 }
 
@@ -105,6 +110,7 @@ export class DiscordImportValidationError extends Error {
 const MAX_MANIFEST_JSON_LENGTH = 2_000_000
 const MAX_CARDS = 200
 const MAX_TAGS_PER_CARD = 16
+const MAX_FILTER_TAGS = 64
 const MAX_IMPORTED_HASHES = 2_000
 const MAX_COUNT = 1_000_000_000
 const MAX_SOURCE_URL_LENGTH = 2_048
@@ -132,8 +138,9 @@ const RESOURCE_KINDS = new Set<DiscordCardResourceKind>(['character-card', 'web-
 const WEB_APP_RUNTIMES = new Set<DiscordWebAppRuntime>(['standalone', 'aibar-bridge'])
 const WEB_APP_PERMISSIONS = new Set<DiscordWebAppPermission>(['generation', 'storage'])
 const SUPPORTED_CARD_EXTENSIONS = new Set(['png', 'json', 'yaml', 'yml', 'charx', 'byaf'])
-const PERIODS = new Set<DiscordImportPeriod>(['today', 'rolling-24h'])
+const PERIODS = new Set<DiscordImportPeriod>(['today', 'previous-day', 'rolling-24h'])
 const SORTS = new Set<DiscordImportSort>(['reactions', 'activity'])
+const TAG_MATCHES = new Set<DiscordImportTagMatch>(['any', 'all'])
 
 function validationError(path: string, message: string): never {
   throw new DiscordImportValidationError(path, message)
@@ -492,6 +499,26 @@ function parseCard(value: unknown, index: number): DiscordImportCard {
   }
 }
 
+function parseFilters(value: unknown): DiscordImportManifest['filters'] {
+  if (value === undefined) return { tags: [], tagMatch: 'any' }
+  const record = asRecord(value, 'manifest.filters')
+  assertExactKeys(record, ['tags', 'tagMatch'], 'manifest.filters')
+  if (!Array.isArray(record.tags) || record.tags.length > MAX_FILTER_TAGS) {
+    validationError('manifest.filters.tags', `expected an array with at most ${MAX_FILTER_TAGS} items`)
+  }
+  if (typeof record.tagMatch !== 'string' || !TAG_MATCHES.has(record.tagMatch as DiscordImportTagMatch)) {
+    validationError('manifest.filters.tagMatch', 'expected any or all')
+  }
+  const tags = record.tags.map((tag, index) => (
+    asString(tag, `manifest.filters.tags[${index}]`, { max: 48 })
+  ))
+  const normalizedTags = tags.map((tag) => tag.toLocaleLowerCase('en-US'))
+  if (new Set(normalizedTags).size !== tags.length) {
+    validationError('manifest.filters.tags', 'contains duplicate tags')
+  }
+  return { tags, tagMatch: record.tagMatch as DiscordImportTagMatch }
+}
+
 export function parseDiscordImportManifest(input: unknown): DiscordImportManifest {
   const record = asRecord(parseJsonInput(input, 'manifest'), 'manifest')
   assertExactKeys(record, [
@@ -503,6 +530,7 @@ export function parseDiscordImportManifest(input: unknown): DiscordImportManifes
     'timezone',
     'period',
     'sort',
+    'filters',
     'cards',
   ], 'manifest')
 
@@ -527,11 +555,20 @@ export function parseDiscordImportManifest(input: unknown): DiscordImportManifes
   if (!Array.isArray(record.cards)) validationError('manifest.cards', 'expected an array')
   if (record.cards.length > MAX_CARDS) validationError('manifest.cards', `array exceeds ${MAX_CARDS} items`)
 
+  const filters = parseFilters(record.filters)
+  const filterTags = filters.tags.map((tag) => tag.toLocaleLowerCase('en-US'))
   const cards = record.cards.map(parseCard)
   const seen = new Set<string>()
   cards.forEach((card, index) => {
     if (seen.has(card.id)) validationError(`manifest.cards[${index}].id`, 'duplicate card id')
     seen.add(card.id)
+    if (filterTags.length) {
+      const cardTags = new Set(card.tags.map((tag) => tag.toLocaleLowerCase('en-US')))
+      const matches = filters.tagMatch === 'all'
+        ? filterTags.every((tag) => cardTags.has(tag))
+        : filterTags.some((tag) => cardTags.has(tag))
+      if (!matches) validationError(`manifest.cards[${index}].tags`, 'does not satisfy manifest filters')
+    }
   })
 
   return {
@@ -543,6 +580,7 @@ export function parseDiscordImportManifest(input: unknown): DiscordImportManifes
     timezone: DISCORD_IMPORT_TIMEZONE,
     period: record.period as DiscordImportPeriod,
     sort: record.sort as DiscordImportSort,
+    filters,
     cards,
   }
 }

@@ -16,12 +16,14 @@
 
 ### 阶段一：同步候选列表
 
-1. 用户向浏览器助手主动发起同步，例如在 Claude Code 中执行 `/discord-import` 或直接说：`同步 Discord 今日热门`。
-2. 浏览器助手使用用户已经登录的 Chrome 打开固定 guild/channel，读取当日候选帖子及其公开可见的标题、作者、时间、热度、标签、预览和资源提示，并区分角色卡与网页应用。
+1. 用户向浏览器助手主动发起同步，例如在 Claude Code 中执行 `/discord-import` 或直接说：`同步 Discord 今日热门`；也可以创建每日自动化，在 T+1 同步前一自然日。
+2. 浏览器助手使用用户已经登录的 Chrome 打开固定 guild/channel，按 Discord 原生标签按钮和标签匹配方式筛选，读取候选帖子及其公开可见的标题、作者、时间、热度、标签、预览和资源提示，并区分角色卡与网页应用。
 3. 浏览器助手按本文 schema 生成 manifest，并通过 AIBAR 的 Discord 导入面板将 manifest 载入 AIBAR。用户手动操作时，可自行整理 manifest JSON 并粘贴到面板。
 4. AIBAR 校验 manifest、展示候选资源并保存角色卡勾选状态。管理员载入的清单同时登记到服务端导入批次；此阶段不下载角色卡或运行网页应用。
 
-`period: "today"` 表示 `Asia/Shanghai` 自然日；`period: "rolling-24h"` 表示同步时刻之前连续 24 小时。`sort: "reactions"` 按反应数排序，`sort: "activity"` 按最近活跃度排序。
+`period: "today"` 表示 `Asia/Shanghai` 当前自然日；`period: "previous-day"` 表示同步发生日的前一自然日，用于每日 T+1；`period: "rolling-24h"` 表示同步时刻之前连续 24 小时。`sort: "reactions"` 按反应数排序，`sort: "activity"` 按最近活跃度排序。
+
+`filters.tags` 记录本次结果必须满足的 Discord 标签；空数组表示不限制标签。`filters.tagMatch: "any"` 对应 Discord 的“匹配部分”，`"all"` 对应“全部匹配”。筛选按钮只用于可见页面采集，manifest 仍必须逐项保存帖子实际展示的全部标签；声明了标签条件时，每个 `cards[]` 项都必须满足该条件。
 
 ### 阶段二：导入已选资源
 
@@ -79,9 +81,17 @@ manifest 是 UTF-8 JSON 对象。版本 1 的固定字段如下：
 | `channelName` | string | Discord 栏目显示名 |
 | `syncedAt` | string | ISO 8601 时间戳 |
 | `timezone` | string | 必须为 `Asia/Shanghai` |
-| `period` | string | `today` 或 `rolling-24h` |
+| `period` | string | `today`、`previous-day` 或 `rolling-24h` |
 | `sort` | string | `reactions` 或 `activity` |
+| `filters` | object，可选 | Discord 标签条件；旧清单省略时按 `{ "tags": [], "tagMatch": "any" }` |
 | `cards` | array | 候选卡数组 |
+
+`filters` 字段如下：
+
+| 字段 | 类型 | 约束 |
+| --- | --- | --- |
+| `tags` | string[] | 最多 64 个 Discord 可见标签；空数组表示全部标签 |
+| `tagMatch` | string | `any`（匹配部分）或 `all`（全部匹配） |
 
 每个 `cards[]` 对象包含：
 
@@ -137,9 +147,13 @@ manifest 是 UTF-8 JSON 对象。版本 1 的固定字段如下：
   "channelId": "1478612237869519021",
   "channelName": "今日热门角色卡",
   "syncedAt": "2026-07-31T15:19:04Z",
-  "timezone": "Asia/Shanghai",
-  "period": "today",
-  "sort": "reactions",
+    "timezone": "Asia/Shanghai",
+    "period": "previous-day",
+    "sort": "reactions",
+    "filters": {
+      "tags": [],
+      "tagMatch": "any"
+    },
   "cards": [
     {
       "id": "1479000000000000001",

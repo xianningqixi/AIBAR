@@ -38,6 +38,7 @@ import {
   type DiscordImportQueue,
   type DiscordImportQueueItem,
   type DiscordImportQueueItemStatus,
+  type DiscordImportTagMatch,
 } from '@/lib/discordImportQueue'
 import AppButton from '@/components/ui/AppButton.vue'
 import AppEmpty from '@/components/ui/AppEmpty.vue'
@@ -805,11 +806,22 @@ function formatTimestamp(value?: string): string {
 }
 
 function periodLabel(value: DiscordImportQueue['manifest']['period']): string {
-  return value === 'today' ? '今日' : '滚动 24 小时'
+  if (value === 'today') return '今日'
+  if (value === 'previous-day') return '前一自然日（T+1）'
+  return '滚动 24 小时'
 }
 
 function sortLabel(value: DiscordImportQueue['manifest']['sort']): string {
   return value === 'reactions' ? '按回应热度' : '按活跃度'
+}
+
+function tagMatchLabel(value: DiscordImportTagMatch): string {
+  return value === 'all' ? '全部匹配' : '匹配部分'
+}
+
+function sourceFilterLabel(value: DiscordImportQueue['manifest']['filters']): string {
+  if (!value.tags.length) return '全部标签'
+  return `${tagMatchLabel(value.tagMatch)}：${value.tags.join('、')}`
 }
 
 function availabilityLabel(card: DiscordImportCard): string {
@@ -861,6 +873,9 @@ function statusClass(status: DiscordImportQueueItemStatus): string {
     :data-import-request-id="queue?.importRequest?.requestedAt || undefined"
     :data-import-request-card-ids="queue?.importRequest?.cardIds.join(',') || undefined"
     :data-import-requested-at="queue?.importRequest?.requestedAt || undefined"
+    :data-discord-sync-period="queue?.manifest.period || undefined"
+    :data-discord-filter-tags="queue?.manifest.filters.tags.join(',') || undefined"
+    :data-discord-filter-tag-match="queue?.manifest.filters.tagMatch || undefined"
   >
     <input
       ref="manifestInput"
@@ -875,7 +890,7 @@ function statusClass(status: DiscordImportQueueItemStatus): string {
         <p class="text-xs font-semibold text-emerald-700">Discord 同步清单</p>
         <h2 class="mt-1 text-lg font-semibold text-ink-primary">Discord 热门资源</h2>
         <p v-if="queue" data-testid="discord-sync-meta" class="mt-1 text-xs text-ink-muted">
-          {{ queue.manifest.channelName }} · {{ periodLabel(queue.manifest.period) }} · {{ sortLabel(queue.manifest.sort) }} · 同步于 {{ formatTimestamp(queue.manifest.syncedAt) }}
+          {{ queue.manifest.channelName }} · {{ periodLabel(queue.manifest.period) }} · {{ sortLabel(queue.manifest.sort) }} · {{ sourceFilterLabel(queue.manifest.filters) }} · 同步于 {{ formatTimestamp(queue.manifest.syncedAt) }}
         </p>
       </div>
       <div class="flex w-full flex-col gap-2 sm:w-auto sm:items-end">

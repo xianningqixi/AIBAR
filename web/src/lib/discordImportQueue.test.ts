@@ -55,6 +55,7 @@ describe('Discord import queue', () => {
   it('keeps legacy character-card manifests importable and clears completed work', () => {
     const now = new Date(timestamp)
     let queue = createDiscordImportQueue(manifest, now)
+    expect(queue.manifest.filters).toEqual({ tags: [], tagMatch: 'any' })
     expect(queue.manifest.cards[0].resource.kind).toBe('character-card')
     queue = updateDiscordImportQueueItem(queue, readyId, { selected: true }, now)
     expect(() => updateDiscordImportQueueItem(queue, unsupportedId, { selected: true }, now)).toThrow(
@@ -75,6 +76,34 @@ describe('Discord import queue', () => {
       importedAvatar: 'ready-card.png',
     })
     expect(queue.importedHashes).toContain('sha256:ready-card')
+  })
+
+  it('accepts T+1 manifests and validates Discord tag filters', () => {
+    const filteredManifest = {
+      ...manifest,
+      period: 'previous-day',
+      filters: {
+        tags: ['中文', '剧情'],
+        tagMatch: 'all',
+      },
+      cards: manifest.cards.map((card) => ({ ...card, tags: ['中文', '剧情'] })),
+    }
+    const parsed = parseDiscordImportManifest(filteredManifest)
+
+    expect(parsed.period).toBe('previous-day')
+    expect(parsed.filters).toEqual({ tags: ['中文', '剧情'], tagMatch: 'all' })
+    expect(() => parseDiscordImportManifest({
+      ...manifest,
+      filters: { tags: ['原创', '原创'], tagMatch: 'any' },
+    })).toThrow('contains duplicate tags')
+    expect(() => parseDiscordImportManifest({
+      ...manifest,
+      filters: { tags: [], tagMatch: 'none' },
+    })).toThrow('expected any or all')
+    expect(() => parseDiscordImportManifest({
+      ...filteredManifest,
+      filters: { tags: ['原创'], tagMatch: 'any' },
+    })).toThrow('does not satisfy manifest filters')
   })
 
   it('accepts web apps but never selects or submits them as character cards', () => {
