@@ -2,6 +2,8 @@ name: CI
 
 on:
   push:
+    # PR 分支由 pull_request 触发覆盖，push 只跑 main，避免同一提交双跑
+    branches: [main]
   pull_request:
   workflow_dispatch:
 
@@ -153,6 +155,7 @@ jobs:
 
       - name: Verify public endpoint
         run: |
+          # SPA 首页 + 后端 API 各探一次：只探首页时后端起不来也会被判为部署成功
           curl \
             --fail \
             --silent \
@@ -161,6 +164,15 @@ jobs:
             --retry-all-errors \
             --retry-delay 5 \
             https://aibar.peakstar88.store/aibar/ \
+            >/dev/null
+          curl \
+            --fail \
+            --silent \
+            --show-error \
+            --retry 6 \
+            --retry-all-errors \
+            --retry-delay 5 \
+            https://aibar.peakstar88.store/csrf-token \
             >/dev/null
 
       - name: Remove deployment key
