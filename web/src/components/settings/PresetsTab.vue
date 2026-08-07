@@ -23,6 +23,7 @@ function addPreset() {
 }
 
 function deleteSelectedPreset(preset: Preset) {
+  if (!window.confirm(`删除预设「${preset.name || '未命名'}」？此操作不可恢复。`)) return
   presets.deletePreset(preset.id)
   selectedPresetId.value = presets.presets[0]?.id || ''
 }

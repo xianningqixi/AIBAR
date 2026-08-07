@@ -31,11 +31,17 @@ function typeIcon(type: string) {
 </script>
 
 <template>
-  <div class="pointer-events-none fixed bottom-[calc(4.5rem+env(safe-area-inset-bottom))] right-4 z-40 flex max-w-[calc(100vw-2rem)] flex-col gap-2 md:bottom-4 md:z-50">
+  <!-- toast 是全应用唯一的操作反馈通道，必须对屏幕阅读器可见 -->
+  <div
+    class="pointer-events-none fixed bottom-[calc(4.5rem+env(safe-area-inset-bottom))] right-4 z-40 flex max-w-[calc(100vw-2rem)] flex-col gap-2 md:bottom-4 md:z-50"
+    aria-live="polite"
+    aria-atomic="false"
+  >
     <TransitionGroup name="toast">
       <div
         v-for="toast in ui.toasts"
         :key="toast.id"
+        :role="toast.type === 'error' ? 'alert' : 'status'"
         :class="[
           'pointer-events-auto rounded-lg px-4 py-3 text-sm shadow-elevated bg-surface-elevated/95 backdrop-blur-md border border-border-subtle border-l-4 cursor-pointer min-w-[240px] max-w-md flex items-start gap-3',
           typeClasses(toast.type),

@@ -11,8 +11,9 @@ import { getApiErrorMessage } from '@/api/client'
 import { buildGeneratePayload } from '@/lib/buildPayload'
 import { getMatchedWorldInfo } from '@/lib/worldInfoMatch'
 import { useModelProfilesStore } from '@/stores/modelProfiles'
-import { listWorldInfo } from '@/api/worldInfo'
-import type { Character, StoryCard, WorldInfoSummary } from '@/api/types'
+import { useStoriesStore } from '@/stores/stories'
+import { useWorldInfoStore } from '@/stores/worldInfo'
+import type { Character, StoryCard } from '@/api/types'
 import AppButton from '@/components/ui/AppButton.vue'
 import AppCard from '@/components/ui/AppCard.vue'
 import AppPageHeader from '@/components/ui/AppPageHeader.vue'
@@ -36,7 +37,9 @@ const character = ref<Character | null>(null)
 const loading = ref(false)
 const starting = ref(false)
 const startModIds = ref<string[]>([])
-const worlds = ref<WorldInfoSummary[]>([])
+const worldInfoStore = useWorldInfoStore()
+const storiesStore = useStoriesStore()
+const worlds = computed(() => worldInfoStore.worlds)
 
 const testModel = reactive({
   profileId: '',
@@ -74,7 +77,7 @@ async function loadData() {
     story.value = await getStory(storyId.value)
     character.value = chars.findCharacter(story.value.characterAvatar) || null
     startModIds.value = [...(story.value.modIds || [])]
-    worlds.value = await listWorldInfo().catch(() => [])
+    await worldInfoStore.load().catch(() => undefined)
     testModel.profileId = story.value.modelProfileId || models.activeProfileId
     testModel.world = story.value.world || ''
   } catch (e: unknown) {
@@ -114,6 +117,7 @@ async function renameStory() {
   if (!next?.trim()) return
   try {
     story.value = await saveStory({ ...story.value, title: next.trim() })
+    storiesStore.invalidate()
     ui.addToast('故事标题已更新', 'success')
   } catch (e: unknown) {
     ui.addToast(`保存失败：${getApiErrorMessage(e)}`, 'error')
@@ -130,6 +134,7 @@ async function quickTagEdit() {
     .filter(Boolean)
   try {
     story.value = await saveStory({ ...story.value, tags: arr })
+    storiesStore.invalidate()
     ui.addToast('标签已更新', 'success')
   } catch (e: unknown) {
     ui.addToast(`保存失败：${getApiErrorMessage(e)}`, 'error')
@@ -216,6 +221,7 @@ async function importStoryJSON() {
         ...data,
         id: undefined,
       })
+      storiesStore.invalidate()
       ui.addToast('故事卡已导入', 'success')
       router.push(`/story/${encodeURIComponent(saved.id)}`)
     } catch (e: unknown) {
@@ -235,6 +241,7 @@ async function duplicateStory() {
       id: undefined,
       title: newTitle.trim(),
     })
+    storiesStore.invalidate()
     ui.addToast('故事卡已复制', 'success')
     router.push(`/story/${encodeURIComponent(saved.id)}`)
   } catch (e: unknown) {
@@ -247,6 +254,7 @@ async function removeStory() {
   if (!window.confirm(`删除故事卡「${story.value.title}」？已创建的聊天存档不会删除。`)) return
   try {
     await deleteStory(story.value.id)
+    storiesStore.invalidate()
     ui.addToast('故事卡已删除', 'success')
     router.push({ path: '/browse', query: { tab: 'stories' } })
   } catch (e: unknown) {

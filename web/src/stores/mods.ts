@@ -1,7 +1,8 @@
 import { defineStore } from 'pinia'
-import { computed, ref } from 'vue'
+import { ref } from 'vue'
 import { generateId } from '@/lib/format'
 import { loadAibarSettings, saveAibarSettings } from '@/api/settings'
+import { notifyPersistFailure } from '@/stores/persistFeedback'
 
 export interface ModItem {
   id: string
@@ -54,8 +55,6 @@ export const useModsStore = defineStore('mods', () => {
   let storeVersion = 0
   let loadPromise: Promise<void> | null = null
 
-  const enabledGlobalMods = computed(() => mods.value.filter((m) => m.enabled))
-
   function schedulePersist() {
     if (!loaded.value) return
     if (persistTimer) clearTimeout(persistTimer)
@@ -71,7 +70,7 @@ export const useModsStore = defineStore('mods', () => {
     try {
       await saveMods(version)
     } catch (e) {
-      if (version === storeVersion) console.warn('Persist mods failed', e)
+      if (version === storeVersion) notifyPersistFailure('MOD', e)
     }
   }
 
@@ -171,6 +170,7 @@ export const useModsStore = defineStore('mods', () => {
     const index = mods.value.findIndex((mod) => mod.id === normalized.id)
     if (index === -1) mods.value.push(normalized)
     else mods.value[index] = normalized
+    schedulePersist()
   }
 
   function reset() {
@@ -185,7 +185,6 @@ export const useModsStore = defineStore('mods', () => {
   return {
     mods,
     loaded,
-    enabledGlobalMods,
     load,
     flushPersist,
     createMod,

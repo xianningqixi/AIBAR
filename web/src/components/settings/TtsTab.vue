@@ -197,6 +197,7 @@ function addTtsVoiceProfile() {
 
 function removeTtsVoiceProfile(voice: TtsVoiceItem) {
   if (voice.source !== '自定义') return
+  if (!window.confirm(`删除自定义音色「${voice.name}」？`)) return
   tts.removeCustomVoice(voice.provider, voice.id)
   ui.addToast('音色已删除', 'success')
 }

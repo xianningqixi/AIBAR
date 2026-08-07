@@ -11,6 +11,7 @@ import {
 } from '@/lib/providers'
 import { generateId } from '@/lib/format'
 import { useSessionStore } from './session'
+import { notifyPersistFailure } from '@/stores/persistFeedback'
 
 const UNAVAILABLE_PROFILE: ModelProfile = {
   id: '',
@@ -191,7 +192,7 @@ export const useModelProfilesStore = defineStore('modelProfiles', () => {
       ))?.id || ''
       const version = loadVersion
       void persistActive(version).catch((error) => {
-        if (version === loadVersion) console.warn('Persist active shared model failed', error)
+        if (version === loadVersion) notifyPersistFailure('模型选择', error)
       })
     }
   }
@@ -204,7 +205,7 @@ export const useModelProfilesStore = defineStore('modelProfiles', () => {
       persistTimers.delete(id)
       if (version !== loadVersion) return
       void saveProfile(id).catch((error) => {
-        if (version === loadVersion) console.warn('Persist shared model failed', error)
+        if (version === loadVersion) notifyPersistFailure('模型配置', error)
       })
     }, 350))
   }
@@ -298,7 +299,7 @@ export const useModelProfilesStore = defineStore('modelProfiles', () => {
     activeProfileId.value = id
     const version = loadVersion
     void persistActive(version).catch((error) => {
-      if (version === loadVersion) console.warn('Persist active shared model failed', error)
+      if (version === loadVersion) notifyPersistFailure('模型选择', error)
     })
   }
 

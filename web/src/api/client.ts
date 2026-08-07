@@ -142,16 +142,8 @@ export async function apiGet<T = unknown>(url: string): Promise<T> {
   }))
 }
 
-export async function apiPostText(url: string, body: unknown = {}): Promise<string> {
-  return (await postJson(url, body)).text()
-}
-
 export async function apiPostBlob(url: string, body: unknown = {}): Promise<Blob> {
   return (await postJson(url, body)).blob()
-}
-
-export async function apiPostBlobResponse(url: string, body: unknown = {}): Promise<Response> {
-  return postJson(url, body)
 }
 
 export async function apiPostForm<T = unknown>(url: string, formData: FormData): Promise<T> {

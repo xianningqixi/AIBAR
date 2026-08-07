@@ -164,15 +164,44 @@ watch(search, () => {
   searchTimer = setTimeout(loadCommunityWorks, 250)
 })
 
+// 后端 /api/characters/import 支持的全部卡体格式；ZIP/RAR/APK 等仍不支持
+const CARD_FILE_EXTENSIONS = ['png', 'json', 'yaml', 'yml', 'charx', 'byaf'] as const
+
+function cardExtensionOf(pathname: string): string {
+  const ext = pathname.toLowerCase().split('.').pop() || ''
+  return (CARD_FILE_EXTENSIONS as readonly string[]).includes(ext) ? ext : ''
+}
+
 function normalizeDiscordUrl(value: string): string {
   const parsed = new URL(value)
   const validHost = parsed.hostname === 'cdn.discordapp.com' || parsed.hostname === 'media.discordapp.net'
-  if (!validHost || !parsed.pathname.includes('/attachments/') || !parsed.pathname.toLowerCase().endsWith('.png')) {
-    throw new Error('请使用 Discord 附件中的 PNG 卡体链接')
+  if (!validHost || !parsed.pathname.includes('/attachments/') || !cardExtensionOf(parsed.pathname)) {
+    throw new Error('请使用 Discord 附件中的角色卡文件链接（支持 PNG / JSON / CHARX / BYAF / YAML）')
   }
   parsed.hostname = 'cdn.discordapp.com'
   for (const key of ['format', 'quality', 'width', 'height']) parsed.searchParams.delete(key)
   return parsed.toString()
+}
+
+const CARD_MIME_TYPES: Record<string, string> = {
+  png: 'image/png',
+  json: 'application/json',
+  yaml: 'text/yaml',
+  yml: 'text/yaml',
+  charx: 'application/zip',
+  byaf: 'application/zip',
+}
+
+// File 扩展名决定后端 file_type 分派，必须与真实附件一致
+function cardFileFor(blob: Blob, serverFileName: string, url: string, mimeType: string): File {
+  const urlPath = new URL(url).pathname
+  const ext = cardExtensionOf(serverFileName) || cardExtensionOf(urlPath) || 'png'
+  let name = serverFileName && cardExtensionOf(serverFileName) ? serverFileName : ''
+  if (!name) {
+    const base = decodeURIComponent(urlPath.split('/').pop() || '')
+    name = cardExtensionOf(base) ? base : `discord-character.${ext}`
+  }
+  return new File([blob], name, { type: mimeType || CARD_MIME_TYPES[ext] || 'application/octet-stream' })
 }
 
 async function importFromDiscord() {
@@ -185,10 +214,11 @@ async function importFromDiscord() {
   publishedWorkId.value = ''
   publishedStatus.value = ''
   try {
-    const content = await downloadCommunityContent(normalizeDiscordUrl(importUrl.value.trim()))
+    const normalizedUrl = normalizeDiscordUrl(importUrl.value.trim())
+    const content = await downloadCommunityContent(normalizedUrl)
     if (!accountIsCurrent()) return
-    if (content.type !== 'character') throw new Error('该 PNG 未被识别为角色卡')
-    const file = new File([content.blob], content.fileName || 'discord-character.png', { type: content.mimeType || 'image/png' })
+    if (content.type !== 'character') throw new Error('该附件未被识别为角色卡')
+    const file = cardFileFor(content.blob, content.fileName || '', normalizedUrl, content.mimeType || '')
     const imported = await importCharacter(file)
     if (!accountIsCurrent()) return
     const avatar = imported.file_name ? `${imported.file_name}.png` : ''
@@ -293,7 +323,7 @@ onBeforeUnmount(() => {
             <div class="space-y-4">
               <div>
                 <h2 class="text-base font-semibold text-ink-primary">发布 Discord 角色卡</h2>
-                <p class="mt-1 text-sm text-ink-muted">角色卡解析完成后会立即发布为公共作品。</p>
+                <p class="mt-1 text-sm text-ink-muted">支持 PNG / JSON / CHARX / BYAF / YAML 卡体，解析完成后立即发布为公共作品。</p>
               </div>
               <div v-if="discordSource" class="border-l-2 border-brand-500 pl-3">
                 <p class="text-sm font-medium text-ink-primary">{{ discordSource.title }}</p>
@@ -305,7 +335,7 @@ onBeforeUnmount(() => {
                   v-model="importUrl"
                   data-testid="discord-png-import-input"
                   type="url"
-                  placeholder="cdn.discordapp.com/attachments/.../*.png"
+                  placeholder="cdn.discordapp.com/attachments/.../角色卡文件"
                   class="min-w-0 flex-1"
                   @keydown.enter.prevent="importFromDiscord"
                 />

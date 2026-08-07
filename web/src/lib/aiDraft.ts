@@ -1,5 +1,6 @@
 import type { Character, ModelProfile } from '@/api/types'
 import { buildChatCompletionPayload } from './buildPayload'
+import { parseJsonObject } from './llmJson'
 
 export interface CharacterDraft {
   ch_name: string
@@ -47,20 +48,6 @@ function asStringArray(value: unknown): string[] {
       .filter(Boolean)
   }
   return []
-}
-
-function parseJsonObject<T>(text: string): T {
-  let body = text.trim()
-  const fence = body.match(/```(?:json)?\s*([\s\S]*?)```/i)
-  if (fence) body = fence[1].trim()
-
-  const start = body.indexOf('{')
-  const end = body.lastIndexOf('}')
-  if (start === -1 || end === -1 || end <= start) {
-    throw new Error('模型没有返回可解析的 JSON')
-  }
-
-  return JSON.parse(body.slice(start, end + 1)) as T
 }
 
 function buildDraftPayload(

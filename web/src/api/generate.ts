@@ -1,11 +1,20 @@
 import { ApiError, apiPost, apiStream } from './client'
-import { useBillingStore } from '@/stores/billing'
 import type { ModelProfile } from './types'
 
+// api 层不允许依赖 Pinia store：结算通知通过回调注入（billing store 在创建时注册），
+// 这里只负责在每次生成结束后触发一次。
+let generationSettledListener: (() => void) | null = null
+
+export function setGenerationSettledListener(listener: (() => void) | null): void {
+  generationSettledListener = listener
+}
+
 function refreshPointBalance() {
-  void useBillingStore().load(true).catch((error) => {
-    console.warn('Refresh point balance failed', error)
-  })
+  try {
+    generationSettledListener?.()
+  } catch (error) {
+    console.warn('Generation settled listener failed', error)
+  }
 }
 
 function explainGenerateError(error: unknown, payload?: Record<string, unknown>): string {

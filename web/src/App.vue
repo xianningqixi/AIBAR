@@ -13,6 +13,8 @@ import { useSessionStore } from '@/stores/session'
 import { useTtsStore } from '@/stores/tts'
 import { invalidateSettingsCache } from '@/api/settings'
 import { clearSettingsSharedState } from '@/components/settings/shared'
+import { useStoriesStore } from '@/stores/stories'
+import { useWorldInfoStore } from '@/stores/worldInfo'
 import {
   clearLegacyDiscordImportQueue,
   clearLegacyTelegramBotAdminToken,
@@ -57,6 +59,8 @@ watch(
     tts.reset()
     billing.reset()
     models.reset()
+    useStoriesStore().reset()
+    useWorldInfoStore().reset()
     clearSettingsSharedState()
     if (!handle) {
       if (session.booted && !route.meta.public) {

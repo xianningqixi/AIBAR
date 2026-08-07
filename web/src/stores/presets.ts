@@ -3,6 +3,7 @@ import { ref, computed } from 'vue'
 import type { Preset } from '@/api/types'
 import { generateId } from '@/lib/format'
 import { loadAibarSettings, saveAibarSettings } from '@/api/settings'
+import { notifyPersistFailure } from '@/stores/persistFeedback'
 
 const DEFAULTS: Preset[] = [
   {
@@ -71,7 +72,7 @@ export const usePresetsStore = defineStore('presets', () => {
         simple_ui_active_preset: activePresetId.value,
       })
     } catch (e) {
-      if (version === storeVersion) console.warn('Persist presets failed', e)
+      if (version === storeVersion) notifyPersistFailure('预设', e)
     }
   }
 

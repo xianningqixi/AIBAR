@@ -3,7 +3,7 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useCharactersStore } from '@/stores/characters'
 import { useUiStore } from '@/stores/ui'
-import { listStories } from '@/api/stories'
+import { useStoriesStore } from '@/stores/stories'
 import type { Character, StoryCard } from '@/api/types'
 import AppButton from '@/components/ui/AppButton.vue'
 import AppPageHeader from '@/components/ui/AppPageHeader.vue'
@@ -16,7 +16,8 @@ const router = useRouter()
 const chars = useCharactersStore()
 const ui = useUiStore()
 
-const stories = ref<StoryCard[]>([])
+const storiesStore = useStoriesStore()
+const stories = computed(() => storiesStore.stories)
 
 function normalizeMode(value: unknown): CreateMode {
   return value === 'advanced' ? 'advanced' : 'simple'
@@ -124,9 +125,7 @@ function openStory(story: StoryCard) {
 onMounted(async () => {
   await Promise.all([
     chars.characters.length ? Promise.resolve() : chars.load(),
-    listStories()
-      .then((res) => (stories.value = res))
-      .catch(() => undefined),
+    storiesStore.load().catch(() => undefined),
   ])
 })
 </script>

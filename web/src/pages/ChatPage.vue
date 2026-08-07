@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { refThrottled } from '@vueuse/core'
 import { useRoute, useRouter } from 'vue-router'
 import { useChatStore } from '@/stores/chat'
 import { useCharactersStore } from '@/stores/characters'
@@ -11,6 +12,8 @@ import { usePersonasStore } from '@/stores/personas'
 import { useTtsStore } from '@/stores/tts'
 import { useImageGenStore } from '@/stores/imageGen'
 import { useSessionStore } from '@/stores/session'
+import { useStoriesStore } from '@/stores/stories'
+import { useWorldInfoStore } from '@/stores/worldInfo'
 import ChatTopBar from '@/components/chat/ChatTopBar.vue'
 import MessageList from '@/components/chat/MessageList.vue'
 import ChatInput from '@/components/chat/ChatInput.vue'
@@ -32,13 +35,13 @@ import { testConnection } from '@/api/generate'
 import { PROVIDER_VOICES, TTS_PROVIDERS } from '@/api/tts'
 import { deleteChat, exportChat, importChat, renameChat } from '@/api/chats'
 import { fetchCharacterChats, setCharacterChat } from '@/api/characters'
-import { listWorldInfo } from '@/api/worldInfo'
 import { saveStory } from '@/api/stories'
+import { getChatDraftKey } from '@/lib/accountStorage'
 import { getProviderLabel } from '@/lib/providers'
 import { buildChatMessageImagePrompt } from '@/lib/imagePrompts'
 import { formatModelPricing } from '@/lib/points'
 import { createChatFromCharacter } from '@/lib/storyStart'
-import type { CharacterStartSelection, ChatEntry, Character, ImageAsset, ModelProfile, TtsProvider, WorldInfoSummary } from '@/api/types'
+import type { CharacterStartSelection, ChatEntry, Character, ImageAsset, ModelProfile, TtsProvider } from '@/api/types'
 import type { ReplyDraftOption } from '@/lib/replyDraft'
 
 const route = useRoute()
@@ -59,7 +62,9 @@ const chatList = ref<ChatEntry[]>([])
 const loadingChats = ref(false)
 const importing = ref(false)
 const importInput = ref<HTMLInputElement>()
-const worlds = ref<WorldInfoSummary[]>([])
+const worldInfoStore = useWorldInfoStore()
+const storiesStore = useStoriesStore()
+const worlds = computed(() => worldInfoStore.worlds)
 const modelPickerOpen = ref(false)
 const modelSearch = ref('')
 const imageDrawerOpen = ref(false)
@@ -93,6 +98,30 @@ const modelTestResults = ref<Record<string, ModelTestResult>>({})
 
 const routeAvatar = computed(() => decodeURIComponent((route.params.avatar as string) || ''))
 const routeChatFile = computed(() => (route.query.chat as string) || '')
+
+// 流式内容在页面层节流：否则每个 token 都会让本页与整个消息列表重渲染一次。
+const throttledStreamingContent = refThrottled(
+  computed(() => chat.streamingContent),
+  150,
+)
+
+// 未发送的草稿按账号+角色落到 localStorage，刷新或会话过期后不丢字。
+const draftStorageKey = computed(() => getChatDraftKey(session.user?.handle || '', routeAvatar.value))
+watch(draftStorageKey, (key) => {
+  try {
+    inputDraft.value = localStorage.getItem(key) || ''
+  } catch {
+    inputDraft.value = ''
+  }
+}, { immediate: true })
+watch(inputDraft, (value) => {
+  try {
+    if (value) localStorage.setItem(draftStorageKey.value, value)
+    else localStorage.removeItem(draftStorageKey.value)
+  } catch {
+    // 隐私模式等场景下 localStorage 不可用时静默降级为仅内存草稿。
+  }
+})
 
 async function initChat() {
   const avatar = routeAvatar.value
@@ -339,6 +368,7 @@ async function saveChatAsStory() {
       modelProfileId: chat.selectedProfileId,
       modIds: chat.selectedModIds,
     })
+    storiesStore.invalidate()
     ui.addToast('已保存为故事模板', 'success')
     router.push(`/story/${encodeURIComponent(story.id)}`)
   } catch (e: unknown) {
@@ -348,7 +378,10 @@ async function saveChatAsStory() {
 
 function handleSend(text: string) {
   inputDraft.value = ''
-  chat.sendMessage(text)
+  void chat.sendMessage(text).then((accepted) => {
+    // 消息被拒（未加载完成/无可用模型）时把用户打的字还回输入框，避免丢草稿。
+    if (!accepted && !inputDraft.value) inputDraft.value = text
+  })
 }
 function handleStop() { chat.stopGeneration() }
 function handleRegenerate() { chat.regenerateLast() }
@@ -461,8 +494,13 @@ const memoryStatusClass = computed(() => {
 const memoryEmptyText = computed(() =>
   chat.messages.length > 1 ? '下次发送时整理历史' : '暂无记忆',
 )
+const noModelAvailable = computed(() => chat.ready && !chat.selectedProfile.id)
+
 const chatInputBusyLabel = computed(() => {
-  if (chat.memoryUpdating) return '整理记忆中...'
+  // 没有可用模型时直接禁用输入并说明原因，而不是等用户打完字再丢一条 toast
+  if (noModelAvailable.value) return '暂无可用模型，无法发送。请联系管理员开通共享模型'
+  // 记忆整理在后台进行，不再锁输入框，只作为状态提示
+  if (chat.memoryUpdating) return '后台整理记忆中，可继续对话'
   if (chat.replyDraftLoading) return 'AI 正在拟回复...'
   return ''
 })
@@ -563,12 +601,28 @@ function handleGlobalKeydown(e: KeyboardEvent) {
     e.preventDefault()
     return
   }
+  // 有浮层打开时 Esc 交给浮层自己处理，不能顺带打断正在进行的生成。
+  if (ui.sidePanelOpen || ui.modelDrawerOpen || imageDrawerOpen.value || newChatDialogOpen.value) return
   if (!chat.isStreaming) return
   e.preventDefault()
   chat.stopGeneration()
 }
 
+// 世界书列表只有右侧抽屉的“世界与MOD”分页会用到，首次打开时再加载（store 内有缓存）。
+async function ensureWorlds() {
+  try {
+    await worldInfoStore.load()
+  } catch (e: unknown) {
+    ui.addToast(`世界书列表加载失败：${getApiErrorMessage(e)}`, 'error')
+  }
+}
+watch([() => ui.modelDrawerOpen, drawerTab], ([open, tab]) => {
+  if (open && tab === 'world') void ensureWorlds()
+})
+
 onMounted(async () => {
+  window.addEventListener('keydown', handleGlobalKeydown)
+  // 设置加载与聊天初始化互不依赖，并行执行缩短进入聊天的等待。
   await Promise.all([
     models.loadSecrets(),
     modsStore.load(),
@@ -576,14 +630,8 @@ onMounted(async () => {
     personas.load(),
     tts.load(),
     imageGen.load(),
+    initChat(),
   ])
-  try {
-    worlds.value = await listWorldInfo()
-  } catch {
-    /* noop */
-  }
-  await initChat()
-  window.addEventListener('keydown', handleGlobalKeydown)
 })
 
 onBeforeUnmount(() => {
@@ -691,7 +739,7 @@ watch(() => route.fullPath, initChat)
     <MessageList
       :messages="chat.messages"
       :loading="chat.loading"
-      :streaming="chat.streamingContent"
+      :streaming="throttledStreamingContent"
       :is-streaming="chat.isStreaming"
       :character-avatar="chat.character?.avatar"
       :media-actions="session.isAdmin"
@@ -719,13 +767,13 @@ watch(() => route.fullPath, initChat)
 
     <ChatInput
       v-model="inputDraft"
-      :disabled="chat.loading || !chat.ready || chat.memoryUpdating"
+      :disabled="chat.loading || !chat.ready || noModelAvailable"
       :is-streaming="chat.isStreaming"
       :busy-label="chatInputBusyLabel"
       :draft-loading="chat.replyDraftLoading"
       :draft-options="chat.replyDraftOptions"
       :draft-error="chat.replyDraftError"
-      :draft-disabled="chat.loading || !chat.ready || chat.isStreaming || chat.memoryUpdating"
+      :draft-disabled="chat.loading || !chat.ready || chat.isStreaming || noModelAvailable"
       @send="handleSend"
       @stop="handleStop"
       @request-drafts="handleDraftReplies"

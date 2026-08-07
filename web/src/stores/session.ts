@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
-import { ApiError, bootCsrf, resetCsrfToken } from '@/api/client'
+import { ApiError, apiPost, bootCsrf, resetCsrfToken } from '@/api/client'
 import {
   getCurrentUser,
   loginUser,
@@ -9,6 +9,7 @@ import {
 } from '@/api/auth'
 import { invalidateSettingsCache } from '@/api/settings'
 import { clearStoredTelegramBotAdminToken } from '@/lib/accountStorage'
+import { useUiStore } from '@/stores/ui'
 
 export const useSessionStore = defineStore('session', () => {
   const csrfToken = ref('')
@@ -133,22 +134,24 @@ export const useSessionStore = defineStore('session', () => {
     const epoch = sessionEpoch.value
     pingTimer = setInterval(async () => {
       const requestId = ++pingRequestId
-      const token = csrfToken.value
       try {
-        const response = await fetch('/api/ping?extend=true', {
-          method: 'POST',
-          headers: { 'X-CSRF-Token': token },
-          credentials: 'same-origin',
-        })
+        // 必须走 doFetch：token 轮换后它会自动换新 token 重试一次，
+        // 避免拿旧 token 得到 403 而把有效会话误判为过期。
+        await apiPost('/api/ping?extend=true')
         if (!isCurrentSession(epoch) || requestId !== pingRequestId) return
-        online.value = response.ok
-        if (response.status === 403) {
-          const previousHandle = user.value?.handle || ''
-          clearAuthenticatedState(previousHandle)
+        online.value = true
+      } catch (error) {
+        if (!isCurrentSession(epoch) || requestId !== pingRequestId) return
+        if (error instanceof ApiError) {
+          online.value = true
+          if (error.status === 403) {
+            const previousHandle = user.value?.handle || ''
+            clearAuthenticatedState(previousHandle)
+            useUiStore().addToast('登录已过期，请重新登录', 'warning', 6000)
+          }
+        } else {
+          online.value = false
         }
-      } catch {
-        if (!isCurrentSession(epoch) || requestId !== pingRequestId) return
-        online.value = false
       }
     }, 5 * 60 * 1000)
   }

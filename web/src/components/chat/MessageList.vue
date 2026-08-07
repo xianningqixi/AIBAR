@@ -1,12 +1,12 @@
 <script setup lang="ts">
 import { computed, ref, watch, nextTick, onMounted } from 'vue'
-import { refThrottled } from '@vueuse/core'
 import type { ChatMessage } from '@/api/types'
 import MessageBubble from './MessageBubble.vue'
 import AppSpinner from '../ui/AppSpinner.vue'
 import AppEmpty from '../ui/AppEmpty.vue'
 import { useMarkdown } from '@/composables/useMarkdown'
 
+// streaming prop 由页面层节流后传入（150ms），这里不再看到逐 token 的更新
 const props = defineProps<{
   messages: ChatMessage[]
   loading?: boolean
@@ -18,12 +18,20 @@ const props = defineProps<{
 
 const { render } = useMarkdown()
 
-// 流式 token 高频到达，节流后再做 markdown + sanitize，避免每个 token 都全量渲染
-const throttledStreaming = refThrottled(
-  computed(() => props.streaming || ''),
-  150,
-)
+const throttledStreaming = computed(() => props.streaming || '')
 const streamingHtml = computed(() => (throttledStreaming.value ? render(throttledStreaming.value) : ''))
+
+// 稳定 key：按时间戳+角色，同值冲突时按出现序号消歧。
+// 用下标做 key 会让删除/重新生成后所有后续气泡重渲染整段 markdown。
+const messageKeys = computed(() => {
+  const seen = new Map<string, number>()
+  return props.messages.map((m, i) => {
+    const base = m.date ? `${m.role}@${m.date}` : `i${i}`
+    const count = seen.get(base) ?? 0
+    seen.set(base, count + 1)
+    return count ? `${base}#${count}` : base
+  })
+})
 
 const lastAssistantIndex = computed(() => {
   for (let i = props.messages.length - 1; i >= 0; i--) {
@@ -116,9 +124,11 @@ onMounted(() => nextTick(() => scrollToBottom()))
       <template v-else>
         <!-- 消息列的左右留白只在这里给一次，气泡自身不再带 px -->
         <div class="mx-auto max-w-4xl px-4">
+          <!-- 事件处理器不引用循环变量（气泡自带 index），编译器才能缓存它们，
+               避免流式期间每个 tick 强制 patch 所有气泡 -->
           <MessageBubble
             v-for="(msg, idx) in messages"
-            :key="idx"
+            :key="messageKeys[idx]"
             :message="msg"
             :index="idx"
             :show-actions="true"
@@ -127,11 +137,11 @@ onMounted(() => nextTick(() => scrollToBottom()))
             :media-actions="mediaActions"
             :actions-locked="isStreaming"
             @edit="(msgIdx: number, content: string) => $emit('edit', msgIdx, content)"
-            @delete="$emit('delete', idx)"
+            @delete="(msgIdx: number) => $emit('delete', msgIdx)"
             @regenerate="$emit('regenerate')"
             @continue="$emit('continue')"
             @swipe="(msgIdx: number, dir: -1 | 1) => $emit('swipe', msgIdx, dir)"
-            @generate-image="$emit('generateImage', idx)"
+            @generate-image="(msgIdx: number) => $emit('generateImage', msgIdx)"
           />
 
           <div v-if="isStreaming" class="flex gap-2.5 py-2 animate-fade-in">
@@ -160,7 +170,7 @@ onMounted(() => nextTick(() => scrollToBottom()))
                 <span class="h-1.5 w-1.5 animate-bounce rounded-full bg-brand-400" style="animation-delay: 0.15s" />
                 <span class="h-1.5 w-1.5 animate-bounce rounded-full bg-brand-400" style="animation-delay: 0.3s" />
               </span>
-              <span v-if="streaming" class="ml-0.5 inline-block h-3.5 w-1 animate-pulse bg-brand-400 align-middle" />
+              <span v-if="throttledStreaming" class="ml-0.5 inline-block h-3.5 w-1 animate-pulse bg-brand-400 align-middle" />
             </div>
           </div>
         </div>

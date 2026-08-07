@@ -1,4 +1,4 @@
-export const TELEGRAM_BOT_ADMIN_TOKEN_KEY = 'aibar-telegram-bot-admin-token'
+const TELEGRAM_BOT_ADMIN_TOKEN_KEY = 'aibar-telegram-bot-admin-token'
 export const DISCORD_IMPORT_GUILD_ID = '1380075940285124724'
 export const DISCORD_IMPORT_CHANNEL_ID = '1478612237869519021'
 
@@ -14,7 +14,7 @@ function resolveStorage(storage: Storage | null | undefined): Storage | null {
   }
 }
 
-export function getTelegramBotAdminTokenKey(handle: string): string {
+function getTelegramBotAdminTokenKey(handle: string): string {
   const account = encodeURIComponent(handle.trim() || 'anonymous')
   return `${TELEGRAM_BOT_ADMIN_TOKEN_KEY}.${account}`
 }
@@ -38,6 +38,11 @@ export function clearStoredTelegramBotAdminToken(
   } catch {
     // Storage may be unavailable in privacy-restricted browser contexts.
   }
+}
+
+export function getChatDraftKey(handle: string, avatar: string): string {
+  const account = encodeURIComponent(handle.trim() || 'anonymous')
+  return `aibar.chat-draft.${account}.${encodeURIComponent(avatar)}`
 }
 
 export function getDiscordImportQueueStorageKey(handle: string): string {

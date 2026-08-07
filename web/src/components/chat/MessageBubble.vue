@@ -59,10 +59,16 @@ function startEditing() {
   editing.value = true
 }
 
-function copyToClipboard(text: string) {
-  navigator.clipboard.writeText(text)
-  copied.value = true
-  window.setTimeout(() => (copied.value = false), 1400)
+async function copyToClipboard(text: string) {
+  try {
+    // HTTP 部署下 navigator.clipboard 不存在；失败时不能假装“已复制”。
+    if (!navigator.clipboard) throw new Error('剪贴板不可用')
+    await navigator.clipboard.writeText(text)
+    copied.value = true
+    window.setTimeout(() => (copied.value = false), 1400)
+  } catch {
+    ui.addToast('复制失败，请手动选择文本复制', 'warning')
+  }
 }
 
 async function togglePlay() {
@@ -245,5 +251,12 @@ async function togglePlay() {
 }
 .action-btn:disabled {
   @apply cursor-not-allowed opacity-40 hover:bg-transparent;
+}
+
+/* 触屏设备上没有 hover 精度，加大可点击面积 */
+@media (pointer: coarse) {
+  .action-btn {
+    @apply h-9 w-9;
+  }
 }
 </style>
