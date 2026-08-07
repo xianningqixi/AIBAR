@@ -1,28 +1,34 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
+import { DISCORD_SOURCES } from '../src/config.js';
 import {
     buildManifests,
     MANIFEST_BATCH_SIZE,
     MAX_TOTAL_CARDS,
     mergePassCards,
     missingCoverage,
+    normalizeCatalog,
     normalizePass,
 } from '../src/manifest.js';
 
+const [TEXT_SOURCE, LIGHT_SOURCE, HEAVY_SOURCE] = DISCORD_SOURCES;
 const threadId = '1478612237869519901';
 
 function job(filters = { tags: [], tagMatch: 'any' }) {
     return {
-        id: 't1-2026-08-05',
-        sourceDate: '2026-08-05',
+        id: 'manual-20260806020000000',
+        mode: 'manual',
+        period: 'today',
+        localDate: '2026-08-06',
         window: {
-            start: '2026-08-04T16:00:00.000Z',
-            end: '2026-08-05T16:00:00.000Z',
+            start: '2026-08-05T16:00:00.000Z',
+            end: '2026-08-06T02:00:00.000Z',
         },
-        channelName: 'Discord T+1',
+        channelName: 'NSFW-男性向',
+        sources: DISCORD_SOURCES.map(source => ({ ...source })),
         filters,
-        tagCatalog: ['原创', '多路线'],
+        tagCatalogBySource: Object.fromEntries(DISCORD_SOURCES.map(source => [source.channelId, ['原创', '多路线']])),
         coverage: {},
         cards: [],
     };
@@ -32,12 +38,12 @@ function post(overrides = {}) {
     return {
         id: threadId,
         threadId,
-        title: 'T+1 card',
+        title: 'Today card',
         authorName: 'Author',
         sourceUrl: `https://discord.com/channels/1380075940285124724/${threadId}`,
         tags: ['原创', '多路线'],
-        publishedAt: '2026-08-05T08:00:00.000Z',
-        lastActiveAt: '2026-08-05T09:00:00.000Z',
+        publishedAt: '2026-08-06T01:00:00.000Z',
+        lastActiveAt: '2026-08-06T01:30:00.000Z',
         reactionCount: 4,
         replyCount: 2,
         resource: { availability: 'browser', kind: 'character-card' },
@@ -45,45 +51,59 @@ function post(overrides = {}) {
     };
 }
 
-function discoveryPass(tags, posts = [post()], observedAt = '2026-08-06T01:05:00.000Z') {
+function discoveryPass(
+    tags,
+    posts = [post()],
+    observedAt = '2026-08-06T01:05:00.000Z',
+    sourceChannelId = HEAVY_SOURCE.channelId,
+) {
     return {
+        sourceChannelId,
         observedAt,
         view: { tags, tagMatch: 'any', sort: 'created-at' },
         posts,
     };
 }
 
-test('unfiltered T+1 jobs require every current Discord tag plus a catch-all pass', () => {
+test('unfiltered manual jobs require every current Discord tag plus a catch-all pass', () => {
     const value = job();
-    assert.deepEqual(missingCoverage(value), ['unfiltered', 'any:["原创"]', 'any:["多路线"]']);
+    assert.equal(missingCoverage(value).length, 9);
 
-    for (const pass of [discoveryPass([]), discoveryPass(['原创']), discoveryPass(['多路线'])]) {
-        const normalized = normalizePass(pass, value);
-        value.cards = mergePassCards(value.cards, normalized);
-        value.coverage[normalized.signature] = { observedAt: normalized.observedAt };
+    for (const source of DISCORD_SOURCES) {
+        for (const pass of [
+            discoveryPass([], source === HEAVY_SOURCE ? [post()] : [], undefined, source.channelId),
+            discoveryPass(['原创'], source === HEAVY_SOURCE ? [post()] : [], undefined, source.channelId),
+            discoveryPass(['多路线'], source === HEAVY_SOURCE ? [post()] : [], undefined, source.channelId),
+        ]) {
+            const normalized = normalizePass(pass, value);
+            value.cards = mergePassCards(value.cards, normalized);
+            value.coverage[normalized.signature] = { observedAt: normalized.observedAt };
+        }
     }
 
     assert.deepEqual(missingCoverage(value), []);
     const manifests = buildManifests(value, '2026-08-06T01:10:00.000Z');
     assert.equal(manifests.length, 1);
-    assert.equal(manifests[0].period, 'previous-day');
+    assert.equal(manifests[0].period, 'today');
     assert.deepEqual(manifests[0].filters, { tags: [], tagMatch: 'any' });
     assert.equal(manifests[0].cards.length, 1);
+    assert.equal(manifests[0].channelId, HEAVY_SOURCE.channelId);
 });
 
 test('oversized jobs split into hot-first batches within the AIBAR manifest limit', () => {
     const value = job();
-    value.coverage = {
-        unfiltered: {},
-        'any:["原创"]': {},
-        'any:["多路线"]': {},
-    };
+    value.coverage = Object.fromEntries(DISCORD_SOURCES.flatMap(source => [
+        [`${source.channelId}/unfiltered`, {}],
+        [`${source.channelId}/any:["原创"]`, {}],
+        [`${source.channelId}/any:["多路线"]`, {}],
+    ]));
     value.cards = Array.from({ length: MANIFEST_BATCH_SIZE + 50 }, (_, index) => ({
         ...post({
             id: `147861223786${String(9520000 + index)}`,
             threadId: `147861223786${String(9520000 + index)}`,
             reactionCount: index,
         }),
+        sourceChannelId: HEAVY_SOURCE.channelId,
         observedAt: '2026-08-06T01:05:00.000Z',
     }));
 
@@ -122,19 +142,58 @@ test('filtered jobs require the exact Discord match mode and reject out-of-windo
     assert.throws(() => normalizePass({
         ...discoveryPass(['原创', '多路线']),
         view: { tags: ['原创', '多路线'], tagMatch: 'all', sort: 'created-at' },
-        posts: [post({ publishedAt: '2026-08-05T16:00:00.000Z' })],
-    }, value), /outside the T\+1 source window/);
+        posts: [post({ publishedAt: '2026-08-06T02:00:00.000Z' })],
+    }, value), /outside the manual snapshot window/);
 });
 
 test('coverage signatures never collide across tag boundaries', () => {
     const single = { tags: ['原创|多路线'], tagMatch: 'any', sort: 'created-at' };
     const pair = { tags: ['原创', '多路线'], tagMatch: 'any', sort: 'created-at' };
     const value = job();
-    value.tagCatalog = ['原创', '多路线', '原创|多路线'];
+    value.tagCatalogBySource[HEAVY_SOURCE.channelId] = ['原创', '多路线', '原创|多路线'];
     assert.notEqual(
         normalizePass(discoveryPass(single.tags, []), value).signature,
         normalizePass(discoveryPass(pair.tags, []), value).signature,
     );
+});
+
+test('source ids are validated and the same tag in separate forums has independent coverage', () => {
+    assert.throws(() => normalizeCatalog({
+        sourceChannelId: '1478601254312874999',
+        tags: ['原创'],
+        observedAt: '2026-08-06T01:00:00.000Z',
+    }), /not a configured Discord source/);
+
+    const value = job();
+    const heavy = normalizePass(discoveryPass([], [], undefined, HEAVY_SOURCE.channelId), value);
+    value.coverage[heavy.signature] = {};
+    assert.ok(missingCoverage(value).includes(`${TEXT_SOURCE.channelId}/unfiltered`));
+    assert.ok(missingCoverage(value).includes(`${LIGHT_SOURCE.channelId}/any:["原创"]`));
+    assert.ok(missingCoverage(value).includes(`${HEAVY_SOURCE.channelId}/any:["原创"]`));
+});
+
+test('cards from all forums are emitted as v1 manifests with their real source channel', () => {
+    const value = job({ tags: ['原创'], tagMatch: 'any' });
+    value.coverage = Object.fromEntries(DISCORD_SOURCES.map(source => [
+        `${source.channelId}/any:["原创"]`,
+        {},
+    ]));
+    value.cards = DISCORD_SOURCES.map((source, index) => ({
+        ...post({
+            id: `147861223786951991${index}`,
+            threadId: `147861223786951991${index}`,
+            sourceUrl: `https://discord.com/channels/1380075940285124724/147861223786951991${index}`,
+            reactionCount: 9 - index,
+        }),
+        sourceChannelId: source.channelId,
+        observedAt: '2026-08-06T01:05:00.000Z',
+    }));
+
+    const manifests = buildManifests(value, '2026-08-06T01:10:00.000Z');
+    assert.deepEqual(manifests.map(manifest => manifest.channelId), DISCORD_SOURCES.map(source => source.channelId));
+    assert.deepEqual(manifests.map(manifest => manifest.channelName), DISCORD_SOURCES.map(source => source.channelName));
+    assert.ok(manifests.every(manifest => manifest.version === 1 && manifest.cards.length === 1));
+    assert.ok(manifests.every(manifest => manifest.cards[0].sourceChannelId === undefined));
 });
 
 test('a discovery pass only covers posts that satisfy its visible Discord filters', () => {

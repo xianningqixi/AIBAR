@@ -1,18 +1,17 @@
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { useCharactersStore } from '@/stores/characters'
 import { useSessionStore } from '@/stores/session'
 import { useUiStore } from '@/stores/ui'
 import {
   downloadCommunityContent,
   listCommunityWorks,
+  publishDiscordCommunityWork,
   type CommunityWork,
   type CommunityWorkType,
+  type DiscordCommunitySource,
 } from '@/api/community'
-import { fetchCharacter, importCharacter } from '@/api/characters'
-import { characterGreetings, saveStoryFromCharacterGreeting } from '@/lib/storyFromCharacter'
-import DiscordImportPanel from '@/components/community/DiscordImportPanel.vue'
+import { importCharacter } from '@/api/characters'
 import WorkCard from '@/components/community/WorkCard.vue'
 import AppButton from '@/components/ui/AppButton.vue'
 import AppEmpty from '@/components/ui/AppEmpty.vue'
@@ -30,7 +29,6 @@ const chipClass = 'inline-flex h-9 shrink-0 items-center rounded-lg border px-3 
 
 const route = useRoute()
 const router = useRouter()
-const chars = useCharactersStore()
 const session = useSessionStore()
 const ui = useUiStore()
 
@@ -54,6 +52,30 @@ let requestSequence = 0
 const importUrl = ref('')
 const importing = ref(false)
 const importResult = ref('')
+const importError = ref('')
+const publishedWorkId = ref('')
+const publishedStatus = ref<'' | 'published' | 'duplicate'>('')
+
+function routeQueryText(value: unknown): string {
+  const candidate = Array.isArray(value) ? value[0] : value
+  return typeof candidate === 'string' ? candidate.trim() : ''
+}
+
+const discordSource = computed<DiscordCommunitySource | null>(() => {
+  const guildId = routeQueryText(route.query.discordGuildId)
+  const channelId = routeQueryText(route.query.discordChannelId)
+  const threadId = routeQueryText(route.query.discordThreadId)
+  const cardId = routeQueryText(route.query.discordCardId)
+  const sourceUrl = routeQueryText(route.query.discordSourceUrl)
+  const title = routeQueryText(route.query.discordTitle)
+  const authorName = routeQueryText(route.query.discordAuthorName)
+  const rawTags = route.query.discordTag
+  const tags = (Array.isArray(rawTags) ? rawTags : [rawTags])
+    .filter((tag): tag is string => typeof tag === 'string' && Boolean(tag.trim()))
+    .map(tag => tag.trim())
+  if (!guildId || !channelId || !threadId || !cardId || !sourceUrl || !title) return null
+  return { guildId, channelId, threadId, cardId, sourceUrl, title, authorName, tags }
+})
 
 const rankings = [
   { value: 'recommended', label: '推荐' },
@@ -154,11 +176,14 @@ function normalizeDiscordUrl(value: string): string {
 }
 
 async function importFromDiscord() {
-  if (!importUrl.value.trim()) return
+  if (!importUrl.value.trim() || !discordSource.value) return
   const accountHandle = session.user?.handle || ''
   const accountIsCurrent = () => accountHandle && session.user?.handle === accountHandle
   importing.value = true
   importResult.value = ''
+  importError.value = ''
+  publishedWorkId.value = ''
+  publishedStatus.value = ''
   try {
     const content = await downloadCommunityContent(normalizeDiscordUrl(importUrl.value.trim()))
     if (!accountIsCurrent()) return
@@ -167,35 +192,21 @@ async function importFromDiscord() {
     const imported = await importCharacter(file)
     if (!accountIsCurrent()) return
     const avatar = imported.file_name ? `${imported.file_name}.png` : ''
-    const issues: string[] = []
-    let storyText = ''
-    if (avatar) {
-      try {
-        const character = await fetchCharacter(avatar)
-        if (!accountIsCurrent()) return
-        const greeting = characterGreetings(character)[0]
-        if (greeting) {
-          await saveStoryFromCharacterGreeting(character, greeting, 0)
-          if (!accountIsCurrent()) return
-          storyText = '，并生成了故事卡'
-        }
-      } catch (e: unknown) {
-        issues.push(`故事卡生成失败：${getApiErrorMessage(e, '未知错误')}`)
-      }
-    } else {
-      issues.push('后端未返回角色文件名')
-    }
-    try {
-      await chars.load()
-      if (!accountIsCurrent()) return
-      if (chars.error) issues.push(`角色列表刷新失败：${chars.error}`)
-    } catch (e: unknown) {
-      issues.push(`角色列表刷新失败：${getApiErrorMessage(e, '未知错误')}`)
-    }
-    importResult.value = `角色卡已导入私人资料库${storyText}${issues.length ? `；${issues.join('；')}` : ''}`
-    ui.addToast(importResult.value, issues.length ? 'warning' : 'success', issues.length ? 5000 : 3000)
+    if (!avatar) throw new Error('后端未返回角色文件名，无法发布到公共区')
+    const publication = await publishDiscordCommunityWork({
+      sourceId: avatar,
+      source: discordSource.value,
+    })
+    if (!accountIsCurrent()) return
+    publishedWorkId.value = publication.work.id
+    publishedStatus.value = publication.status
+    importResult.value = publication.status === 'duplicate'
+      ? '公共区已存在相同角色卡，已关联现有作品'
+      : '角色卡已发布到公共区，所有用户均可使用'
+    ui.addToast(importResult.value, 'success')
   } catch (e: unknown) {
-    ui.addToast(`导入失败：${getApiErrorMessage(e)}`, 'error')
+    importError.value = `发布失败：${getApiErrorMessage(e)}`
+    ui.addToast(importError.value, 'error')
   } finally {
     importing.value = false
   }
@@ -214,8 +225,8 @@ onBeforeUnmount(() => {
 <template>
   <div class="min-h-[100dvh] bg-bg">
     <AppPageHeader
-      :title="source === 'discord' ? 'Discord 资源' : '社区作品'"
-      :subtitle="source === 'discord' ? '热门角色卡与隔离网页应用' : '角色卡、故事与提示词'"
+      :title="source === 'discord' ? 'Discord 公共发布' : '社区作品'"
+      :subtitle="source === 'discord' ? '发布 Discord 角色卡到公共区' : '角色卡、故事与提示词'"
       :show-back="false"
     >
       <template #actions>
@@ -236,7 +247,7 @@ onBeforeUnmount(() => {
           :class="source === 'discord' ? 'bg-brand-500/10 text-brand-300' : 'text-ink-secondary hover:bg-surface-sunken'"
           :aria-pressed="source === 'discord'"
           @click="selectSource('discord')"
-        ><span class="md:hidden">Discord 热门</span><span class="hidden md:inline">Discord 今日热门</span></button>
+        ><span class="md:hidden">Discord 发布</span><span class="hidden md:inline">Discord 公共发布</span></button>
       </div>
 
       <template v-if="source === 'community'">
@@ -277,16 +288,43 @@ onBeforeUnmount(() => {
       </template>
 
       <template v-else>
-        <div class="space-y-6">
-          <DiscordImportPanel />
-
-          <AppCard collapsible title="手动导入 Discord PNG 链接" :default-open="false">
-            <div class="max-w-3xl space-y-4">
-              <div class="flex flex-col gap-3 md:flex-row">
-                <AppInput v-model="importUrl" type="url" placeholder="cdn.discordapp.com/attachments/.../*.png" class="min-w-0 flex-1" @keydown.enter.prevent="importFromDiscord" />
-                <AppButton variant="secondary" :disabled="importing" @click="importFromDiscord">{{ importing ? '导入中…' : '导入到私人库' }}</AppButton>
+        <div class="max-w-3xl">
+          <AppCard padding="lg">
+            <div class="space-y-4">
+              <div>
+                <h2 class="text-base font-semibold text-ink-primary">发布 Discord 角色卡</h2>
+                <p class="mt-1 text-sm text-ink-muted">角色卡解析完成后会立即发布为公共作品。</p>
               </div>
-              <p v-if="importResult" class="text-sm text-emerald-700">{{ importResult }}</p>
+              <div v-if="discordSource" class="border-l-2 border-brand-500 pl-3">
+                <p class="text-sm font-medium text-ink-primary">{{ discordSource.title }}</p>
+                <p class="mt-1 text-xs text-ink-muted">{{ discordSource.authorName || 'Discord 作者' }}</p>
+              </div>
+              <p v-else class="text-sm text-amber-700" data-testid="discord-publish-context-error">缺少 Discord 帖子来源，请从本地同步控制台选择角色卡并发起发布。</p>
+              <div class="flex flex-col gap-3 md:flex-row">
+                <AppInput
+                  v-model="importUrl"
+                  data-testid="discord-png-import-input"
+                  type="url"
+                  placeholder="cdn.discordapp.com/attachments/.../*.png"
+                  class="min-w-0 flex-1"
+                  @keydown.enter.prevent="importFromDiscord"
+                />
+                <AppButton
+                  data-testid="discord-png-import-submit"
+                  :disabled="importing || !importUrl.trim() || !discordSource"
+                  @click="importFromDiscord"
+                >{{ importing ? '发布中…' : '发布到公共区' }}</AppButton>
+              </div>
+              <div v-if="importResult" class="flex flex-wrap items-center gap-3">
+                <p
+                  data-testid="discord-png-import-result"
+                  :data-publish-status="publishedStatus"
+                  :data-work-id="publishedWorkId"
+                  class="text-sm text-emerald-700"
+                >{{ importResult }}</p>
+                <AppButton size="sm" variant="secondary" @click="router.push(`/work/${encodeURIComponent(publishedWorkId)}`)">查看公共作品</AppButton>
+              </div>
+              <p v-if="importError" data-testid="discord-png-import-error" class="text-sm text-red-700">{{ importError }}</p>
             </div>
           </AppCard>
         </div>

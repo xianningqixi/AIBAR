@@ -327,7 +327,7 @@ onBeforeUnmount(() => {
 <template>
   <div class="flex min-h-[100dvh] flex-col bg-bg text-ink-primary" data-testid="web-app-page">
     <header class="flex min-h-14 shrink-0 items-center gap-2 border-b border-border bg-surface px-3 sm:px-5">
-      <AppButton variant="ghost" size="sm" title="返回 Discord 热门" @click="router.push('/hub?source=discord')">返回</AppButton>
+      <AppButton variant="ghost" size="sm" title="返回 Discord 公共发布" @click="router.push('/hub?source=discord')">返回</AppButton>
       <div class="min-w-0 flex-1">
         <h1 class="truncate text-sm font-semibold sm:text-base">{{ card?.title || '独立网页应用' }}</h1>
         <p v-if="card" class="truncate text-[11px] text-ink-muted">{{ card.authorName }} · {{ launchHost }}</p>
@@ -343,8 +343,8 @@ onBeforeUnmount(() => {
     <main v-if="!card" class="flex flex-1 items-center justify-center px-5 py-12">
       <div class="w-full max-w-xl rounded-md border border-border bg-surface p-6 text-center">
         <h2 class="text-lg font-semibold">找不到网页应用</h2>
-        <p class="mt-2 text-sm text-ink-secondary">请从 Discord 热门清单中的网页应用条目启动。</p>
-        <AppButton class="mt-5" @click="router.push('/hub?source=discord')">返回热门榜</AppButton>
+        <p class="mt-2 text-sm text-ink-secondary">该网页应用入口已移至本地 Discord 导入控制台。</p>
+        <AppButton class="mt-5" @click="router.push('/hub?source=discord')">返回 Discord 发布</AppButton>
       </div>
     </main>
 

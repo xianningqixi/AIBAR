@@ -1,5 +1,6 @@
 import crypto from 'node:crypto';
 
+import { DISCORD_CHANNEL_ID, DISCORD_SOURCES } from './config.js';
 import {
     buildManifests,
     mergePassCards,
@@ -8,19 +9,20 @@ import {
     normalizeFilters,
     normalizePass,
 } from './manifest.js';
-import {
-    dateKeyInShanghai,
-    isAtOrAfterRunTime,
-    nextRunAt,
-    previousDayKey,
-    shiftDateKey,
-    sourceWindow,
-} from './t1.js';
-
-// 休眠/停机跨天后最多自动回补的天数；更早的历史仍需显式 trigger
-const MAX_BACKFILL_DAYS = 7;
+import { manualTodayWindow } from './time.js';
 
 const TERMINAL_STATUSES = new Set(['delivered', 'failed']);
+const WORKER_STATES = new Set(['starting', 'idle', 'scanning', 'applying', 'waiting-selection', 'importing', 'blocked']);
+const WORKFLOW_STATES = new Set(['waiting-selection', 'importing', 'complete', 'blocked']);
+const IMPORT_ITEM_STATES = new Set(['pending', 'importing', 'imported', 'failed', 'skipped']);
+const TERMINAL_IMPORT_ITEM_STATES = new Set(['imported', 'failed', 'skipped']);
+const WORKFLOW_TRANSITIONS = new Map([
+    ['waiting-selection', new Set(['waiting-selection', 'importing', 'complete', 'blocked'])],
+    ['importing', new Set(['waiting-selection', 'importing', 'complete', 'blocked'])],
+    ['blocked', new Set(['waiting-selection', 'importing', 'complete', 'blocked'])],
+    ['complete', new Set(['complete'])],
+]);
+const WORKER_ONLINE_WINDOW_MS = 90_000;
 
 function iso(clock) {
     const value = clock();
@@ -28,10 +30,82 @@ function iso(clock) {
     return value.toISOString();
 }
 
-function jobId(sourceDate, filters) {
-    if (!filters.tags.length) return `t1-${sourceDate}`;
-    const digest = crypto.createHash('sha256').update(JSON.stringify(filters)).digest('hex').slice(0, 10);
-    return `t1-${sourceDate}-${digest}`;
+function manualJobId(createdAt, jobs) {
+    const base = `manual-${createdAt.replace(/\D/g, '')}`;
+    const existing = new Set(jobs.map(job => job.id));
+    let id = base;
+    let suffix = 2;
+    while (existing.has(id)) {
+        id = `${base}-${suffix}`;
+        suffix += 1;
+    }
+    return id;
+}
+
+function manifestBatchId(manifest) {
+    return crypto.createHash('sha256').update(JSON.stringify(manifest)).digest('hex');
+}
+
+function normalizeTrigger(value) {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('trigger must be an object');
+    const unsupported = Object.keys(value).find(key => key !== 'filters');
+    if (unsupported) throw new Error(`trigger.${unsupported} is not allowed`);
+    return normalizeFilters(value.filters);
+}
+
+function normalizeWorkerHeartbeat(value) {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('heartbeat must be an object');
+    const allowed = new Set(['workerId', 'state', 'jobId', 'message']);
+    const unsupported = Object.keys(value).find(key => !allowed.has(key));
+    if (unsupported) throw new Error(`heartbeat.${unsupported} is not allowed`);
+    const workerId = String(value.workerId || '').trim();
+    const state = String(value.state || '').trim();
+    const jobId = String(value.jobId || '').trim();
+    const message = String(value.message || '').trim();
+    if (!workerId || workerId.length > 120) throw new Error('heartbeat.workerId is required');
+    if (!WORKER_STATES.has(state)) throw new Error('heartbeat.state is invalid');
+    if (jobId.length > 160) throw new Error('heartbeat.jobId is too long');
+    if (message.length > 500) throw new Error('heartbeat.message is too long');
+    return { workerId, state, jobId, message };
+}
+
+function normalizeWorkflowUpdate(value) {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('workflow must be an object');
+    const allowed = new Set(['state', 'message']);
+    const unsupported = Object.keys(value).find(key => !allowed.has(key));
+    if (unsupported) throw new Error(`workflow.${unsupported} is not allowed`);
+    const state = String(value.state || '').trim();
+    const message = String(value.message || '').trim();
+    if (!WORKFLOW_STATES.has(state)) throw new Error('workflow.state is invalid');
+    if (message.length > 500) throw new Error('workflow.message is too long');
+    return { state, message };
+}
+
+function normalizeImportRequest(value) {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('importRequest must be an object');
+    const unsupported = Object.keys(value).find(key => key !== 'cardIds');
+    if (unsupported) throw new Error(`importRequest.${unsupported} is not allowed`);
+    if (!Array.isArray(value.cardIds) || !value.cardIds.length || value.cardIds.length > 1000) {
+        throw new Error('importRequest.cardIds must contain 1 to 1000 items');
+    }
+    const cardIds = value.cardIds.map((id) => String(id || '').trim());
+    if (cardIds.some(id => !/^\d{17,20}$/.test(id))) throw new Error('importRequest.cardIds contains an invalid card id');
+    if (new Set(cardIds).size !== cardIds.length) throw new Error('importRequest.cardIds contains duplicates');
+    return { cardIds };
+}
+
+function normalizeImportItemUpdate(value) {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('importItem must be an object');
+    const allowed = new Set(['cardId', 'state', 'message']);
+    const unsupported = Object.keys(value).find(key => !allowed.has(key));
+    if (unsupported) throw new Error(`importItem.${unsupported} is not allowed`);
+    const cardId = String(value.cardId || '').trim();
+    const state = String(value.state || '').trim();
+    const message = String(value.message || '').trim();
+    if (!/^\d{17,20}$/.test(cardId)) throw new Error('importItem.cardId is required');
+    if (!IMPORT_ITEM_STATES.has(state) || state === 'pending') throw new Error('importItem.state is invalid');
+    if (message.length > 500) throw new Error('importItem.message is too long');
+    return { cardId, state, message };
 }
 
 function findJob(state, id) {
@@ -52,34 +126,142 @@ function assertMutable(job) {
     }
 }
 
-// 标签目录是覆盖检查的基准：没有目录时 "unfiltered" 一个 pass 就能通过 complete，
-// 会静默漏扫全部标签视图，所以在接受 pass 和 complete 之前强制要求已上报目录。
-function assertCatalogReported(job) {
-    if (!job.catalogObservedAt) {
-        const error = new Error('Report the Discord tag catalog before submitting passes or completing');
+function jobSources(job) {
+    if (Array.isArray(job.sources) && job.sources.length) return job.sources;
+    return [{
+        channelId: job.channelId || DISCORD_CHANNEL_ID,
+        channelName: job.channelName || '重前端·独立前端',
+    }];
+}
+
+function sourceCatalog(job, sourceId) {
+    if (Array.isArray(job.sources) && job.sources.length) return job.tagCatalogBySource?.[sourceId] || [];
+    return job.tagCatalog || [];
+}
+
+function sourceCatalogObservedAt(job, sourceId) {
+    if (Array.isArray(job.sources) && job.sources.length) return job.catalogObservedAtBySource?.[sourceId] || '';
+    return job.catalogObservedAt || '';
+}
+
+function assertCatalogReported(job, onlySourceId = '') {
+    const sources = jobSources(job).filter(source => !onlySourceId || source.channelId === onlySourceId);
+    if (!sources.length) {
+        const error = new Error('Discord source is not part of this job');
+        error.statusCode = 409;
+        throw error;
+    }
+    const missing = sources.find(source => (
+        !sourceCatalogObservedAt(job, source.channelId) || !sourceCatalog(job, source.channelId).length
+    ));
+    if (missing) {
+        const error = new Error('Report a non-empty Discord tag catalog before submitting passes or completing');
         error.statusCode = 409;
         throw error;
     }
 }
 
-// 兼容旧状态文件里的单 manifest 字段
+function assertDeliveryNotStarted(job) {
+    if ((job.deliveredBatches || 0) > 0) {
+        const error = new Error('A job cannot be rescanned after manifest delivery has started');
+        error.statusCode = 409;
+        throw error;
+    }
+}
+
+// 兼容 review 前状态文件里的单 manifest 字段。
 function jobManifests(job) {
     if (Array.isArray(job.manifests)) return job.manifests;
     return job.manifest ? [job.manifest] : [];
 }
 
+function manifestCards(job) {
+    const seen = new Set();
+    return jobManifests(job).flatMap(manifest => (manifest.cards || []).map(card => ({
+        ...card,
+        sourceChannelId: manifest.channelId || job.channelId || DISCORD_CHANNEL_ID,
+        sourceName: manifest.channelName || job.channelName || 'Discord 栏目',
+    }))).filter((card) => {
+        if (seen.has(card.id)) return false;
+        seen.add(card.id);
+        return true;
+    });
+}
+
+function selectableCard(card) {
+    const fileName = String(card.resource?.fileName || '').toLowerCase();
+    return (card.resource?.kind || 'character-card') === 'character-card'
+        && card.resource?.availability !== 'unsupported'
+        && (!fileName || fileName.endsWith('.png'));
+}
+
+function dashboardCards(job) {
+    if (!job || !['ready', 'delivered'].includes(job.status)) return [];
+    return manifestCards(job)
+        .filter(card => (card.resource?.kind || 'character-card') === 'character-card')
+        .map((card) => {
+            const item = job.importItems?.[card.id];
+            return {
+                id: card.id,
+                title: card.title,
+                authorName: card.authorName,
+                sourceUrl: card.sourceUrl,
+                sourceChannelId: card.sourceChannelId,
+                sourceName: card.sourceName,
+                tags: card.tags,
+                reactionCount: card.reactionCount,
+                replyCount: card.replyCount,
+                availability: card.resource?.availability || 'browser',
+                selectable: selectableCard(card),
+                importStatus: item?.status || '',
+                importMessage: item?.message || '',
+            };
+        })
+        .sort((left, right) => (
+            right.reactionCount - left.reactionCount
+            || left.sourceName.localeCompare(right.sourceName)
+            || left.id.localeCompare(right.id)
+        ));
+}
+
+function importProgress(job) {
+    const requested = job.importRequest?.cardIds || [];
+    const terminal = requested.filter(id => TERMINAL_IMPORT_ITEM_STATES.has(job.importItems?.[id]?.status)).length;
+    // failed 虽是终态但允许重试，所以“剩余”按未成功/未跳过统计。
+    const retryable = requested.filter(id => !['imported', 'skipped'].includes(job.importItems?.[id]?.status)).length;
+    return { requested: requested.length, terminal, retryable };
+}
+
 function summary(job) {
+    const progress = importProgress(job);
+    const sources = jobSources(job);
+    const filters = job.filters || { tags: [], tagMatch: 'any' };
+    const tagCount = sources.reduce((total, source) => total + sourceCatalog(job, source.channelId).length, 0);
+    const scannedSourceCount = sources.filter(source => sourceCatalogObservedAt(job, source.channelId)).length;
     return {
         id: job.id,
-        sourceDate: job.sourceDate,
+        mode: job.mode || (job.sourceDate ? 'legacy-t1' : 'manual'),
+        period: job.period || (job.sourceDate ? 'previous-day' : 'today'),
+        localDate: job.localDate || job.sourceDate || '',
         window: job.window,
         status: job.status,
-        filters: job.filters,
-        tagCount: job.tagCatalog.length,
-        passCount: Object.keys(job.coverage).length,
-        cardCount: job.cards.length,
+        workflowStatus: job.workflowStatus || (job.status === 'delivered' ? 'complete' : ''),
+        workflowMessage: job.workflowMessage || '',
+        workflowUpdatedAt: job.workflowUpdatedAt || '',
+        filters,
+        sourceCount: sources.length,
+        sourceTargetCount: DISCORD_SOURCES.length,
+        sourceScopeComplete: sources.length === DISCORD_SOURCES.length,
+        scannedSourceCount,
+        tagCount,
+        passCount: Object.keys(job.coverage || {}).length,
+        passTargetCount: filters.tags.length ? sources.length : tagCount + sources.length,
+        cardCount: (job.cards || []).length,
         batchCount: jobManifests(job).length,
         deliveredBatches: job.deliveredBatches || 0,
+        importRequestedCount: progress.requested,
+        importTerminalCount: progress.terminal,
+        importRetryableCount: progress.retryable,
         missingCoverage: missingCoverage(job),
         workerId: job.workerId || '',
         error: job.error || '',
@@ -93,73 +275,48 @@ export class DiscordImportService {
         this.store = store;
         this.config = config;
         this.clock = clock;
+        this.workerHeartbeat = null;
     }
 
     async initialize() {
         await this.store.load();
-        if (isAtOrAfterRunTime(this.clock(), this.config.runHour, this.config.runMinute)) {
-            await this.ensureScheduledJobs();
-        }
     }
 
-    /**
-     * 建单入口（每日调度和启动补建共用）：从最近一个默认任务的次日补到昨天，
-     * 覆盖休眠/停机跨天漏掉的日期，最多回补 MAX_BACKFILL_DAYS 天。
-     * 首次运行（没有任何默认任务）只建昨天，与历史行为一致。
-     */
-    async ensureScheduledJobs() {
-        const yesterday = previousDayKey(this.clock());
-        const scheduledDates = this.store.read().jobs
-            .filter(job => !job.filters.tags.length)
-            .map(job => job.sourceDate)
-            .sort();
-        const latest = scheduledDates[scheduledDates.length - 1] || '';
-        const targets = [];
-        if (!latest) {
-            targets.push(yesterday);
-        } else {
-            let cursor = yesterday;
-            for (let day = 0; day < MAX_BACKFILL_DAYS && cursor > latest; day += 1) {
-                targets.unshift(cursor);
-                cursor = shiftDateKey(cursor, -1);
-            }
-        }
-        const summaries = [];
-        for (const sourceDate of targets) {
-            summaries.push(await this.trigger({ sourceDate }));
-        }
-        return summaries;
-    }
-
-    async trigger({ sourceDate = previousDayKey(this.clock()), filters = { tags: [], tagMatch: 'any' } } = {}) {
-        const normalizedFilters = normalizeFilters(filters);
-        const window = sourceWindow(sourceDate);
-        // T+1 只处理已经结束的自然日；今天/未来的窗口会让所有帖子都落在窗口外
-        if (sourceDate >= dateKeyInShanghai(this.clock())) {
-            const error = new Error('sourceDate must be a completed natural day in Asia/Shanghai');
-            error.statusCode = 422;
-            throw error;
-        }
-        const id = jobId(sourceDate, normalizedFilters);
-        const createdAt = iso(this.clock);
+    async trigger(value = {}) {
+        const normalizedFilters = normalizeTrigger(value);
+        const triggeredAt = iso(this.clock);
+        const window = manualTodayWindow(new Date(triggeredAt));
         return this.store.update((state) => {
-            const existing = state.jobs.find(job => job.id === id);
-            if (existing) return summary(existing);
+            const id = manualJobId(triggeredAt, state.jobs);
             const job = {
                 id,
-                sourceDate,
-                window,
+                mode: 'manual',
+                period: 'today',
+                localDate: window.localDate,
+                triggeredAt,
+                window: { start: window.start, end: window.end },
                 status: 'queued',
+                workflowStatus: '',
+                workflowMessage: '',
+                workflowUpdatedAt: '',
                 filters: normalizedFilters,
                 channelName: this.config.channelName,
+                sources: (this.config.sources || DISCORD_SOURCES).map(source => ({ ...source })),
+                tagCatalogBySource: {},
+                catalogObservedAtBySource: {},
                 tagCatalog: [],
                 coverage: {},
                 cards: [],
+                manifests: [],
                 manifest: null,
+                deliveredBatches: 0,
+                deliveredBatchIds: [],
+                importRequest: null,
+                importItems: {},
                 workerId: '',
                 error: '',
-                createdAt,
-                updatedAt: createdAt,
+                createdAt: triggeredAt,
+                updatedAt: triggeredAt,
             };
             state.jobs.push(job);
             state.jobs.sort((left, right) => right.createdAt.localeCompare(left.createdAt));
@@ -173,6 +330,47 @@ export class DiscordImportService {
 
     latestJob() {
         return this.listJobs()[0] || null;
+    }
+
+    dashboardSnapshot() {
+        const state = this.store.read();
+        const latest = state.jobs[0] || null;
+        return {
+            mode: 'manual',
+            timezone: 'Asia/Shanghai',
+            sources: (this.config.sources || DISCORD_SOURCES).map(source => ({ ...source })),
+            now: iso(this.clock),
+            worker: this.workerStatus(),
+            latestJob: latest ? summary(latest) : null,
+            cards: dashboardCards(latest),
+            jobs: state.jobs.slice(0, 12).map(summary),
+        };
+    }
+
+    workerStatus() {
+        if (!this.workerHeartbeat) {
+            return { online: false, state: 'offline', workerId: '', jobId: '', message: '', observedAt: '' };
+        }
+        const now = this.clock();
+        if (!(now instanceof Date) || !Number.isFinite(now.getTime())) throw new Error('Clock returned an invalid date');
+        return {
+            ...this.workerHeartbeat,
+            online: now.getTime() - Date.parse(this.workerHeartbeat.observedAt) <= WORKER_ONLINE_WINDOW_MS,
+        };
+    }
+
+    reportWorker(value) {
+        const heartbeat = normalizeWorkerHeartbeat(value);
+        if (heartbeat.jobId) findJob(this.store.read(), heartbeat.jobId);
+        this.workerHeartbeat = { ...heartbeat, observedAt: iso(this.clock) };
+        return this.workerStatus();
+    }
+
+    clearWorker(jobId = '') {
+        if (!jobId || !this.workerHeartbeat?.jobId || this.workerHeartbeat.jobId === jobId) {
+            this.workerHeartbeat = null;
+        }
+        return this.workerStatus();
     }
 
     getJob(id) {
@@ -192,8 +390,6 @@ export class DiscordImportService {
                 throw error;
             }
             job.workerId = normalizedWorkerId;
-            // 重新 claim 不降级已完成扫描的任务：ready 任务保持可交接，
-            // 补扫会经由 recordPass 自然回到 scanning
             if (job.status === 'queued') job.status = 'scanning';
             job.updatedAt = updatedAt;
             return summary(job);
@@ -206,8 +402,18 @@ export class DiscordImportService {
         return this.store.update((state) => {
             const job = findJob(state, id);
             assertMutable(job);
-            job.tagCatalog = catalog.tags;
-            job.catalogObservedAt = catalog.observedAt;
+            assertDeliveryNotStarted(job);
+            const source = jobSources(job).find(candidate => candidate.channelId === catalog.sourceChannelId);
+            if (!source) throw new Error('catalog.sourceChannelId is not part of this job');
+            if (Array.isArray(job.sources) && job.sources.length) {
+                job.tagCatalogBySource ||= {};
+                job.catalogObservedAtBySource ||= {};
+                job.tagCatalogBySource[catalog.sourceChannelId] = catalog.tags;
+                job.catalogObservedAtBySource[catalog.sourceChannelId] = catalog.observedAt;
+            } else {
+                job.tagCatalog = catalog.tags;
+                job.catalogObservedAt = catalog.observedAt;
+            }
             job.status = 'scanning';
             job.updatedAt = updatedAt;
             return summary(job);
@@ -219,9 +425,11 @@ export class DiscordImportService {
         return this.store.update((state) => {
             const job = findJob(state, id);
             assertMutable(job);
-            assertCatalogReported(job);
+            assertDeliveryNotStarted(job);
+            assertCatalogReported(job, value?.sourceChannelId);
             const discoveryPass = normalizePass(value, job);
-            job.cards = mergePassCards(job.cards, discoveryPass);
+            job.cards = mergePassCards(job.cards || [], discoveryPass);
+            job.coverage ||= {};
             job.coverage[discoveryPass.signature] = {
                 observedAt: discoveryPass.observedAt,
                 postCount: discoveryPass.posts.length,
@@ -239,19 +447,21 @@ export class DiscordImportService {
         return this.store.update((state) => {
             const job = findJob(state, id);
             assertMutable(job);
+            if (job.status === 'ready' || job.status === 'empty') return summary(job);
+            assertDeliveryNotStarted(job);
             assertCatalogReported(job);
-            const manifests = buildManifests(job, completedAt);
+            const manifests = buildManifests(job, job.triggeredAt || completedAt);
             job.manifests = manifests;
             job.manifest = null;
             job.deliveredBatches = 0;
+            job.deliveredBatchIds = [];
             job.status = manifests.length ? 'ready' : 'empty';
-            job.error = manifests.length ? '' : 'No posts were found in the T+1 source window';
+            job.error = manifests.length ? '' : 'No posts were found in the manual snapshot window';
             job.updatedAt = completedAt;
             return summary(job);
         });
     }
 
-    // 始终返回下一个未交接的批次；worker 每次 delivered 之后重新 GET 即可拿到下一批
     getManifest(id) {
         const job = this.getJob(id);
         const manifests = jobManifests(job);
@@ -262,27 +472,172 @@ export class DiscordImportService {
             error.statusCode = 409;
             throw error;
         }
-        const index = Math.min(job.deliveredBatches || 0, manifests.length - 1);
-        return structuredClone(manifests[index]);
+        const batchIndex = job.deliveredBatches || 0;
+        if (batchIndex >= manifests.length) throw new Error('Manifest delivery state is invalid');
+        const manifest = manifests[batchIndex];
+        return {
+            batchId: manifestBatchId(manifest),
+            batchIndex,
+            batchCount: manifests.length,
+            manifest: structuredClone(manifest),
+        };
     }
 
-    async markDelivered(id) {
+    async markDelivered(id, value) {
+        const requestedBatchId = String(value?.batchId || '').trim();
+        if (!/^[a-f0-9]{64}$/.test(requestedBatchId)) throw new Error('batchId is required');
         const deliveredAt = iso(this.clock);
         return this.store.update((state) => {
             const job = findJob(state, id);
             const manifests = jobManifests(job);
+            const batchIds = manifests.map(manifestBatchId);
+            const requestedIndex = batchIds.indexOf(requestedBatchId);
+            if (requestedIndex < 0) {
+                const error = new Error('batchId does not belong to this job');
+                error.statusCode = 409;
+                throw error;
+            }
+            const deliveredBatches = job.deliveredBatches || 0;
+            if (requestedIndex < deliveredBatches) return summary(job);
             if (job.status !== 'ready' || !manifests.length) {
                 const error = new Error('Only ready jobs can be marked delivered');
                 error.statusCode = 409;
                 throw error;
             }
-            job.deliveredBatches = (job.deliveredBatches || 0) + 1;
+            if (requestedIndex !== deliveredBatches) {
+                const error = new Error('Only the current manifest batch can be marked delivered');
+                error.statusCode = 409;
+                throw error;
+            }
+            job.deliveredBatches = deliveredBatches + 1;
+            job.deliveredBatchIds = batchIds.slice(0, job.deliveredBatches);
             job.updatedAt = deliveredAt;
             if (job.deliveredBatches >= manifests.length) {
                 job.status = 'delivered';
                 job.deliveredAt = deliveredAt;
+                job.workflowStatus = 'waiting-selection';
+                job.workflowMessage = '';
+                job.workflowUpdatedAt = deliveredAt;
             }
             return summary(job);
+        });
+    }
+
+    async updateWorkflow(id, value) {
+        const workflow = normalizeWorkflowUpdate(value);
+        const updatedAt = iso(this.clock);
+        return this.store.update((state) => {
+            const job = findJob(state, id);
+            if (job.status !== 'delivered') {
+                const error = new Error('Workflow can only be updated after manifest delivery');
+                error.statusCode = 409;
+                throw error;
+            }
+            const current = job.workflowStatus || 'complete';
+            if (!WORKFLOW_TRANSITIONS.get(current)?.has(workflow.state)) {
+                const error = new Error(`Workflow cannot transition from ${current} to ${workflow.state}`);
+                error.statusCode = 409;
+                throw error;
+            }
+            if (workflow.state === 'importing' && !job.importRequest?.cardIds?.length) {
+                const error = new Error('Importing requires a dashboard import request');
+                error.statusCode = 409;
+                throw error;
+            }
+            if (workflow.state === 'complete') {
+                const progress = importProgress(job);
+                if (!progress.requested || progress.terminal !== progress.requested) {
+                    const error = new Error('Workflow cannot complete before every requested card has a terminal result');
+                    error.statusCode = 409;
+                    throw error;
+                }
+            }
+            job.workflowStatus = workflow.state;
+            job.workflowMessage = workflow.message;
+            job.workflowUpdatedAt = updatedAt;
+            job.updatedAt = updatedAt;
+            return summary(job);
+        });
+    }
+
+    async requestImport(id, value) {
+        const request = normalizeImportRequest(value);
+        const requestedAt = iso(this.clock);
+        return this.store.update((state) => {
+            const job = findJob(state, id);
+            if (job.status !== 'delivered' || !['waiting-selection', 'blocked'].includes(job.workflowStatus)) {
+                const error = new Error('Cards can only be selected after the hot list is ready');
+                error.statusCode = 409;
+                throw error;
+            }
+            const existing = job.importRequest?.cardIds || [];
+            if (existing.length) {
+                if (existing.length === request.cardIds.length && existing.every((cardId, index) => cardId === request.cardIds[index])) {
+                    return summary(job);
+                }
+                const error = new Error('This job already has an import request');
+                error.statusCode = 409;
+                throw error;
+            }
+            const cardById = new Map(manifestCards(job).map(card => [card.id, card]));
+            for (const cardId of request.cardIds) {
+                const card = cardById.get(cardId);
+                if (!card || !selectableCard(card)) {
+                    const error = new Error(`Card ${cardId} cannot be selected for import`);
+                    error.statusCode = 422;
+                    throw error;
+                }
+            }
+            job.importRequest = { cardIds: request.cardIds, requestedAt };
+            job.importItems = Object.fromEntries(request.cardIds.map(cardId => [cardId, {
+                status: 'pending',
+                message: '',
+                updatedAt: requestedAt,
+            }]));
+            job.workflowMessage = `已请求发布 ${request.cardIds.length} 项，等待 Worker`;
+            job.workflowUpdatedAt = requestedAt;
+            job.updatedAt = requestedAt;
+            return summary(job);
+        });
+    }
+
+    // “继续发布”只校验已持久化请求仍可恢复，不改任务状态；由 HTTP 层再启动一次性发布 Worker。
+    resumeImport(id) {
+        const job = findJob(this.store.read(), id);
+        if (job.status !== 'delivered' || !job.importRequest?.cardIds?.length) {
+            const error = new Error('No persisted import request to resume');
+            error.statusCode = 409;
+            throw error;
+        }
+        if (job.workflowStatus === 'complete') {
+            const error = new Error('Import is already complete');
+            error.statusCode = 409;
+            throw error;
+        }
+        return summary(job);
+    }
+
+    async updateImportItem(id, value) {
+        const update = normalizeImportItemUpdate(value);
+        const updatedAt = iso(this.clock);
+        return this.store.update((state) => {
+            const job = findJob(state, id);
+            const item = job.importItems?.[update.cardId];
+            if (job.status !== 'delivered' || !item || !job.importRequest?.cardIds?.includes(update.cardId)) {
+                const error = new Error('Import item is not part of the active request');
+                error.statusCode = 409;
+                throw error;
+            }
+            if (TERMINAL_IMPORT_ITEM_STATES.has(item.status) && item.status !== 'failed' && item.status !== update.state) {
+                const error = new Error(`Import item cannot transition from ${item.status} to ${update.state}`);
+                error.statusCode = 409;
+                throw error;
+            }
+            item.status = update.state;
+            item.message = update.message;
+            item.updatedAt = updatedAt;
+            job.updatedAt = updatedAt;
+            return { ...summary(job), item: { cardId: update.cardId, ...item } };
         });
     }
 
@@ -302,40 +657,5 @@ export class DiscordImportService {
             job.updatedAt = failedAt;
             return summary(job);
         });
-    }
-
-    nextRunAt() {
-        return nextRunAt(this.clock(), this.config.runHour, this.config.runMinute);
-    }
-}
-
-export class T1Scheduler {
-    constructor(service) {
-        this.service = service;
-        this.timer = null;
-    }
-
-    start() {
-        this.#schedule();
-    }
-
-    close() {
-        if (this.timer) clearTimeout(this.timer);
-        this.timer = null;
-    }
-
-    #schedule() {
-        const runAt = this.service.nextRunAt();
-        const delay = Math.max(1, runAt.getTime() - Date.now());
-        this.timer = setTimeout(async () => {
-            try {
-                await this.service.ensureScheduledJobs();
-            } catch (error) {
-                console.error('Discord import service failed to create the scheduled job:', error);
-            } finally {
-                this.#schedule();
-            }
-        }, delay);
-        this.timer.unref?.();
     }
 }

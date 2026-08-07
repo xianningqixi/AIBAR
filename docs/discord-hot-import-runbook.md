@@ -1,32 +1,34 @@
-# Discord 热门资源同步与导入 Runbook
+# Discord 热门角色卡同步与公共发布 Runbook
 
-本文是 AIBAR Discord 热门资源的可执行操作手册，面向任何“浏览器助手”——即能在用户已登录的 Chrome 中执行可见页面操作的 AI 代理（如 Claude Code；历史上也用过 Codex）。助手在执行“刷新热门榜”“导入已选”“重试失败项”或“支持帖子自带前端”之前，都应先读完本文和 [`discord-browser-import.md`](./discord-browser-import.md)。没有助手时，用户也可以按本文流程手动操作：自行整理 manifest 粘贴进面板，再逐项粘贴 CDN 链接或上传本地文件。
+本文是 AIBAR Discord 热门角色卡的可执行操作手册，面向能在用户已登录的 Chrome 中执行可见页面操作的浏览器 worker。热门榜、多选和逐项结果都位于本机 `127.0.0.1:4317` 控制台；远端 AIBAR 手动 PNG 入口负责把所选卡发布为公共社区作品。
 
 ## 快速启动
 
-在 Claude Code 中执行 `/discord-import`，或向任意浏览器助手直接说：
+先打开 `http://127.0.0.1:4317/` 并点击“开始同步”。该点击会创建 job 并立即启动一次性 Codex Worker；同步完成后 Worker 退出，不做 heartbeat 轮询。只有需要人工恢复失败 job 时才使用下面的命令：
 
 ```text
-按 docs/discord-hot-import-runbook.md 执行 Discord T+1 同步：遍历 Discord 原生标签筛选，收集 Asia/Shanghai 前一自然日的全部候选并去重；等待我在页面勾选后，完成所有下载、导入、网页应用分类和失败重试，直到失败数归零或每项都有明确的不可处理原因。
+按 docs/discord-hot-import-runbook.md 消费我刚在本地控制台创建的任务：依次遍历三个固定栏目及各自的 Discord 原生标签筛选，收集 Asia/Shanghai 今日 00:00 到点击时刻的全部角色卡候选并去重；把合并列表发布到本地控制台，等待我勾选并点击“发布已选”后，只通过远端 AIBAR 手动 PNG 入口逐项发布到公共区，直到每项都有明确结果。
 ```
 
-如果清单已经存在，只需要继续导入：
+如果清单已经存在，只需要继续发布：
 
 ```text
-按 docs/discord-hot-import-runbook.md 处理 AIBAR 页面里刚刚授权的 Discord 导入请求，并重试所有失败项。
+按 docs/discord-hot-import-runbook.md 处理本地控制台里刚刚授权的 Discord 公共发布请求，并重试所有失败项。
 ```
 
 ## 固定边界
 
 - 工作目录：AIBAR 仓库根目录。
 - Discord guild：`1380075940285124724`。
-- Discord forum channel：`1478612237869519021`。
-- AIBAR 页面：本地开发为 `http://127.0.0.1:5173/#/hub?source=discord`；目标是已部署的正式环境时，改用 `https://<服务器地址>/aibar/#/hub?source=discord`。
+- Discord forums：
+  - 纯文字：`1478601254312874024`
+  - 轻前端·美化：`1478601664838766723`
+  - 重前端·独立前端：`1478612237869519021`
+- AIBAR 页面：本地开发为 `http://127.0.0.1:5173/#/hub?source=discord`；本机控制台的一次性发布 Worker 固定使用 `AIBAR_DISCORD_AIBAR_URL`，当前正式目标为 `https://172.86.116.166/aibar/#/hub?source=discord`，不得回退到本地 Vite 或本地 SillyTavern。
 - 前端代理目标（仅本地开发）：`http://127.0.0.1:8001`。
-- 默认同步数量：100 项；用户要求更多时按用户数量执行。
-- T+1 同步范围：`Asia/Shanghai` 前一自然日 `[00:00, 24:00)` 的全部候选，不设 100 项下限；首次回填或热门榜刷新仍默认至少 100 项。
+- 手动同步范围：`Asia/Shanghai` 触发当日 `[00:00, 触发时刻)` 的全部候选；刷新时重新触发一个新任务，不复用旧快照。
 - 默认标签：不限制最终标签；采集时遍历所有可见标签按钮并以无标签视图补漏。
-- 角色卡支持：`.png`、`.json`、`.yaml`、`.yml`、`.charx`、`.byaf`。
+- 自动发布只支持 `.png`；其他格式在本地榜单标记为不可自动处理。
 - Discord 卡体上限：64 MB。通用 ZIP/RAR、APK、安装器、扩展包和普通图片不属于角色卡。
 
 只使用用户已经登录的 Chrome 可见页面。禁止读取或记录 Cookie、token、Authorization header、浏览器密码、localStorage 或其他会话存储；禁止调用 Discord 私有 API 或使用 self-bot。密码只能从帖子可见内容中临时读取并立即用于对应下载，不得写入仓库、聊天、日志或长期变量文件。
@@ -36,14 +38,14 @@
 目标是已部署的正式环境时，仍在管理员电脑启动第 2 步的本地子服务，只跳过第 3、4 步的本地 AIBAR 后端和前端，直接打开正式入口并以管理员登录；其余预检相同。
 
 1. 检查主仓库和 `SillyTavern/` 子模块的工作树，保留已有本地改动。
-2. T+1 自动化模式启动本地子服务：
+2. 启动本地手动编排服务：
 
    ```bash
    cd discord-import-service
    npm start
    ```
 
-   在独立终端保持进程运行。确认 `http://127.0.0.1:4317/health` 可用，并按 [`local-discord-import-service.md`](./local-discord-import-service.md) claim 最新 job。手动一次性刷新可以跳过本地子服务。
+   在独立终端保持进程运行。确认 `http://127.0.0.1:4317/health` 可用。服务启动本身不会创建任务或 Worker；只有用户点击控制台“开始同步”才建单并启动一条临时 Worker。
 3. 启动后端：
 
    ```bash
@@ -58,48 +60,47 @@
    npm run dev -- --host 127.0.0.1
    ```
 
-5. 使用 Browser/Chrome 能力连接现有登录会话，打开 AIBAR 和固定 Discord forum。不要用无登录状态的独立 Playwright 替代用户 Chrome。
+5. 使用 Browser/Chrome 能力连接现有登录会话，打开 AIBAR 和三个固定 Discord forum。不要用无登录状态的独立 Playwright 替代用户 Chrome。
 6. 确认 AIBAR 能渲染、`/csrf-token` 可用、页面控制台没有相关应用错误。
 
-## 2. T+1 与标签筛选
+## 2. 手动今日快照与标签筛选
 
-每日自动化在 T+1 运行，采集 T 日 `Asia/Shanghai` 自然日内发布的帖子。不得用滚动 24 小时代替自然日；跨日边界以帖子绝对时间为准，Discord 的“15 小时前”等相对时间只用于初筛。
+每次由用户主动触发，采集 `Asia/Shanghai` 当日 00:00 到触发时刻已经发布的帖子。不得用滚动 24 小时代替今日自然日；边界以帖子绝对时间为准，Discord 的“15 小时前”等相对时间只用于初筛。
 
-1. 打开固定 forum，确认页面不是登录页或成人内容确认页。需要用户本人确认或重新登录时停止本次运行并明确报告，不要绕过。
-2. 打开“排序 & 查看”，选择“发帖日期”以发现 T 日新帖；需要刷新旧帖热度时才使用“最近活跃”。预览可保持列表或图库，但采集不能依赖截图。
-3. 读取页面当前全部“按标签 <标签> 筛选”按钮，包括“查看所有标签”弹窗中的按钮。标签是动态配置，不能把某天读到的标签名永久硬编码为完整集合。
+1. 按配置顺序逐个打开三个固定 forum，确认页面不是登录页或成人内容确认页。需要用户本人确认或重新登录时停止本次运行并明确报告，不要绕过。
+2. 打开“排序 & 查看”，选择“发帖日期”以发现今日新帖；需要刷新旧帖热度时才使用“最近活跃”。预览可保持列表或图库，但采集不能依赖截图。
+3. 在每个栏目分别读取当前全部“按标签 <标签> 筛选”按钮，包括“查看所有标签”弹窗中的按钮；catalog/pass 都携带该栏目的 `sourceChannelId`。标签目录按栏目隔离，不能把某个栏目的目录复用给另一个栏目。
 4. 最终不限制标签时，逐个点击所有可见标签，以“匹配部分”采集各视图并按 `threadId` 合并，再清除标签从无标签视图补漏。用户指定多个标签时一次选中全部标签，并按要求设置“匹配部分”或“全部匹配”。
-5. 每次切换标签、匹配方式或排序后，等待帖子网格稳定；滚动到 T 日之前的第一项后停止该视图。跨视图重复帖子必须合并，保留最新可见计数和完整标签集合。
-6. 从真实帖子卡片收集标题、作者、帖子 URL、标签、回应数、回复数、发布时间和当前可用预览。排除置顶规则帖、原始消息已删除且无法定位资源的帖子，以及不在 T 日边界内的帖子。
-7. 按用户要求排序；T+1 默认按回应数降序。初次回填至少收集 100 项，T+1 则收集前一自然日全部项目。
+5. 每次切换标签、匹配方式或排序后，等待帖子网格稳定；滚动到今日 00:00 之前的第一项后停止该视图。跨视图重复帖子必须合并，保留最新可见计数和完整标签集合。
+6. 从真实帖子卡片收集标题、作者、帖子 URL、标签、回应数、回复数、发布时间和当前可用预览。排除置顶规则帖、原始消息已删除且无法定位资源的帖子，以及不在本次快照窗口内的帖子。
+7. 收集本次快照内的全部项目，最终按回应数降序展示热门项。
 8. 每项先标记为以下一种资源：
    - `character-card`：帖子可能提供受支持的角色卡体。
    - `web-app`：帖子提供可直接运行的公网 HTTPS 页面。
    - `unsupported`：只有压缩包、客户端、APK、源码、文档、截图或普通图片。
-9. 生成版本 1 manifest。T+1 使用 `period: "previous-day"`；`filters` 记录最终标签约束，遍历全部标签但不限制最终结果时写 `{ "tags": [], "tagMatch": "any" }`。结构、安全约束和字段定义以 [`discord-browser-import.md`](./discord-browser-import.md) 为准。
-10. 使用管理员账号在 AIBAR 中点击“粘贴清单”，将 JSON 放入 `discord-manifest-json`，点击 `discord-manifest-apply`。页面会同时创建或更新服务端导入批次；不要通过读取或改写浏览器存储绕过页面。
-11. 确认列表数量、T+1 周期、标签条件、排序、预览和来源帖链接正确。预览失败只能回退为“无预览/网页应用”，不能让整行崩溃。
+9. 服务按来源栏目分别生成版本 1 manifest，每份写入真实 `channelId/channelName`，并在本地榜单按热度合并展示；使用 `period: "today"`，`filters` 记录最终标签约束。结构、安全约束和字段定义以 [`discord-browser-import.md`](./discord-browser-import.md) 为准。
+10. 逐批读取本地服务的 manifest 信封，并使用每批原 `batchId` 调用 `delivered`。不得把 manifest 载入 AIBAR 主项目。
+11. 打开本地控制台，确认列表数量、今日周期、标签、排序、来源帖链接和可选状态正确。
 
-### 自动化运行约束
+### 手动运行约束
 
-- 自动化只能唤醒浏览器协作任务，不能把 Discord 登录态搬到服务器或后台爬虫。
+- 只有用户点击“开始同步”才新建手动 job；worker 每次只 claim 已有任务，不得调用 trigger 或复用旧快照冒充刷新结果。
 - 每次运行必须重新读取 Discord 当前可见标签按钮；新增、改名或删除的标签从当日开始生效。
-- 清单成功应用到 AIBAR 后即完成 T+1 同步阶段。下载仍需用户点击“导入已选”授权，不能因为任务是定时启动就跳过第二阶段授权。
-- Chrome 不在线、Discord 退出登录、成人内容确认未由用户完成、AIBAR 管理员会话失效时，本次自动化应失败并通知，不得生成空清单覆盖上一批。
+- 完整榜单发布到本地控制台后，任务进入 `waiting-selection`，同步 Worker 立即退出。下载和公共发布仍需用户点击“发布已选”授权，该点击会启动新的单次发布 Worker。
+- Chrome 不在线、Discord 退出登录、成人内容确认未由用户完成、AIBAR 管理员会话失效时，本次任务应失败并通知，不得生成空清单覆盖上一批。
 
 ## 3. 等待用户授权
 
-勾选本身不授权浏览器下载。只有用户点击“导入已选”后，页面出现“等待浏览器自动导入 N 项”，才进入下载阶段。
+勾选本身不授权浏览器下载。只有用户在本地控制台点击“发布已选”并出现“已提交 N 项”后，才进入下载和公共发布阶段。
 
 关键控件：
 
-- 选择：`discord-select-<cardId>`
-- 授权：`discord-import-selected`
-- 卡体 URL：`discord-card-url-<cardId>`
-- 接收链接：`discord-import-url-<cardId>`
-- 跳过：`discord-skip-<cardId>`
+- 选择：本地控制台候选表中的角色卡复选框。
+- 授权：本地控制台 `import-selected-button`。
+- AIBAR PNG 输入：`discord-png-import-input` 或其 `cdn.discordapp.com/attachments/.../*.png` placeholder。
+- AIBAR 发布按钮：`discord-png-import-submit`，可见文字为“发布到公共区”。
 
-助手任务应保持运行并观察页面请求。若上一个助手任务已结束，新的任务应重新打开 AIBAR，从可见页面重建待处理列表，不依赖上一个任务的临时 JavaScript 变量。
+“发布已选”请求成功保存后，本地服务立即启动一次性发布 Worker。它只对该 job 执行 `get <jobId>`，把 workflow 更新为 `importing`；每项通过 `import-item` 写回结果，全部终态后更新为 `complete` 并退出。异常退出时服务把 job 置为可恢复的 `blocked`，不会在后台持续重试或轮询。用户处理完登录、成人内容确认或资源口令后，点击控制台“继续发布”会用同一份已持久化请求再启动一条一次性发布 Worker，只处理 `pending`、`importing` 和 `failed` 的剩余项。
 
 ## 4. Discord 下载流程
 
@@ -111,10 +112,11 @@
 4. 等待 Slash command 列表，点击第一个准确匹配“`/下载 获取本帖资源的下载列表`”的命令。
 5. 按 Enter 提交，等待 `Odysseia-protect` 返回“版本选择”。
 6. 点击“请选择一个公开/受保护的版本进行下载...”按钮，再读取版本选项。
-7. 选择最新的受支持角色卡文件。不要机械点击最后一项：最后一项可能是 ZIP/RAR；必须按扩展名选择 PNG/JSON/YAML/CHARX/BYAF。
+7. 选择最新的 PNG 角色卡文件。不要机械点击最后一项：最后一项可能是 ZIP/RAR/JSON；主项目自动入口只接受 PNG。
 8. 若出现密码表单，从帖子可见正文或剧透中临时读取对应密码，填写并提交。不要输出或保存密码。
 9. 获取“点击这里下载”的短期 Discord CDN URL，并立即交给 AIBAR；签名链接会过期。
-10. 在 AIBAR 对应行填写 CDN URL，点击“接收链接”，等待该行结束后再处理下一行。
+10. 以 `AIBAR_DISCORD_AIBAR_URL` 指定的正式服务器地址为基础，在 hash 路由查询参数中携带当前卡的 `discordGuildId`、`discordChannelId`、`discordThreadId`、`discordCardId`、`discordSourceUrl`、`discordTitle`、`discordAuthorName` 和重复的 `discordTag`；所有值必须用 `URLSearchParams` 编码。
+11. 打开该完整远端地址，在手动 PNG 输入框填写 CDN URL，点击“发布到公共区”。等待页面稳定显示 `data-publish-status="published"` 或 `duplicate` 并出现公共作品入口后再处理下一项；立即丢弃该短期 URL。不得使用 localhost、127.0.0.1、本地 Vite 或本地 SillyTavern。
 
 ### 锁帖或迁移帖
 
@@ -135,67 +137,43 @@
 
 只有重复重试和帖子直接附件检查都失败后，才能归为不支持。
 
-## 5. 角色卡有效性与导入
+## 5. 角色卡有效性与公共发布
 
 CDN 返回 `200`、文件名为 `.png` 或图片能显示，都不能证明它是 Tavern Card。
 
-有效性由 AIBAR/SillyTavern 导入链路最终确认：
+有效性与公开状态由远端 AIBAR/SillyTavern 链路最终确认：
 
-1. 后端代理只允许 Discord CDN、受支持扩展名、最多 3 次重定向、15 秒超时和 64 MB 上限。
-2. 服务端按原始字节计算 SHA-256，将卡体归档到 `_aibar/imports/discord/sha256/`；前端只消费服务端返回的可信哈希。
-3. SillyTavern 解析角色卡元数据。出现 `PNG metadata does not contain any character data.` 或响应体 `{error:true}` 时必须标记失败，不能当成功。
-4. 成功导入私人库后写入 Discord 来源标记，并自动发布为社区作品；同一 thread 的新内容形成新版本，全局相同文件关联已有作品。
-5. 如果角色包含有效开场白，自动生成故事卡。
-6. 最终状态为“已入库”或“已去重”，并出现“查看入库作品”入口；社区发布失败时保留私人角色，重试时不得重复解析写入。
+1. 主项目入口只接受 Discord CDN `/attachments/` 下以 `.png` 结尾的链接。
+2. SillyTavern 解析角色卡元数据。出现 `PNG metadata does not contain any character data.` 或响应体 `{error:true}` 时必须标记失败，不能当成功。
+3. 私人角色写入仅用于 SillyTavern 解析，不能作为任务成功；随后必须调用管理员专用公共发布接口。
+4. 服务器从解析后的 PNG 原始字节计算 SHA-256；相同哈希关联现有公共作品，同一 Discord thread 的新内容发布为该作品新版本。
+5. 只有公共接口返回 `published` 或 `duplicate` 且作品可见时，worker 才用 `import-item <jobId> <cardId> imported <结果>` 写回成功；解析或公共发布失败写 `failed`，没有有效 PNG 写 `skipped`。
 
-完成一项后，等待它的 URL 输入框消失且后续故事生成消息稳定，再处理下一项。否则全局导入锁仍在释放过程中，下一行可能暂时不可填写。
+完成一项后，等待按钮退出“发布中”且成功或错误提示稳定，再处理下一项。
 
-## 6. 网页应用分类
+## 6. 非 PNG 与网页应用
 
-帖子自带前端不能走角色卡导入。只有满足以下全部条件才设为 `web-app`：
+以下内容不进入自动导入：
 
-1. 有直接可运行的公网 HTTPS 入口。
-2. URL 不含凭据、自定义端口、localhost、`.local`、环回或私网地址。
-3. 浏览器直接打开后不是 404、部署不存在、连接关闭、文档页或“服务暂不可用”。
-4. 优先选择实际应用首页；不能用 GitHub 仓库、release 页面、教程、网盘、APK、截图、CDN 图片或 API 子路径冒充入口。
-5. 主域名只加载错误壳时，检查页面提供的官方备用域名并验证备用入口。
+- JSON、YAML、CHARX、BYAF、ZIP/RAR、APK、安装器和扩展包。
+- 普通预览图、封面、截图、说明文本和诊断文件。
+- 帖子自带网页应用或源码仓库。
 
-普通第三方前端使用：
-
-```json
-{
-  "availability": "ready",
-  "kind": "web-app",
-  "launchUrl": "https://verified.example/",
-  "runtime": "standalone",
-  "permissions": [],
-  "note": "已验证公开 HTTPS 入口；在 AIBAR 隔离页启动"
-}
-```
-
-只有明确实现 [`aibar-web-app-bridge.md`](./aibar-web-app-bridge.md) 的应用才能设为 `aibar-bridge` 并声明 `generation`/`storage` 权限。不能根据标题或作者口头描述自动授予桥接权限。
-
-应用清单写回后，至少完整测试一个代表性入口：
-
-1. 点击“启动应用”。
-2. 核对来源域名、运行方式和权限确认页。
-3. 点击“允许并启动”。
-4. 确认 sandbox iframe 内出现应用真实内容，而不是加载页、错误壳或空白页。
-5. 检查 AIBAR 控制台；忽略已确认与应用无关的浏览器扩展噪声，相关应用错误必须处理。
+若用户选中的帖子最终没有有效 PNG，记录 `skipped` 和明确原因，不把其他文件伪装成 PNG。
 
 ## 7. 归一化最终状态
 
-完成下载和网页入口验证后，重新应用纠正后的 manifest：
+完成所有请求项后，从 `get <jobId>` 核对 `importItems`：
 
-- 已成功或去重的角色卡保留 `imported`。
-- 已验证入口的应用设为 `web-app` + `ready`。
-- 已重试但没有有效卡体或可运行入口的项目设为 `character-card` + `unsupported`。
-- 不允许留下可避免的 `failed` 状态。
+- 已发布或已关联公共区重复作品的角色卡为 `imported`。
+- 没有有效 PNG 或明确不支持的资源为 `skipped`。
+- 已执行但失败的项目为 `failed`，并保留具体错误。
+- 不允许留下 `pending` 或 `importing`。
 
 总数必须守恒：
 
 ```text
-总项目数 = 已导入角色卡 + 可启动网页应用 + 不支持项目 + 仍在处理项目
+请求总数 = imported + failed + skipped
 ```
 
 ## 8. 验收
@@ -206,35 +184,31 @@ CDN 返回 `200`、文件名为 `.png` 或图片能显示，都不能证明它�
 cd web
 npm run check
 
-cd ../SillyTavern
-npx eslint src/endpoints/aibar.js
-node --check src/endpoints/aibar.js
+cd ../discord-import-service
+npm run check
 
 cd ..
 git diff --check
-git -C SillyTavern diff --check
 ```
 
 浏览器验收必须包含：
 
 - AIBAR 页面身份和目标 URL 正确。
-- 清单非空，没有框架错误覆盖层。
+- 本地热门列表非空，没有框架错误覆盖层。
 - 所有授权项都有逐项结果。
-- 所有成功角色卡都显示“已入库”并能打开对应社区作品。
-- 最终失败数为 0，或每个残留失败都有无法继续的外部原因。
-- 至少一个网页应用通过“确认权限 -> 允许启动 -> iframe 真实内容”全流程。
+- 所有成功角色卡都显示“已发布”，并能通过结果入口打开公共作品。
+- 主项目 Discord 页面只显示手动 PNG 公共发布入口。
 - 控制台没有相关应用错误。
-- 截图能证明最终计数、角色卡状态和网页应用入口。
+- 截图能证明本地榜单结果和主项目 PNG 入口。
 
 ## 9. 完成报告模板
 
 ```text
 同步总数：N
-原失败数：N
-角色卡：新导入 N，重复去重 N，故事卡生成 N
-网页应用：验证可启动 N
-不支持：N（无有效卡体/只有安装包或源码/入口失效）
+请求发布：N
+公共作品：新发布 N，重复关联 N
+跳过：N（无有效 PNG/只有安装包或源码）
 最终失败：N
-验证：npm run check、后端 ESLint/语法、diff check、浏览器启动链路、控制台
+验证：后端、服务和前端质量门禁、diff check、浏览器公共发布链路、控制台
 未验证：明确列出外部副作用、其他浏览器或未覆盖视口
 ```
