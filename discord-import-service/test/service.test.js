@@ -227,14 +227,23 @@ test('dashboard exposes safe ranked cards and persists one validated import requ
         sourceUrl: `https://discord.com/channels/1380075940285124724/${unsupportedId}`,
         resource: { availability: 'unsupported', kind: 'character-card', note: '只有普通预览图' },
     });
-    const { id } = await scanCompleteJob(service, [selectable, unsupported]);
+    const jsonCardId = '1478612237869519904';
+    const jsonCard = card({
+        id: jsonCardId,
+        threadId: jsonCardId,
+        sourceUrl: `https://discord.com/channels/1380075940285124724/${jsonCardId}`,
+        resource: { availability: 'browser', kind: 'character-card', fileName: 'card.json' },
+    });
+    const { id } = await scanCompleteJob(service, [selectable, unsupported, jsonCard]);
     const batch = service.getManifest(id);
     await service.markDelivered(id, { batchId: batch.batchId });
 
     const snapshot = service.dashboardSnapshot();
-    assert.equal(snapshot.cards.length, 2);
+    assert.equal(snapshot.cards.length, 3);
     assert.equal(snapshot.cards[0].previewUrl, undefined);
     assert.equal(snapshot.cards.find(item => item.id === unsupportedId).selectable, false);
+    // 远端入口已支持全部卡体格式，JSON 卡体可直接勾选发布
+    assert.equal(snapshot.cards.find(item => item.id === jsonCardId).selectable, true);
     await assert.rejects(
         service.requestImport(id, { cardIds: [unsupportedId] }),
         /cannot be selected/,

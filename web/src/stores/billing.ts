@@ -5,6 +5,7 @@ import {
   redeemCreditCode,
   type PointLedgerEntry,
 } from '@/api/billing'
+import { setGenerationSettledListener } from '@/api/generate'
 
 export const useBillingStore = defineStore('billing', () => {
   const balance = ref(0)
@@ -21,6 +22,18 @@ export const useBillingStore = defineStore('billing', () => {
   let redeemRequestId = 0
 
   const hasHeldPoints = computed(() => held.value > 0)
+
+  // 一次发送可能触发回复、草稿、记忆总结多次生成：合并为结算后 1.2 秒内的一次余额刷新。
+  let settledRefreshTimer: ReturnType<typeof setTimeout> | null = null
+  setGenerationSettledListener(() => {
+    if (settledRefreshTimer) clearTimeout(settledRefreshTimer)
+    settledRefreshTimer = setTimeout(() => {
+      settledRefreshTimer = null
+      void load(true).catch((error) => {
+        console.warn('Refresh point balance failed', error)
+      })
+    }, 1200)
+  })
 
   function applyAccount(account: {
     balance: number

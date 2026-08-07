@@ -403,16 +403,17 @@ export const useChatStore = defineStore('chat', () => {
     await persistSafe()
   }
 
-  async function sendMessage(text: string) {
-    if (!text.trim() || !character.value) return
+  // 返回是否已接受这条消息：false 表示消息没有进入会话，调用方应保留用户草稿。
+  async function sendMessage(text: string): Promise<boolean> {
+    if (!text.trim() || !character.value) return false
     if (!ready.value) {
       useUiStore().addToast(error.value || '聊天尚未加载完成，请重试', 'error', 5000)
-      return
+      return false
     }
-    if (streaming.value.active || memoryUpdating.value) return
+    if (streaming.value.active) return false
     if (!selectedProfile.value.id) {
       useUiStore().addToast('当前没有可用模型，请联系管理员', 'warning')
-      return
+      return false
     }
     clearReplyDrafts()
     const epoch = accountEpoch
@@ -424,9 +425,12 @@ export const useChatStore = defineStore('chat', () => {
       date: new Date().toISOString(),
     })
 
-    await persistSafe()
-    if (epoch !== accountEpoch || activeChatEpoch !== chatEpoch) return
+    // 保存与生成并行：长对话的全量历史上传不该叠加在首字延迟上。
+    // persistSafe 自带脏标记合并与失败 toast，生成结束后的保存会自然收敛。
+    void persistSafe()
+    if (epoch !== accountEpoch || activeChatEpoch !== chatEpoch) return true
     await runGeneration({ updateMemory: true })
+    return true
   }
 
   function formatMemoryTranscript(
@@ -958,7 +962,6 @@ export const useChatStore = defineStore('chat', () => {
     stopGeneration,
     clearCurrentChat,
     regenerateLast,
-    persist,
     persistSafe,
     editMessage,
     deleteMessage,

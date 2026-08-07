@@ -3,6 +3,7 @@ import { ref, computed } from 'vue'
 import type { Persona } from '@/api/types'
 import { generateId } from '@/lib/format'
 import { loadAibarSettings, saveAibarSettings } from '@/api/settings'
+import { notifyPersistFailure } from '@/stores/persistFeedback'
 
 export const usePersonasStore = defineStore('personas', () => {
   const personas = ref<Persona[]>([])
@@ -34,7 +35,7 @@ export const usePersonasStore = defineStore('personas', () => {
         simple_ui_active_persona: activePersonaId.value,
       })
     } catch (e) {
-      if (version === storeVersion) console.warn('Persist personas failed', e)
+      if (version === storeVersion) notifyPersistFailure('身份', e)
     }
   }
 

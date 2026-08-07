@@ -3,6 +3,7 @@ import { ref, computed } from 'vue'
 import type { TtsProvider, TtsProviderConfig, TtsCharacterVoice, TtsSettings, TtsVoiceProfile } from '@/api/types'
 import { loadAibarSettings, saveAibarSettings } from '@/api/settings'
 import { PROVIDER_MODELS, PROVIDER_VOICES, TTS_PROVIDERS, synthesizeSpeech } from '@/api/tts'
+import { notifyPersistFailure } from '@/stores/persistFeedback'
 
 const PROVIDER_IDS = TTS_PROVIDERS.map((p) => p.id) as readonly TtsProvider[]
 const PLAYABLE_PROVIDER_IDS = TTS_PROVIDERS.filter((p) => p.playable).map((p) => p.id) as readonly TtsProvider[]
@@ -146,7 +147,7 @@ export const useTtsStore = defineStore('tts', () => {
     try {
       await saveAibarSettings({ simple_ui_tts: settings.value })
     } catch (e) {
-      if (version === storeVersion) console.warn('Persist TTS settings failed', e)
+      if (version === storeVersion) notifyPersistFailure('语音设置', e)
     }
   }
 

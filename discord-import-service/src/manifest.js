@@ -10,7 +10,7 @@ const ALLOWED_RESOURCE_KEYS = new Set([
     'availability', 'kind', 'fileName', 'note', 'launchUrl', 'runtime', 'bridgeVersion', 'permissions',
 ]);
 const ALLOWED_VIEW_KEYS = new Set(['tags', 'tagMatch', 'sort']);
-const CARD_EXTENSIONS = new Set(['png', 'json', 'yaml', 'yml', 'charx', 'byaf']);
+export const CARD_EXTENSIONS = new Set(['png', 'json', 'yaml', 'yml', 'charx', 'byaf']);
 const RESOURCE_AVAILABILITY = new Set(['ready', 'browser', 'unsupported']);
 const TAG_MATCH = new Set(['any', 'all']);
 const VIEW_SORT = new Set(['created-at', 'recent-activity']);

@@ -81,16 +81,32 @@ async function load() {
   }
 }
 
+// 收藏做乐观更新：失败回滚并提示，避免点了没反应导致连点。
+let favoritePending = false
 async function toggleFavorite() {
-  if (!work.value) return
-  const updated = await setCommunityFavorite(work.value.id, !work.value.favorite)
-  work.value = { ...work.value, ...updated }
+  if (!work.value || favoritePending) return
+  favoritePending = true
+  const previous = work.value
+  work.value = { ...work.value, favorite: !work.value.favorite }
+  try {
+    const updated = await setCommunityFavorite(previous.id, !previous.favorite)
+    work.value = { ...work.value, ...updated }
+  } catch (e: unknown) {
+    work.value = previous
+    ui.addToast(`收藏失败：${getApiErrorMessage(e)}`, 'error')
+  } finally {
+    favoritePending = false
+  }
 }
 
 async function rate(score: number) {
   if (!work.value) return
-  const updated = await rateCommunityWork(work.value.id, score)
-  work.value = { ...work.value, ...updated }
+  try {
+    const updated = await rateCommunityWork(work.value.id, score)
+    work.value = { ...work.value, ...updated }
+  } catch (e: unknown) {
+    ui.addToast(`评分失败：${getApiErrorMessage(e)}`, 'error')
+  }
 }
 
 async function submitComment() {
@@ -101,6 +117,9 @@ async function submitComment() {
     work.value.comments.unshift(created)
     work.value.commentCount += 1
     comment.value = ''
+  } catch (e: unknown) {
+    // 评论正文保留在输入框里，用户可修改后重试
+    ui.addToast(`评论失败：${getApiErrorMessage(e)}`, 'error')
   } finally {
     commenting.value = false
   }
@@ -108,9 +127,14 @@ async function submitComment() {
 
 async function removeComment(id: string) {
   if (!work.value) return
-  await deleteCommunityComment(id)
-  work.value.comments = work.value.comments.filter(item => item.id !== id)
-  work.value.commentCount = Math.max(0, work.value.commentCount - 1)
+  if (!window.confirm('删除这条评论？')) return
+  try {
+    await deleteCommunityComment(id)
+    work.value.comments = work.value.comments.filter(item => item.id !== id)
+    work.value.commentCount = Math.max(0, work.value.commentCount - 1)
+  } catch (e: unknown) {
+    ui.addToast(`删除评论失败：${getApiErrorMessage(e)}`, 'error')
+  }
 }
 
 async function toggleVisibility() {

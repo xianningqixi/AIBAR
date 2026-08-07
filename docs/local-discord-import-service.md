@@ -164,8 +164,8 @@ worker 逐批读取 `manifest`，确认本地榜单已可展示后向 `delivered
 5. 调用 `complete`，缺少覆盖时只补扫明确列出的视图。
 6. 服务按真实来源栏目分别生成 manifest v1 批次；逐批读取信封并用其中的 `batchId` 调用 `delivered`，使三个栏目的结果合并显示在本地热门榜。
 7. 任务进入 `waiting-selection` 后立即结束同步 worker，不等待、不轮询发布请求。
-8. 用户勾选并点击“发布已选”后，本地服务启动新的单次 worker；它用 `get <jobId>` 读取已持久化请求，把 workflow 更新为 `importing`，按 [`discord-hot-import-runbook.md`](./discord-hot-import-runbook.md) 完成 `/下载`，只选择 PNG 卡体，并把卡片的栏目、线程、帖子、标题、作者和标签作为 URL 查询参数带到远端 AIBAR 手动入口。
-9. 远端 AIBAR 解析卡体后调用管理员专用的 `/api/aibar/works/publish-discord`，由服务器计算 PNG SHA-256、复用同线程作品版本并去重。只有页面返回 `published` 或 `duplicate` 且给出公共作品入口时，worker 才用 `import-item` 记录成功；所有勾选项均有终态结果后把 workflow 更新为 `complete`。
+8. 用户勾选并点击“发布已选”后，本地服务启动新的单次 worker；它用 `get <jobId>` 读取已持久化请求，把 workflow 更新为 `importing`，按 [`discord-hot-import-runbook.md`](./discord-hot-import-runbook.md) 分两阶段执行：阶段A 在最多 3 个标签页并行完成 `/下载`（按 PNG > JSON > CHARX > BYAF > YAML 优先级）收集短期链接与来源信息；阶段B 打开远端 AIBAR 批量发布入口一次性提交 JSON 数组。
+9. 远端 AIBAR 通过管理员专用的 `/api/aibar/works/publish-discord-batch` 在服务器端直接抓取附件（内部 3 并发）、导入并发布：计算 PNG SHA-256、复用同线程作品版本并去重，逐项返回 `published`/`duplicate`/`failed`。只有对应行给出终态时 worker 才用 `import-item` 写回；所有勾选项均有终态结果后把 workflow 更新为 `complete`。
 
 ## 8. 启动与验证
 

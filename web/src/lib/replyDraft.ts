@@ -1,5 +1,6 @@
 import type { Character, ChatMessage, ModelProfile } from '@/api/types'
 import { buildChatCompletionPayload } from './buildPayload'
+import { parseJsonObject } from './llmJson'
 
 export interface ReplyDraftOption {
   id: string
@@ -20,20 +21,6 @@ const REPLY_DRAFT_OVERRIDES = {
 
 function asString(value: unknown): string {
   return typeof value === 'string' ? value.trim() : ''
-}
-
-function parseJsonObject<T>(text: string): T {
-  let body = text.trim()
-  const fence = body.match(/```(?:json)?\s*([\s\S]*?)```/i)
-  if (fence) body = fence[1].trim()
-
-  const start = body.indexOf('{')
-  const end = body.lastIndexOf('}')
-  if (start === -1 || end === -1 || end <= start) {
-    throw new Error('模型没有返回可解析的 JSON')
-  }
-
-  return JSON.parse(body.slice(start, end + 1)) as T
 }
 
 function formatTranscript(messages: ChatMessage[], userName: string, characterName: string): string {
@@ -110,17 +97,22 @@ export function parseReplyDraftOptions(text: string): ReplyDraftOption[] {
   const raw = parseJsonObject<{ options?: unknown }>(text)
   const list = Array.isArray(raw.options) ? raw.options : []
 
+  // 先过滤空消息再编号，保证 id 与展示位置连续对应
   return list
-    .map((item, index) => {
+    .map((item) => {
       const record = item && typeof item === 'object' ? item as Record<string, unknown> : {}
-      const message = asString(record.message)
       return {
-        id: `reply-${index + 1}`,
-        title: asString(record.title) || `方向 ${index + 1}`,
+        title: asString(record.title),
         direction: asString(record.direction),
-        message,
+        message: asString(record.message),
       }
     })
     .filter((option) => option.message)
     .slice(0, 5)
+    .map((option, index) => ({
+      id: `reply-${index + 1}`,
+      title: option.title || `方向 ${index + 1}`,
+      direction: option.direction,
+      message: option.message,
+    }))
 }

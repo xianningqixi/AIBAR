@@ -12,15 +12,16 @@ import {
   deleteWorldInfo,
   getWorldInfo,
   importWorldInfo,
-  listWorldInfo,
   saveWorldInfo,
 } from '@/api/worldInfo'
 import { getApiErrorMessage } from '@/api/client'
 import WorldInfoEditor from '@/components/world/WorldInfoEditor.vue'
-import { worlds } from './shared'
+import { useWorldInfoStore } from '@/stores/worldInfo'
 
 const ui = useUiStore()
 const router = useRouter()
+const worldInfo = useWorldInfoStore()
+const worlds = computed(() => worldInfo.worlds)
 
 const selectedWorld = ref('')
 const worldFile = ref<WorldInfoFile | null>(null)
@@ -66,10 +67,11 @@ const selectedWorldStats = computed(() => {
   }
 })
 
-async function loadWorlds() {
+async function loadWorlds(force = true) {
   worldLoading.value = true
   try {
-    worlds.value = await listWorldInfo()
+    // 增删改后强制刷新；标签页初次挂载复用 store 缓存
+    await worldInfo.load(force)
     if (!selectedWorld.value && worlds.value[0]) {
       await selectWorld(worlds.value[0].file_id)
     }
@@ -249,7 +251,7 @@ function switchWorldMode(mode: 'entry' | 'json') {
 }
 
 onMounted(async () => {
-  await loadWorlds()
+  await loadWorlds(false)
 })
 </script>
 

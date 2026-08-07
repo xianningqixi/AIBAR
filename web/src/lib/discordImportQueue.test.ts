@@ -1,16 +1,16 @@
 import { describe, expect, it } from 'vitest'
 import {
-  createDiscordImportQueue,
   DISCORD_IMPORT_CHANNEL_ID,
   DISCORD_IMPORT_GUILD_ID,
   DISCORD_IMPORT_MANIFEST_VERSION,
   DISCORD_IMPORT_TIMEZONE,
+  isDiscordWebAppCard,
   isSafeWebAppLaunchUrl,
   parseDiscordImportManifest,
-  requestDiscordImportBatch,
-  resolveDiscordImportBatchItem,
-  updateDiscordImportQueueItem,
 } from './discordImportQueue'
+
+// 批次导入流程已迁移到本地 discord-import-service 控制台；
+// 前端保留的存活面是 manifest v1 契约解析与 web-app 启动 URL 校验。
 
 const readyId = '1478612237869519022'
 const unsupportedId = '1478612237869519023'
@@ -51,31 +51,12 @@ const manifest = {
   ],
 } as const
 
-describe('Discord import queue', () => {
-  it('keeps legacy character-card manifests importable and clears completed work', () => {
-    const now = new Date(timestamp)
-    let queue = createDiscordImportQueue(manifest, now)
-    expect(queue.manifest.filters).toEqual({ tags: [], tagMatch: 'any' })
-    expect(queue.manifest.cards[0].resource.kind).toBe('character-card')
-    queue = updateDiscordImportQueueItem(queue, readyId, { selected: true }, now)
-    expect(() => updateDiscordImportQueueItem(queue, unsupportedId, { selected: true }, now)).toThrow(
-      'resource is not an importable character card',
-    )
-    queue = requestDiscordImportBatch(queue, now)
-
-    expect(queue.importRequest?.cardIds).toEqual([readyId])
-
-    queue = resolveDiscordImportBatchItem(queue, readyId, {
-      status: 'imported',
-      importedAvatar: 'ready-card.png',
-      importedHash: 'sha256:ready-card',
-    }, now)
-    expect(queue.importRequest).toBeUndefined()
-    expect(queue.items.find((item) => item.id === readyId)).toMatchObject({
-      status: 'imported',
-      importedAvatar: 'ready-card.png',
-    })
-    expect(queue.importedHashes).toContain('sha256:ready-card')
+describe('Discord import manifest contract', () => {
+  it('parses legacy character-card manifests with defaults', () => {
+    const parsed = parseDiscordImportManifest(manifest)
+    expect(parsed.filters).toEqual({ tags: [], tagMatch: 'any' })
+    expect(parsed.cards[0].resource.kind).toBe('character-card')
+    expect(parsed.cards[1].resource.availability).toBe('unsupported')
   })
 
   it('accepts T+1 manifests and validates Discord tag filters', () => {
@@ -106,7 +87,7 @@ describe('Discord import queue', () => {
     })).toThrow('does not satisfy manifest filters')
   })
 
-  it('accepts web apps but never selects or submits them as character cards', () => {
+  it('parses web-app cards and distinguishes them from character cards', () => {
     const parsed = parseDiscordImportManifest({
       ...manifest,
       cards: [
@@ -130,40 +111,10 @@ describe('Discord import queue', () => {
         },
       ],
     })
-    let queue = createDiscordImportQueue(parsed, new Date(timestamp))
-    expect(queue.items.find((item) => item.id === webAppId)).toMatchObject({ status: 'ready', selected: false })
-    expect(() => updateDiscordImportQueueItem(queue, webAppId, { selected: true })).toThrow(
-      'resource is not an importable character card',
-    )
-
-    queue = updateDiscordImportQueueItem(queue, readyId, { selected: true }, new Date(timestamp))
-    queue = requestDiscordImportBatch(queue, new Date(timestamp))
-    expect(queue.importRequest?.cardIds).toEqual([readyId])
-  })
-
-  it('keeps the private avatar available when a server publication retry is needed', () => {
-    let queue = createDiscordImportQueue(manifest, new Date(timestamp))
-    queue = updateDiscordImportQueueItem(queue, readyId, { selected: true }, new Date(timestamp))
-    queue = requestDiscordImportBatch(queue, new Date(timestamp))
-    queue = resolveDiscordImportBatchItem(queue, readyId, {
-      status: 'failed',
-      selected: false,
-      error: 'community publication failed',
-      importedAvatar: 'ready-card.png',
-      importedHash: `${readyId}:abc123`,
-    }, new Date(timestamp))
-
-    expect(queue.items.find((item) => item.id === readyId)).toMatchObject({
-      status: 'failed',
-      importedAvatar: 'ready-card.png',
-    })
-    queue = updateDiscordImportQueueItem(queue, readyId, { selected: true }, new Date(timestamp))
-    queue = requestDiscordImportBatch(queue, new Date(timestamp))
-    expect(queue.items.find((item) => item.id === readyId)).toMatchObject({
-      status: 'ready',
-      selected: true,
-      importedAvatar: 'ready-card.png',
-    })
+    const webAppCard = parsed.cards.find((card) => card.id === webAppId)
+    expect(webAppCard).toBeDefined()
+    expect(isDiscordWebAppCard(webAppCard!)).toBe(true)
+    expect(isDiscordWebAppCard(parsed.cards[0])).toBe(false)
   })
 
   it('only accepts public HTTPS launch URLs without credentials or custom ports', () => {

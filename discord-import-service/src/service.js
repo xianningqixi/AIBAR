@@ -2,6 +2,7 @@ import crypto from 'node:crypto';
 
 import { DISCORD_CHANNEL_ID, DISCORD_SOURCES } from './config.js';
 import {
+    CARD_EXTENSIONS,
     buildManifests,
     mergePassCards,
     missingCoverage,
@@ -189,10 +190,12 @@ function manifestCards(job) {
 }
 
 function selectableCard(card) {
+    // 远端 AIBAR 支持全部卡体格式（PNG/JSON/CHARX/BYAF/YAML），与 manifest 契约保持同一集合
     const fileName = String(card.resource?.fileName || '').toLowerCase();
+    const extension = fileName.split('.').pop() || '';
     return (card.resource?.kind || 'character-card') === 'character-card'
         && card.resource?.availability !== 'unsupported'
-        && (!fileName || fileName.endsWith('.png'));
+        && (!fileName || CARD_EXTENSIONS.has(extension));
 }
 
 function dashboardCards(job) {

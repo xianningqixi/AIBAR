@@ -4,14 +4,13 @@ import { useRoute, useRouter } from 'vue-router'
 import { useSessionStore } from '@/stores/session'
 import { useUiStore } from '@/stores/ui'
 import {
-  downloadCommunityContent,
   listCommunityWorks,
-  publishDiscordCommunityWork,
+  publishDiscordCommunityBatch,
   type CommunityWork,
   type CommunityWorkType,
   type DiscordCommunitySource,
+  type DiscordBatchPublishResult,
 } from '@/api/community'
-import { importCharacter } from '@/api/characters'
 import WorkCard from '@/components/community/WorkCard.vue'
 import AppButton from '@/components/ui/AppButton.vue'
 import AppEmpty from '@/components/ui/AppEmpty.vue'
@@ -19,6 +18,7 @@ import AppPageHeader from '@/components/ui/AppPageHeader.vue'
 import AppSpinner from '@/components/ui/AppSpinner.vue'
 import AppCard from '@/components/ui/AppCard.vue'
 import AppInput from '@/components/ui/AppInput.vue'
+import AppTextarea from '@/components/ui/AppTextarea.vue'
 import SearchInput from '@/components/ui/SearchInput.vue'
 import { getApiErrorMessage } from '@/api/client'
 
@@ -164,17 +164,26 @@ watch(search, () => {
   searchTimer = setTimeout(loadCommunityWorks, 250)
 })
 
+// 后端 /api/characters/import 支持的全部卡体格式；ZIP/RAR/APK 等仍不支持
+const CARD_FILE_EXTENSIONS = ['png', 'json', 'yaml', 'yml', 'charx', 'byaf'] as const
+
+function cardExtensionOf(pathname: string): string {
+  const ext = pathname.toLowerCase().split('.').pop() || ''
+  return (CARD_FILE_EXTENSIONS as readonly string[]).includes(ext) ? ext : ''
+}
+
 function normalizeDiscordUrl(value: string): string {
   const parsed = new URL(value)
   const validHost = parsed.hostname === 'cdn.discordapp.com' || parsed.hostname === 'media.discordapp.net'
-  if (!validHost || !parsed.pathname.includes('/attachments/') || !parsed.pathname.toLowerCase().endsWith('.png')) {
-    throw new Error('请使用 Discord 附件中的 PNG 卡体链接')
+  if (!validHost || !parsed.pathname.includes('/attachments/') || !cardExtensionOf(parsed.pathname)) {
+    throw new Error('请使用 Discord 附件中的角色卡文件链接（支持 PNG / JSON / CHARX / BYAF / YAML）')
   }
   parsed.hostname = 'cdn.discordapp.com'
   for (const key of ['format', 'quality', 'width', 'height']) parsed.searchParams.delete(key)
   return parsed.toString()
 }
 
+// 单项发布：卡体由服务器直接从 Discord CDN 抓取并导入，字节不再经过浏览器往返
 async function importFromDiscord() {
   if (!importUrl.value.trim() || !discordSource.value) return
   const accountHandle = session.user?.handle || ''
@@ -185,22 +194,18 @@ async function importFromDiscord() {
   publishedWorkId.value = ''
   publishedStatus.value = ''
   try {
-    const content = await downloadCommunityContent(normalizeDiscordUrl(importUrl.value.trim()))
+    const normalizedUrl = normalizeDiscordUrl(importUrl.value.trim())
+    const { results } = await publishDiscordCommunityBatch([
+      { url: normalizedUrl, source: discordSource.value },
+    ])
     if (!accountIsCurrent()) return
-    if (content.type !== 'character') throw new Error('该 PNG 未被识别为角色卡')
-    const file = new File([content.blob], content.fileName || 'discord-character.png', { type: content.mimeType || 'image/png' })
-    const imported = await importCharacter(file)
-    if (!accountIsCurrent()) return
-    const avatar = imported.file_name ? `${imported.file_name}.png` : ''
-    if (!avatar) throw new Error('后端未返回角色文件名，无法发布到公共区')
-    const publication = await publishDiscordCommunityWork({
-      sourceId: avatar,
-      source: discordSource.value,
-    })
-    if (!accountIsCurrent()) return
-    publishedWorkId.value = publication.work.id
-    publishedStatus.value = publication.status
-    importResult.value = publication.status === 'duplicate'
+    const result = results[0]
+    if (!result || result.status === 'failed') {
+      throw new Error(result?.error || '服务器未返回发布结果')
+    }
+    publishedWorkId.value = result.workId || ''
+    publishedStatus.value = result.status
+    importResult.value = result.status === 'duplicate'
       ? '公共区已存在相同角色卡，已关联现有作品'
       : '角色卡已发布到公共区，所有用户均可使用'
     ui.addToast(importResult.value, 'success')
@@ -209,6 +214,128 @@ async function importFromDiscord() {
     ui.addToast(importError.value, 'error')
   } finally {
     importing.value = false
+  }
+}
+
+// ---- 批量发布：Worker 一次粘贴 JSON 数组，页面按 10 项分批调用服务器端批量端点 ----
+
+interface DiscordBatchInputItem {
+  url: string
+  cardId: string
+  threadId: string
+  channelId: string
+  sourceUrl: string
+  title: string
+  authorName?: string
+  tags?: string[]
+}
+
+interface DiscordBatchRow {
+  cardId: string
+  title: string
+  status: 'pending' | 'published' | 'duplicate' | 'failed'
+  workId: string
+  error: string
+}
+
+const DISCORD_GUILD_ID = '1380075940285124724'
+const BATCH_CHUNK_SIZE = 10
+const batchInput = ref('')
+const batchRunning = ref(false)
+const batchDone = ref(false)
+const batchError = ref('')
+const batchRows = ref<DiscordBatchRow[]>([])
+
+function parseBatchInput(raw: string): DiscordBatchInputItem[] {
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(raw)
+  } catch {
+    throw new Error('批量输入不是有效 JSON')
+  }
+  if (!Array.isArray(parsed) || !parsed.length) throw new Error('批量输入必须是非空 JSON 数组')
+  if (parsed.length > 100) throw new Error('单次批量最多 100 项')
+  return parsed.map((entry, index) => {
+    const record = (entry && typeof entry === 'object' ? entry : {}) as Record<string, unknown>
+    const required = ['url', 'cardId', 'threadId', 'channelId', 'sourceUrl', 'title'] as const
+    for (const key of required) {
+      if (typeof record[key] !== 'string' || !(record[key] as string).trim()) {
+        throw new Error(`第 ${index + 1} 项缺少 ${key}`)
+      }
+    }
+    return {
+      url: normalizeDiscordUrl(String(record.url).trim()),
+      cardId: String(record.cardId).trim(),
+      threadId: String(record.threadId).trim(),
+      channelId: String(record.channelId).trim(),
+      sourceUrl: String(record.sourceUrl).trim(),
+      title: String(record.title).trim(),
+      authorName: typeof record.authorName === 'string' ? record.authorName.trim() : '',
+      tags: Array.isArray(record.tags) ? record.tags.map(tag => String(tag).trim()).filter(Boolean) : [],
+    }
+  })
+}
+
+async function runBatchPublish() {
+  if (batchRunning.value || !batchInput.value.trim()) return
+  batchError.value = ''
+  batchDone.value = false
+  let items: DiscordBatchInputItem[]
+  try {
+    items = parseBatchInput(batchInput.value.trim())
+  } catch (e: unknown) {
+    batchError.value = getApiErrorMessage(e, '批量输入无效')
+    return
+  }
+  batchRunning.value = true
+  batchRows.value = items.map(item => ({
+    cardId: item.cardId,
+    title: item.title,
+    status: 'pending',
+    workId: '',
+    error: '',
+  }))
+  try {
+    for (let offset = 0; offset < items.length; offset += BATCH_CHUNK_SIZE) {
+      const chunk = items.slice(offset, offset + BATCH_CHUNK_SIZE)
+      let results: DiscordBatchPublishResult[] = []
+      try {
+        const response = await publishDiscordCommunityBatch(chunk.map(item => ({
+          url: item.url,
+          source: {
+            guildId: DISCORD_GUILD_ID,
+            channelId: item.channelId,
+            threadId: item.threadId,
+            cardId: item.cardId,
+            sourceUrl: item.sourceUrl,
+            title: item.title,
+            authorName: item.authorName || '',
+            tags: item.tags || [],
+          },
+        })))
+        results = response.results
+      } catch (e: unknown) {
+        // 整批请求失败（限流/网络）：该批全部标失败，继续后续批次
+        const message = getApiErrorMessage(e, '批量请求失败')
+        for (let i = 0; i < chunk.length; i += 1) {
+          batchRows.value[offset + i] = { ...batchRows.value[offset + i], status: 'failed', error: message }
+        }
+        continue
+      }
+      for (const result of results) {
+        const row = batchRows.value[offset + result.index]
+        if (!row) continue
+        batchRows.value[offset + result.index] = {
+          ...row,
+          status: result.status,
+          workId: result.workId || '',
+          error: result.error || '',
+        }
+      }
+    }
+  } finally {
+    batchRunning.value = false
+    batchDone.value = true
   }
 }
 
@@ -293,7 +420,7 @@ onBeforeUnmount(() => {
             <div class="space-y-4">
               <div>
                 <h2 class="text-base font-semibold text-ink-primary">发布 Discord 角色卡</h2>
-                <p class="mt-1 text-sm text-ink-muted">角色卡解析完成后会立即发布为公共作品。</p>
+                <p class="mt-1 text-sm text-ink-muted">支持 PNG / JSON / CHARX / BYAF / YAML 卡体，解析完成后立即发布为公共作品。</p>
               </div>
               <div v-if="discordSource" class="border-l-2 border-brand-500 pl-3">
                 <p class="text-sm font-medium text-ink-primary">{{ discordSource.title }}</p>
@@ -305,7 +432,7 @@ onBeforeUnmount(() => {
                   v-model="importUrl"
                   data-testid="discord-png-import-input"
                   type="url"
-                  placeholder="cdn.discordapp.com/attachments/.../*.png"
+                  placeholder="cdn.discordapp.com/attachments/.../角色卡文件"
                   class="min-w-0 flex-1"
                   @keydown.enter.prevent="importFromDiscord"
                 />
@@ -325,6 +452,65 @@ onBeforeUnmount(() => {
                 <AppButton size="sm" variant="secondary" @click="router.push(`/work/${encodeURIComponent(publishedWorkId)}`)">查看公共作品</AppButton>
               </div>
               <p v-if="importError" data-testid="discord-png-import-error" class="text-sm text-red-700">{{ importError }}</p>
+            </div>
+          </AppCard>
+
+          <!-- 批量发布：Worker 一次粘贴全部条目，服务器端并发抓取与发布 -->
+          <AppCard padding="lg" class="mt-6">
+            <div class="space-y-4">
+              <div>
+                <h2 class="text-base font-semibold text-ink-primary">批量发布</h2>
+                <p class="mt-1 text-sm text-ink-muted">
+                  粘贴 JSON 数组，每项包含 url、cardId、threadId、channelId、sourceUrl、title，可选 authorName、tags。
+                  服务器直接抓取附件并发布，每批 10 项自动分批。
+                </p>
+              </div>
+              <AppTextarea
+                v-model="batchInput"
+                data-testid="discord-batch-input"
+                :rows="5"
+                :disabled="batchRunning"
+                placeholder='[{"url":"https://cdn.discordapp.com/attachments/...","cardId":"...","threadId":"...","channelId":"...","sourceUrl":"https://discord.com/channels/...","title":"...","authorName":"...","tags":["原创"]}]'
+              />
+              <div class="flex flex-wrap items-center gap-3">
+                <AppButton
+                  data-testid="discord-batch-submit"
+                  :disabled="batchRunning || !batchInput.trim() || !session.isAdmin"
+                  @click="runBatchPublish"
+                >{{ batchRunning ? '批量发布中…' : '批量发布' }}</AppButton>
+                <p
+                  data-testid="discord-batch-status"
+                  :data-batch-state="batchRunning ? 'running' : batchDone ? 'done' : 'idle'"
+                  class="text-sm text-ink-muted"
+                >
+                  <template v-if="batchRunning">处理中 {{ batchRows.filter(row => row.status !== 'pending').length }} / {{ batchRows.length }}</template>
+                  <template v-else-if="batchDone">已完成 {{ batchRows.length }} 项</template>
+                  <template v-else>等待批量输入</template>
+                </p>
+                <p v-if="batchError" data-testid="discord-batch-error" class="text-sm text-red-700">{{ batchError }}</p>
+              </div>
+              <ul v-if="batchRows.length" class="divide-y divide-border-subtle rounded-lg border border-border">
+                <li
+                  v-for="row in batchRows"
+                  :key="row.cardId"
+                  data-testid="discord-batch-item"
+                  :data-card-id="row.cardId"
+                  :data-publish-status="row.status"
+                  :data-work-id="row.workId"
+                  class="flex flex-wrap items-center justify-between gap-2 px-3 py-2 text-sm"
+                >
+                  <span class="min-w-0 flex-1 truncate text-ink-primary">{{ row.title }}</span>
+                  <span
+                    :class="row.status === 'failed' ? 'text-red-600' : row.status === 'pending' ? 'text-ink-muted' : 'text-emerald-700'"
+                  >{{ row.status === 'pending' ? '等待' : row.status === 'published' ? '已发布' : row.status === 'duplicate' ? '重复关联' : `失败：${row.error}` }}</span>
+                  <AppButton
+                    v-if="row.workId"
+                    size="sm"
+                    variant="secondary"
+                    @click="router.push(`/work/${encodeURIComponent(row.workId)}`)"
+                  >查看</AppButton>
+                </li>
+              </ul>
             </div>
           </AppCard>
         </div>

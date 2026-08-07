@@ -11,7 +11,7 @@ import {
   fetchCharacterChats,
   mergeAttributes,
 } from '@/api/characters'
-import { listStories } from '@/api/stories'
+import { useStoriesStore } from '@/stores/stories'
 import { createChatFromCharacter, createChatFromStory } from '@/lib/storyStart'
 import { characterGreetings, saveStoryFromCharacterGreeting } from '@/lib/storyFromCharacter'
 import { stripJsonlName } from '@/lib/format'
@@ -33,7 +33,8 @@ const mods = useModsStore()
 
 const avatar = computed(() => decodeURIComponent((route.params.avatar as string) || ''))
 const character = ref<Character | null>(null)
-const stories = ref<StoryCard[]>([])
+const storiesStore = useStoriesStore()
+const stories = computed(() => storiesStore.stories.filter(story => story.characterAvatar === avatar.value))
 const chatList = ref<ChatEntry[]>([])
 const startModIds = ref<string[]>([])
 const loading = ref(false)
@@ -56,11 +57,10 @@ async function loadData() {
   try {
     await mods.load()
     character.value = await fetchCharacter(avatar.value)
-    const [storyResult, chatResult] = await Promise.all([
-      listStories(),
+    const [, chatResult] = await Promise.all([
+      storiesStore.load(),
       fetchCharacterChats(avatar.value),
     ])
-    stories.value = storyResult.filter((story) => story.characterAvatar === avatar.value)
     chatList.value = chatResult
   } catch (e: unknown) {
     ui.addToast(`加载失败：${getApiErrorMessage(e)}`, 'error')
@@ -151,7 +151,8 @@ async function saveGreetingAsStory(greeting: string, index: number) {
   savingGreetingIndex.value = index
   try {
     const story = await saveStoryFromCharacterGreeting(character.value, greeting, index)
-    stories.value = [story, ...stories.value.filter((item) => item.id !== story.id)]
+    storiesStore.invalidate()
+    void storiesStore.load(true)
     ui.addToast('已从开场白生成故事卡', 'success')
     router.push(`/story/${encodeURIComponent(story.id)}`)
   } catch (e: unknown) {

@@ -4,9 +4,8 @@ import { useRoute, useRouter } from 'vue-router'
 import { useCharactersStore } from '@/stores/characters'
 import { useModsStore, type ModItem } from '@/stores/mods'
 import { useUiStore } from '@/stores/ui'
-import { listStories } from '@/api/stories'
+import { useStoriesStore } from '@/stores/stories'
 import { publishCommunityWork, type CommunityWorkType } from '@/api/community'
-import type { StoryCard } from '@/api/types'
 import AppButton from '@/components/ui/AppButton.vue'
 import AppFormField from '@/components/ui/AppFormField.vue'
 import AppInput from '@/components/ui/AppInput.vue'
@@ -21,7 +20,8 @@ const router = useRouter()
 const chars = useCharactersStore()
 const mods = useModsStore()
 const ui = useUiStore()
-const stories = ref<StoryCard[]>([])
+const storiesStore = useStoriesStore()
+const stories = computed(() => storiesStore.stories)
 const loading = ref(false)
 const publishing = ref(false)
 
@@ -90,9 +90,11 @@ watch(() => form.sourceId, applySourceDefaults)
 async function load() {
   loading.value = true
   try {
-    const [, loadedStories] = await Promise.all([chars.load(), listStories(), mods.load()])
-    stories.value = loadedStories
+    await Promise.all([chars.load(), storiesStore.load(), mods.load()])
     if (form.sourceId) applySourceDefaults()
+  } catch (e: unknown) {
+    // 来源下拉为空时用户需要知道是加载失败而不是没有可发布内容
+    ui.addToast(`发布来源加载失败：${getApiErrorMessage(e)}`, 'error')
   } finally {
     loading.value = false
   }

@@ -10,6 +10,7 @@ import {
   testImageProvider,
 } from '@/api/imageGen'
 import { loadAibarSettings, saveAibarSettings } from '@/api/settings'
+import { notifyPersistFailure } from '@/stores/persistFeedback'
 
 export const useImageGenStore = defineStore('imageGen', () => {
   const settings = ref<ImageGenSettings>(normalizeImageSettings({}))
@@ -59,7 +60,7 @@ export const useImageGenStore = defineStore('imageGen', () => {
     try {
       await saveAibarSettings({ simple_ui_image_gen: settings.value })
     } catch (e) {
-      if (version === storeVersion) console.warn('Persist image generation settings failed', e)
+      if (version === storeVersion) notifyPersistFailure('绘图设置', e)
     }
   }
 

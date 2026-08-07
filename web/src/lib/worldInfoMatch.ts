@@ -128,10 +128,3 @@ export async function getMatchedWorldInfo(
   return renderMatchedWorldInfo(entries, scan)
 }
 
-export function entryListOf(file: WorldInfoFile): WorldInfoEntry[] {
-  return entryList(file)
-}
-
-export function setEntries(file: WorldInfoFile, entries: WorldInfoEntry[]): WorldInfoFile {
-  return { ...file, entries }
-}

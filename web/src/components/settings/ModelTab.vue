@@ -256,6 +256,7 @@ function addProfile(source = 'custom') {
 }
 
 async function deleteProfile(profile: ModelProfile) {
+  if (!window.confirm(`删除共享模型「${profile.name || '未命名'}」？所有用户将立即不可用。`)) return
   const epoch = viewEpoch
   const handle = session.user?.handle || ''
   if (!isCurrentView(epoch, handle)) return

@@ -1,17 +1,17 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
+import { onBeforeRouteLeave, useRoute, useRouter } from 'vue-router'
 import { createCharacter, editCharacter, editCharacterAvatar, fetchCharacter } from '@/api/characters'
-import { listWorldInfo } from '@/api/worldInfo'
 import { useCharactersStore } from '@/stores/characters'
 import { useUiStore } from '@/stores/ui'
 import { useModelProfilesStore } from '@/stores/modelProfiles'
 import { useImageGenStore } from '@/stores/imageGen'
+import { useWorldInfoStore } from '@/stores/worldInfo'
 import { generateReply } from '@/api/generate'
 import { getApiErrorMessage } from '@/api/client'
 import { buildGeneratePayload } from '@/lib/buildPayload'
 import { getMatchedWorldInfo } from '@/lib/worldInfoMatch'
-import type { Character, ImageAsset, ModelProfile, WorldInfoSummary } from '@/api/types'
+import type { Character, ImageAsset, ModelProfile } from '@/api/types'
 import AppButton from '@/components/ui/AppButton.vue'
 import AppInput from '@/components/ui/AppInput.vue'
 import AppSelect from '@/components/ui/AppSelect.vue'
@@ -49,7 +49,8 @@ const pageTitle = computed(() => {
 const backTo = computed(() => isEdit.value ? '/characters' : '/create?kind=character')
 const loading = ref(false)
 const original = ref<Character | null>(null)
-const worlds = ref<WorldInfoSummary[]>([])
+const worldInfoStore = useWorldInfoStore()
+const worlds = computed(() => worldInfoStore.worlds)
 const generatedAvatar = ref<ImageAsset | null>(null)
 const applyingAvatar = ref(false)
 
@@ -245,6 +246,16 @@ async function draftWithAi() {
   }
 }
 
+// 未保存离开保护：表单与最近一次保存/载入的快照不一致时拦一次确认。
+let savedFormSnapshot = JSON.stringify(form)
+function markFormSaved() {
+  savedFormSnapshot = JSON.stringify(form)
+}
+onBeforeRouteLeave(() => {
+  if (JSON.stringify(form) === savedFormSnapshot) return true
+  return window.confirm('有未保存的修改，确定离开吗？AI 生成的草稿也会一并丢失。')
+})
+
 async function save() {
   if (!form.ch_name.trim()) {
     ui.addToast('角色名不能为空', 'warning')
@@ -254,9 +265,11 @@ async function save() {
   try {
     if (isEdit.value) {
       await editCharacter(avatar.value, payload())
+      markFormSaved()
       ui.addToast('角色已保存', 'success')
     } else {
       const result = await createCharacter(payload())
+      markFormSaved()
       ui.addToast('角色已创建', 'success')
       if (typeof result === 'string') {
         if (generatedAvatar.value) {
@@ -374,7 +387,7 @@ async function runTest() {
 }
 
 onMounted(async () => {
-  worlds.value = await listWorldInfo().catch(() => [])
+  await worldInfoStore.load().catch(() => undefined)
   await models.loadSecrets()
   await imageGen.load()
   draft.profileId = defaultDraftProfileId()
@@ -384,6 +397,7 @@ onMounted(async () => {
     try {
       original.value = await fetchCharacter(avatar.value)
       fillForm(original.value)
+      markFormSaved()
       test.world = form.world
     } catch (e: unknown) {
       ui.addToast(`角色读取失败：${getApiErrorMessage(e)}`, 'error')

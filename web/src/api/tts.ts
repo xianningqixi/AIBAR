@@ -623,8 +623,3 @@ export async function synthesizeSpeech(opts: SynthesizeOptions): Promise<Blob> {
     throw wrapError(opts.provider, e)
   }
 }
-
-export const OPENAI_TTS_MODELS = PROVIDER_MODELS.openai
-export const OPENAI_TTS_VOICES = PROVIDER_VOICES.openai
-export const MIMO_TTS_MODELS = PROVIDER_MODELS.mimo
-export const MIMO_TTS_VOICES = PROVIDER_VOICES.mimo

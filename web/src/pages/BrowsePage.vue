@@ -6,6 +6,7 @@ import { useUiStore } from '@/stores/ui'
 import { useModelProfilesStore } from '@/stores/modelProfiles'
 import { useSessionStore } from '@/stores/session'
 import type { Character, CharacterStartSelection, ChatEntry, ModelProfile, StoryCard } from '@/api/types'
+import { useStoriesStore } from '@/stores/stories'
 import CharacterStartDialog from '@/components/chat/CharacterStartDialog.vue'
 import AppButton from '@/components/ui/AppButton.vue'
 import AppDrawer from '@/components/ui/AppDrawer.vue'
@@ -14,7 +15,6 @@ import AppSelect from '@/components/ui/AppSelect.vue'
 import SearchInput from '@/components/ui/SearchInput.vue'
 import { getApiErrorMessage } from '@/api/client'
 import { fetchRecentChats } from '@/api/chats'
-import { listStories } from '@/api/stories'
 import { stripJsonlName } from '@/lib/format'
 import { createChatFromCharacter } from '@/lib/storyStart'
 import { getProviderLabel } from '@/lib/providers'
@@ -29,7 +29,8 @@ const ui = useUiStore()
 const models = useModelProfilesStore()
 const session = useSessionStore()
 
-const stories = ref<StoryCard[]>([])
+const storiesStore = useStoriesStore()
+const stories = computed(() => storiesStore.stories)
 const chatEntries = ref<ChatEntry[]>([])
 const loading = ref(true)
 
@@ -243,7 +244,8 @@ function chatThumbnail(entry: ChatEntry): string {
 
 function characterCover(avatar: string): string {
   if (!avatar || avatar === 'none') return ''
-  return `/characters/${encodeURIComponent(avatar)}`
+  // 网格用缩略图端点：原始角色卡 PNG 内嵌了完整卡片 JSON，单张常在 0.5-3 MB。
+  return `/thumbnail?type=avatar&file=${encodeURIComponent(avatar)}`
 }
 
 function getChatTitle(entry: ChatEntry): string {
@@ -438,14 +440,13 @@ function cleanDescription(c: Character): string {
   return t
 }
 
-onMounted(async () => {
+async function loadBrowseData() {
+  loading.value = true
   try {
     await Promise.all([
       store.characters.length ? Promise.resolve() : store.load(),
       models.loadSecrets().catch(() => undefined),
-      listStories()
-        .then((res) => (stories.value = res))
-        .catch(() => undefined),
+      storiesStore.load().catch(() => undefined),
       fetchRecentChats(500)
         .then((res) => (chatEntries.value = res))
         .catch(() => undefined),
@@ -453,7 +454,9 @@ onMounted(async () => {
   } finally {
     loading.value = false
   }
-})
+}
+
+onMounted(loadBrowseData)
 </script>
 
 <template>
@@ -707,8 +710,19 @@ onMounted(async () => {
           </button>
         </div>
 
+        <!-- 加载失败与“真的没有角色”是两种状态：失败必须可重试，不能伪装成空库 -->
         <AppEmpty
-          v-if="!store.characters.length"
+          v-if="!store.characters.length && store.error"
+          icon="box"
+          title="角色列表加载失败"
+          :description="store.error"
+        >
+          <template #actions>
+            <AppButton size="md" @click="loadBrowseData">重试</AppButton>
+          </template>
+        </AppEmpty>
+        <AppEmpty
+          v-else-if="!store.characters.length"
           icon="box"
           title="还没有角色卡"
           description="去创作入口创建角色，或者在角色管理里导入 PNG 角色卡。"

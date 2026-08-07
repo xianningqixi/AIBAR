@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import type { Character } from '@/api/types'
+import { getApiErrorMessage } from '@/api/client'
 import {
   fetchCharacters,
   toggleFavorite as toggleFavoriteApi,
@@ -12,9 +13,9 @@ export const useCharactersStore = defineStore('characters', () => {
   const loading = ref(false)
   const error = ref('')
   let requestVersion = 0
+  let loadPromise: Promise<void> | null = null
 
   const characters = computed(() => list.value)
-  const favorites = computed(() => list.value.filter((c) => c.fav === 'true'))
 
   function findCharacter(avatar: string): Character | undefined {
     return list.value.find((c) => c.avatar === avatar)
@@ -30,17 +31,24 @@ export const useCharactersStore = defineStore('characters', () => {
   }
 
   async function load() {
+    // 多个页面会在挂载时并发调用 load，复用在途请求避免重复拉全量角色列表。
+    if (loadPromise) return loadPromise
     const version = ++requestVersion
     loading.value = true
     error.value = ''
-    try {
-      const characters = await fetchCharacters()
-      if (version === requestVersion) list.value = characters
-    } catch (e: any) {
-      if (version === requestVersion) error.value = e.message || 'Failed to load characters'
-    } finally {
-      if (version === requestVersion) loading.value = false
-    }
+    const promise = (async () => {
+      try {
+        const characters = await fetchCharacters()
+        if (version === requestVersion) list.value = characters
+      } catch (e: unknown) {
+        if (version === requestVersion) error.value = getApiErrorMessage(e, '角色列表加载失败')
+      } finally {
+        if (version === requestVersion) loading.value = false
+        loadPromise = null
+      }
+    })()
+    loadPromise = promise
+    return promise
   }
 
   async function toggleFav(character: Character) {
@@ -78,7 +86,6 @@ export const useCharactersStore = defineStore('characters', () => {
     loading,
     error,
     characters,
-    favorites,
     findCharacter,
     upsertCharacter,
     load,

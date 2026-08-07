@@ -34,6 +34,8 @@ function addMod() {
 }
 
 function deleteSelectedMod(mod: ModItem) {
+  // 内置 MOD 的“删除”只是停用，无需拦截
+  if (!mod.builtin && !window.confirm(`删除 MOD「${mod.name || '未命名'}」？此操作不可恢复。`)) return
   mods.deleteMod(mod.id)
   selectedModId.value = mods.mods[0]?.id || ''
 }

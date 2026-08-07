@@ -1,16 +1,17 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
+import { onBeforeRouteLeave, useRoute, useRouter } from 'vue-router'
 import { useCharactersStore } from '@/stores/characters'
 import { useUiStore } from '@/stores/ui'
 import { useModsStore } from '@/stores/mods'
 import { useModelProfilesStore } from '@/stores/modelProfiles'
 import { useImageGenStore } from '@/stores/imageGen'
+import { useStoriesStore } from '@/stores/stories'
+import { useWorldInfoStore } from '@/stores/worldInfo'
 import { getStory, saveStory } from '@/api/stories'
-import { listWorldInfo } from '@/api/worldInfo'
 import { generateReply } from '@/api/generate'
 import { getApiErrorMessage } from '@/api/client'
-import type { Character, ImageAsset, ModelProfile, StoryCard, WorldInfoSummary } from '@/api/types'
+import type { Character, ImageAsset, ModelProfile, StoryCard } from '@/api/types'
 import AppButton from '@/components/ui/AppButton.vue'
 import AppInput from '@/components/ui/AppInput.vue'
 import AppSelect from '@/components/ui/AppSelect.vue'
@@ -60,7 +61,9 @@ const coverImage = ref('')
 const coverAssetId = ref('')
 const modelProfileId = ref('')
 const modIds = ref<string[]>([])
-const worlds = ref<WorldInfoSummary[]>([])
+const worldInfoStore = useWorldInfoStore()
+const storiesStore = useStoriesStore()
+const worlds = computed(() => worldInfoStore.worlds)
 const submitting = ref(false)
 const draft = reactive({
   profileId: '',
@@ -281,6 +284,34 @@ async function draftWithAi() {
   }
 }
 
+// 未保存离开保护：对比可编辑字段与最近一次载入/保存的快照。
+function editableSnapshot() {
+  return JSON.stringify({
+    characterAvatar: characterAvatar.value,
+    title: title.value,
+    summary: summary.value,
+    scenario: scenario.value,
+    openingUserMessage: openingUserMessage.value,
+    useCharGreeting: useCharGreeting.value,
+    customAssistantOpening: customAssistantOpening.value,
+    tags: tags.value,
+    world: world.value,
+    systemAppend: systemAppend.value,
+    coverImage: coverImage.value,
+    modelProfileId: modelProfileId.value,
+    modIds: modIds.value,
+  })
+}
+let savedSnapshot = ''
+function markStorySaved() {
+  savedSnapshot = editableSnapshot()
+}
+onBeforeRouteLeave(() => {
+  // 新建页初始快照在 onMounted 里补齐默认角色后建立
+  if (!savedSnapshot || editableSnapshot() === savedSnapshot) return true
+  return window.confirm('有未保存的修改，确定离开吗？AI 生成的草稿也会一并丢失。')
+})
+
 async function saveHandler() {
   if (!selectedCharacter.value) {
     ui.addToast('请先选择角色', 'warning')
@@ -313,6 +344,8 @@ async function saveHandler() {
       payload.id = editId.value
     }
     const story = await saveStory(payload)
+    storiesStore.invalidate()
+    markStorySaved()
     ui.addToast(isEdit.value ? '故事卡已更新' : '故事卡已保存', 'success')
     router.push(`/story/${encodeURIComponent(story.id)}`)
   } catch (e: unknown) {
@@ -329,7 +362,7 @@ onMounted(async () => {
     models.loadSecrets(),
     imageGen.load(),
   ])
-  worlds.value = await listWorldInfo().catch(() => [])
+  await worldInfoStore.load().catch(() => undefined)
   draft.profileId = defaultDraftProfileId()
   if (isEdit.value) {
     loadingStory.value = true
@@ -345,6 +378,7 @@ onMounted(async () => {
   } else if (!characterAvatar.value && chars.characters.length) {
     characterAvatar.value = chars.characters[0].avatar
   }
+  markStorySaved()
 })
 
 function applyStoryCover(asset: ImageAsset) {

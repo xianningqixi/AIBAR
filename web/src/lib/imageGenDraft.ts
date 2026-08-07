@@ -1,5 +1,6 @@
 import type { Character, ImageGenSettings, ModelProfile } from '@/api/types'
 import { buildChatCompletionPayload } from './buildPayload'
+import { parseJsonObject } from './llmJson'
 import { addImageSafetyNegative, softenImagePromptForProvider } from './imagePromptSafety'
 
 export interface ImageGenDraft {
@@ -21,6 +22,8 @@ function asString(value: unknown): string {
 }
 
 function asNumber(value: unknown, fallback: number, min: number, max: number): number {
+  // Number(null) === 0，会被误当成合法值钳到下限；null/空串一律按缺省处理
+  if (value === null || value === undefined || (typeof value === 'string' && !value.trim())) return fallback
   const n = typeof value === 'number' ? value : Number(value)
   if (!Number.isFinite(n)) return fallback
   return Math.min(max, Math.max(min, Math.round(n)))
@@ -33,20 +36,6 @@ function asImageDimension(value: unknown, fallback: number): number {
 
 function asBoolean(value: unknown, fallback: boolean): boolean {
   return typeof value === 'boolean' ? value : fallback
-}
-
-function parseJsonObject(text: string): Record<string, unknown> {
-  let body = text.trim()
-  const fence = body.match(/```(?:json)?\s*([\s\S]*?)```/i)
-  if (fence) body = fence[1].trim()
-
-  const start = body.indexOf('{')
-  const end = body.lastIndexOf('}')
-  if (start === -1 || end === -1 || end <= start) {
-    throw new Error('模型没有返回可解析的 JSON')
-  }
-
-  return JSON.parse(body.slice(start, end + 1)) as Record<string, unknown>
 }
 
 function normalizeOpenAiSize(value: unknown, fallback: string): string {
@@ -126,7 +115,7 @@ export function buildImageGenDraftPayload(
 }
 
 export function parseImageGenDraft(text: string, fallback: ImageGenSettings): ImageGenDraft {
-  const raw = parseJsonObject(text)
+  const raw = parseJsonObject<Record<string, unknown>>(text)
   const prompt = softenImagePromptForProvider(asString(raw.prompt), fallback.provider)
   const negativePrompt = addImageSafetyNegative(asString(raw.negativePrompt) || fallback.negativePrompt, fallback.provider)
   return {

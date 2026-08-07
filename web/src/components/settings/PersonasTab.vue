@@ -23,6 +23,7 @@ function addPersona() {
 }
 
 function deleteSelectedPersona(persona: Persona) {
+  if (!window.confirm(`删除身份「${persona.name || '未命名'}」？此操作不可恢复。`)) return
   personas.deletePersona(persona.id)
   selectedPersonaId.value = personas.personas[0]?.id || ''
 }
