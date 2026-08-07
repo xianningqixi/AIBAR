@@ -146,6 +146,28 @@ export function publishDiscordCommunityWork(input: {
   return apiPost('/api/aibar/works/publish-discord', input)
 }
 
+export interface DiscordBatchPublishItem {
+  url: string
+  source: DiscordCommunitySource
+}
+
+export interface DiscordBatchPublishResult {
+  index: number
+  cardId: string
+  status: 'published' | 'duplicate' | 'failed'
+  versionId?: string
+  workId?: string
+  error?: string
+}
+
+// 服务器端批量发布：附件由服务器直接从 Discord CDN 抓取（内部 3 并发），
+// 卡体字节不再经过浏览器往返。单次最多 10 项，超出由调用方分批。
+export function publishDiscordCommunityBatch(
+  items: DiscordBatchPublishItem[],
+): Promise<{ results: DiscordBatchPublishResult[] }> {
+  return apiPost('/api/aibar/works/publish-discord-batch', { items })
+}
+
 export function setCommunityFavorite(id: string, favorite: boolean): Promise<CommunityWork> {
   return apiPost('/api/aibar/works/favorite', { id, favorite })
 }

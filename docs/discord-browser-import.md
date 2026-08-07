@@ -34,8 +34,8 @@
 2. 用户点击本地控制台的“发布已选”。该点击写入持久化请求，并明确授权浏览器 worker 执行后续浏览器操作。
 3. 本地服务为该点击启动新的单次浏览器助手；它读取其中仍被勾选且尚未成功导入的项目，不要求用户再回对话发送命令。
 4. 浏览器助手使用已登录的 Chrome 打开这些项目的 `sourceUrl`，按 PNG > JSON > CHARX > BYAF > YAML 优先级选择卡体并取得短期 Discord CDN 链接。
-5. worker 把固定 guild、来源栏目、thread/card ID、帖子 URL、标题、作者和标签编码进 `AIBAR_DISCORD_AIBAR_URL` 的 hash 路由查询参数，再把短期链接填入已部署 AIBAR 服务器手动卡体入口。
-6. 远端 AIBAR 下载并由 SillyTavern 解析角色卡；私人角色文件只是解析暂存。管理员专用接口从服务器端 PNG 计算 SHA-256，按哈希关联公共区重复作品，或把同 thread 的新内容发布成公共作品版本。
+5. worker 把每项的短期链接与来源信息（url/cardId/threadId/channelId/sourceUrl/title/authorName/tags）组装成 JSON 数组，一次性粘贴进已部署 AIBAR 服务器的批量发布入口；单项手动入口保留为回退路径（来源信息经 hash 查询参数传递）。
+6. 远端 AIBAR 的 `/api/aibar/works/publish-discord-batch` 在服务器端直接抓取附件（并发 3、单批最多 10 项、逐项失败隔离），由 SillyTavern 解析后导入；私人角色文件只是解析暂存。服务器从 PNG 计算 SHA-256，按哈希关联公共区重复作品，或把同 thread 的新内容发布成公共作品版本，逐项返回 `published`/`duplicate`/`failed`。
 7. 页面只有在公共发布返回 `published` 或 `duplicate` 并给出作品入口时才显示成功。worker 随后把每项 `imported`、`failed` 或 `skipped` 结果写回本地服务；单项失败不得回滚已成功项目。
 
 网页应用、压缩包和无卡体附件的帖子不进入阶段二，也不在本地角色卡选择表中提供自动导入。

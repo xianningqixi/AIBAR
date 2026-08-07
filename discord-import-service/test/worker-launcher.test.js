@@ -106,8 +106,13 @@ test('public-publish prompts are one-shot and never wait for future requests', (
     assert.match(prompt, /不得读取、复制、输出或保存/);
     assert.match(prompt, /https:\/\/aibar\.example\/aibar\/#\/hub\?source=discord/);
     assert.match(prompt, /严禁改用 localhost、127\.0\.0\.1/);
+    // 两阶段批量流程：并行收集 + 一次批量提交
+    assert.match(prompt, /阶段A（收集 CDN 链接，可并行）/);
+    assert.match(prompt, /最多 3 个标签页/);
+    assert.match(prompt, /discord-batch-input/);
+    assert.match(prompt, /discord-batch-submit/);
+    assert.match(prompt, /data-batch-state 变为 done/);
     assert.match(prompt, /discordChannelId/);
-    assert.match(prompt, /data-publish-status=published 或 duplicate/);
     assert.match(prompt, /私人角色写入仅是.*内部暂存，不能算完成/);
 });
 

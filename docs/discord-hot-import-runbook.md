@@ -67,7 +67,7 @@
 
 每次由用户主动触发，采集 `Asia/Shanghai` 当日 00:00 到触发时刻已经发布的帖子。不得用滚动 24 小时代替今日自然日；边界以帖子绝对时间为准，Discord 的“15 小时前”等相对时间只用于初筛。
 
-1. 按配置顺序逐个打开三个固定 forum，确认页面不是登录页或成人内容确认页。需要用户本人确认或重新登录时停止本次运行并明确报告，不要绕过。
+1. 打开三个固定 forum（可在最多 3 个独立标签页并行处理，每栏目固定一个标签页；栏目内部仍按顺序执行），确认页面不是登录页或成人内容确认页。需要用户本人确认或重新登录时停止本次运行并明确报告，不要绕过。
 2. 打开“排序 & 查看”，选择“发帖日期”以发现今日新帖；需要刷新旧帖热度时才使用“最近活跃”。预览可保持列表或图库，但采集不能依赖截图。
 3. 在每个栏目分别读取当前全部“按标签 <标签> 筛选”按钮，包括“查看所有标签”弹窗中的按钮；catalog/pass 都携带该栏目的 `sourceChannelId`。标签目录按栏目隔离，不能把某个栏目的目录复用给另一个栏目。
 4. 最终不限制标签时，逐个点击所有可见标签，以“匹配部分”采集各视图并按 `threadId` 合并，再清除标签从无标签视图补漏。用户指定多个标签时一次选中全部标签，并按要求设置“匹配部分”或“全部匹配”。
@@ -97,14 +97,14 @@
 
 - 选择：本地控制台候选表中的角色卡复选框。
 - 授权：本地控制台 `import-selected-button`。
-- AIBAR 卡体输入：`discord-png-import-input`（testid 沿用旧名）或其 `cdn.discordapp.com/attachments/...` placeholder。
-- AIBAR 发布按钮：`discord-png-import-submit`，可见文字为“发布到公共区”。
+- AIBAR 单项卡体输入：`discord-png-import-input`（testid 沿用旧名）；单项发布按钮：`discord-png-import-submit`。
+- AIBAR 批量发布（首选）：JSON 输入 `discord-batch-input`、提交按钮 `discord-batch-submit`、总状态 `discord-batch-status`（`data-batch-state=done` 表示全部处理完）、逐项结果 `discord-batch-item`（携带 `data-card-id`/`data-publish-status`/`data-work-id`）。
 
 “发布已选”请求成功保存后，本地服务立即启动一次性发布 Worker。它只对该 job 执行 `get <jobId>`，把 workflow 更新为 `importing`；每项通过 `import-item` 写回结果，全部终态后更新为 `complete` 并退出。异常退出时服务把 job 置为可恢复的 `blocked`，不会在后台持续重试或轮询。用户处理完登录、成人内容确认或资源口令后，点击控制台“继续发布”会用同一份已持久化请求再启动一条一次性发布 Worker，只处理 `pending`、`importing` 和 `failed` 的剩余项。
 
 ## 4. Discord 下载流程
 
-对每个已授权角色卡逐项处理，单项失败不能回滚其他成功项。
+对每个已授权角色卡逐项处理，单项失败不能回滚其他成功项。可同时在最多 3 个标签页处理不同帖子的 `/下载`（帖内交互与等待不因并行缩短）；本阶段只收集短期 CDN 链接与来源信息，不逐项打开 AIBAR。
 
 1. 打开帖子的 thread URL，不要为了执行 `/下载` 追加 message ID。
 2. 等待消息输入框真实出现。Discord 慢加载时至少再等待 3 秒后重试，不能第一次找不到控件就判为“无资源”。
@@ -115,8 +115,8 @@
 7. 按 PNG > JSON > CHARX > BYAF > YAML 的优先级选择最新卡体文件。不要机械点击最后一项：最后一项可能是 ZIP/RAR 或安装包；主项目入口只接受这五种卡体格式。
 8. 若出现密码表单，从帖子可见正文或剧透中临时读取对应密码，填写并提交。不要输出或保存密码。
 9. 获取“点击这里下载”的短期 Discord CDN URL，并立即交给 AIBAR；签名链接会过期。
-10. 以 `AIBAR_DISCORD_AIBAR_URL` 指定的正式服务器地址为基础，在 hash 路由查询参数中携带当前卡的 `discordGuildId`、`discordChannelId`、`discordThreadId`、`discordCardId`、`discordSourceUrl`、`discordTitle`、`discordAuthorName` 和重复的 `discordTag`；所有值必须用 `URLSearchParams` 编码。
-11. 打开该完整远端地址，在手动卡体输入框填写 CDN URL，点击“发布到公共区”。等待页面稳定显示 `data-publish-status="published"` 或 `duplicate` 并出现公共作品入口后再处理下一项；立即丢弃该短期 URL。不得使用 localhost、127.0.0.1、本地 Vite 或本地 SillyTavern。
+10. 为每个取得链接的项记录 `url`、`cardId`、`threadId`、`channelId`、`sourceUrl`、`title`、`authorName`、`tags` 八个字段。
+11. 全部收集完成后，打开 `AIBAR_DISCORD_AIBAR_URL` 指定的正式服务器地址（不得使用 localhost、127.0.0.1、本地 Vite 或本地 SillyTavern），在“批量发布”卡片把条目组装成 JSON 数组粘贴进 `discord-batch-input`，点击 `discord-batch-submit`。服务器直接从 Discord CDN 抓取附件（内部 3 并发）并逐项导入发布；页面按每批 10 项自动分批。等待 `discord-batch-status` 的 `data-batch-state="done"`，逐项读取 `discord-batch-item` 的 `data-publish-status` 写回结果；随后立即丢弃全部短期 URL。批量入口异常时才退回单项入口（hash 查询参数带来源字段，逐项粘贴）。
 
 ### 锁帖或迁移帖
 
