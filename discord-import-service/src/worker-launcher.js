@@ -31,7 +31,7 @@ function workerPrompt(workspaceDirectory, aibarUrl, jobId, phase) {
 
 只处理 importItems 中 pending、failed 或 importing 的已选卡。处理每项前，从 job 卡片读取 id、threadId、sourceChannelId、sourceUrl、title、authorName 和 tags。以 ${aibarUrl} 为基础保留 source=discord，并在 hash 路由查询参数中加入 discordGuildId=1380075940285124724、discordChannelId、discordThreadId、discordCardId、discordSourceUrl、discordTitle、discordAuthorName；每个标签用一个重复的 discordTag 参数。所有值都必须用 URLSearchParams 正确编码，不得拼接未转义文本。
 
-逐项打开 Discord sourceUrl 执行 /下载，只选择 PNG 角色卡；取得短期 CDN URL 后立即打开该项带来源参数的远端 AIBAR URL，确认地址仍是上述服务器，通过唯一的 PNG 链接入口点击“发布到公共区”。私人角色写入仅是远端 SillyTavern 解析所需的内部暂存，不能算完成。只有页面稳定显示 data-publish-status=published 或 duplicate，并提供对应公共作品入口时，才能用 ${clientCommand} import-item ${jobId} <cardId> imported <已发布到公共区或已关联公共区重复作品> 写回成功，然后立即丢弃短期 CDN URL。没有有效 PNG、只有普通图片或非 PNG 资源时写 skipped；解析或公共发布失败写 failed。
+逐项打开 Discord sourceUrl 执行 /下载，按 PNG > JSON > CHARX > BYAF > YAML 的优先级选择卡体文件（版本列表里同时有多种时选优先级最高的最新版）；ZIP/RAR、APK、安装器和普通图片不是卡体。取得短期 CDN URL 后立即打开该项带来源参数的远端 AIBAR URL，确认地址仍是上述服务器，通过唯一的卡体链接入口点击“发布到公共区”。私人角色写入仅是远端 SillyTavern 解析所需的内部暂存，不能算完成。只有页面稳定显示 data-publish-status=published 或 duplicate，并提供对应公共作品入口时，才能用 ${clientCommand} import-item ${jobId} <cardId> imported <已发布到公共区或已关联公共区重复作品> 写回成功，然后立即丢弃短期 CDN URL。没有任何受支持卡体文件、只有压缩包或普通图片时写 skipped；解析或公共发布失败写 failed。
 
 所有请求项进入终态后执行 ${clientCommand} workflow ${jobId} complete，再执行 ${clientCommand} heartbeat codex-browser idle 并立即结束。只有需要用户处理登录、成人内容确认或资源口令时才执行 ${clientCommand} workflow ${jobId} blocked <原因> 和 ${clientCommand} heartbeat codex-browser blocked ${jobId} <原因>，然后结束。不要等待新的请求，不要重试循环。`;
 }

@@ -1,13 +1,13 @@
 # Discord 热门角色卡同步与公共发布 Runbook
 
-本文是 AIBAR Discord 热门角色卡的可执行操作手册，面向能在用户已登录的 Chrome 中执行可见页面操作的浏览器 worker。热门榜、多选和逐项结果都位于本机 `127.0.0.1:4317` 控制台；远端 AIBAR 手动 PNG 入口负责把所选卡发布为公共社区作品。
+本文是 AIBAR Discord 热门角色卡的可执行操作手册，面向能在用户已登录的 Chrome 中执行可见页面操作的浏览器 worker。热门榜、多选和逐项结果都位于本机 `127.0.0.1:4317` 控制台；远端 AIBAR 手动卡体入口（支持 PNG / JSON / CHARX / BYAF / YAML）负责把所选卡发布为公共社区作品。
 
 ## 快速启动
 
 先打开 `http://127.0.0.1:4317/` 并点击“开始同步”。该点击会创建 job 并立即启动一次性 Codex Worker；同步完成后 Worker 退出，不做 heartbeat 轮询。只有需要人工恢复失败 job 时才使用下面的命令：
 
 ```text
-按 docs/discord-hot-import-runbook.md 消费我刚在本地控制台创建的任务：依次遍历三个固定栏目及各自的 Discord 原生标签筛选，收集 Asia/Shanghai 今日 00:00 到点击时刻的全部角色卡候选并去重；把合并列表发布到本地控制台，等待我勾选并点击“发布已选”后，只通过远端 AIBAR 手动 PNG 入口逐项发布到公共区，直到每项都有明确结果。
+按 docs/discord-hot-import-runbook.md 消费我刚在本地控制台创建的任务：依次遍历三个固定栏目及各自的 Discord 原生标签筛选，收集 Asia/Shanghai 今日 00:00 到点击时刻的全部角色卡候选并去重；把合并列表发布到本地控制台，等待我勾选并点击“发布已选”后，只通过远端 AIBAR 手动卡体入口逐项发布到公共区，直到每项都有明确结果。
 ```
 
 如果清单已经存在，只需要继续发布：
@@ -28,7 +28,7 @@
 - 前端代理目标（仅本地开发）：`http://127.0.0.1:8001`。
 - 手动同步范围：`Asia/Shanghai` 触发当日 `[00:00, 触发时刻)` 的全部候选；刷新时重新触发一个新任务，不复用旧快照。
 - 默认标签：不限制最终标签；采集时遍历所有可见标签按钮并以无标签视图补漏。
-- 自动发布只支持 `.png`；其他格式在本地榜单标记为不可自动处理。
+- 自动发布支持 `.png`、`.json`、`.yaml`/`.yml`、`.charx`、`.byaf` 卡体文件；压缩包、APK、安装器和普通图片在本地榜单标记为不可自动处理。
 - Discord 卡体上限：64 MB。通用 ZIP/RAR、APK、安装器、扩展包和普通图片不属于角色卡。
 
 只使用用户已经登录的 Chrome 可见页面。禁止读取或记录 Cookie、token、Authorization header、浏览器密码、localStorage 或其他会话存储；禁止调用 Discord 私有 API 或使用 self-bot。密码只能从帖子可见内容中临时读取并立即用于对应下载，不得写入仓库、聊天、日志或长期变量文件。
@@ -97,7 +97,7 @@
 
 - 选择：本地控制台候选表中的角色卡复选框。
 - 授权：本地控制台 `import-selected-button`。
-- AIBAR PNG 输入：`discord-png-import-input` 或其 `cdn.discordapp.com/attachments/.../*.png` placeholder。
+- AIBAR 卡体输入：`discord-png-import-input`（testid 沿用旧名）或其 `cdn.discordapp.com/attachments/...` placeholder。
 - AIBAR 发布按钮：`discord-png-import-submit`，可见文字为“发布到公共区”。
 
 “发布已选”请求成功保存后，本地服务立即启动一次性发布 Worker。它只对该 job 执行 `get <jobId>`，把 workflow 更新为 `importing`；每项通过 `import-item` 写回结果，全部终态后更新为 `complete` 并退出。异常退出时服务把 job 置为可恢复的 `blocked`，不会在后台持续重试或轮询。用户处理完登录、成人内容确认或资源口令后，点击控制台“继续发布”会用同一份已持久化请求再启动一条一次性发布 Worker，只处理 `pending`、`importing` 和 `failed` 的剩余项。
@@ -112,11 +112,11 @@
 4. 等待 Slash command 列表，点击第一个准确匹配“`/下载 获取本帖资源的下载列表`”的命令。
 5. 按 Enter 提交，等待 `Odysseia-protect` 返回“版本选择”。
 6. 点击“请选择一个公开/受保护的版本进行下载...”按钮，再读取版本选项。
-7. 选择最新的 PNG 角色卡文件。不要机械点击最后一项：最后一项可能是 ZIP/RAR/JSON；主项目自动入口只接受 PNG。
+7. 按 PNG > JSON > CHARX > BYAF > YAML 的优先级选择最新卡体文件。不要机械点击最后一项：最后一项可能是 ZIP/RAR 或安装包；主项目入口只接受这五种卡体格式。
 8. 若出现密码表单，从帖子可见正文或剧透中临时读取对应密码，填写并提交。不要输出或保存密码。
 9. 获取“点击这里下载”的短期 Discord CDN URL，并立即交给 AIBAR；签名链接会过期。
 10. 以 `AIBAR_DISCORD_AIBAR_URL` 指定的正式服务器地址为基础，在 hash 路由查询参数中携带当前卡的 `discordGuildId`、`discordChannelId`、`discordThreadId`、`discordCardId`、`discordSourceUrl`、`discordTitle`、`discordAuthorName` 和重复的 `discordTag`；所有值必须用 `URLSearchParams` 编码。
-11. 打开该完整远端地址，在手动 PNG 输入框填写 CDN URL，点击“发布到公共区”。等待页面稳定显示 `data-publish-status="published"` 或 `duplicate` 并出现公共作品入口后再处理下一项；立即丢弃该短期 URL。不得使用 localhost、127.0.0.1、本地 Vite 或本地 SillyTavern。
+11. 打开该完整远端地址，在手动卡体输入框填写 CDN URL，点击“发布到公共区”。等待页面稳定显示 `data-publish-status="published"` 或 `duplicate` 并出现公共作品入口后再处理下一项；立即丢弃该短期 URL。不得使用 localhost、127.0.0.1、本地 Vite 或本地 SillyTavern。
 
 ### 锁帖或迁移帖
 
@@ -139,34 +139,34 @@
 
 ## 5. 角色卡有效性与公共发布
 
-CDN 返回 `200`、文件名为 `.png` 或图片能显示，都不能证明它是 Tavern Card。
+CDN 返回 `200`、文件名后缀正确或图片能显示，都不能证明它是有效角色卡。
 
 有效性与公开状态由远端 AIBAR/SillyTavern 链路最终确认：
 
-1. 主项目入口只接受 Discord CDN `/attachments/` 下以 `.png` 结尾的链接。
-2. SillyTavern 解析角色卡元数据。出现 `PNG metadata does not contain any character data.` 或响应体 `{error:true}` 时必须标记失败，不能当成功。
+1. 主项目入口只接受 Discord CDN `/attachments/` 下以 `.png`、`.json`、`.yaml`/`.yml`、`.charx` 或 `.byaf` 结尾的链接。
+2. SillyTavern 解析角色卡元数据（PNG 支持 tEXt/zTXt/iTXt 内的 chara/ccv3，容忍坏 CRC）。响应体 `{error:true}` 时必须标记失败，不能当成功。
 3. 私人角色写入仅用于 SillyTavern 解析，不能作为任务成功；随后必须调用管理员专用公共发布接口。
 4. 服务器从解析后的 PNG 原始字节计算 SHA-256；相同哈希关联现有公共作品，同一 Discord thread 的新内容发布为该作品新版本。
-5. 只有公共接口返回 `published` 或 `duplicate` 且作品可见时，worker 才用 `import-item <jobId> <cardId> imported <结果>` 写回成功；解析或公共发布失败写 `failed`，没有有效 PNG 写 `skipped`。
+5. 只有公共接口返回 `published` 或 `duplicate` 且作品可见时，worker 才用 `import-item <jobId> <cardId> imported <结果>` 写回成功；解析或公共发布失败写 `failed`，没有任何受支持卡体写 `skipped`。
 
 完成一项后，等待按钮退出“发布中”且成功或错误提示稳定，再处理下一项。
 
-## 6. 非 PNG 与网页应用
+## 6. 不支持的资源与网页应用
 
 以下内容不进入自动导入：
 
-- JSON、YAML、CHARX、BYAF、ZIP/RAR、APK、安装器和扩展包。
+- ZIP/RAR、APK、安装器和扩展包（含加密压缩包内的卡体，需要用户手动处理）。
 - 普通预览图、封面、截图、说明文本和诊断文件。
 - 帖子自带网页应用或源码仓库。
 
-若用户选中的帖子最终没有有效 PNG，记录 `skipped` 和明确原因，不把其他文件伪装成 PNG。
+若用户选中的帖子最终没有任何受支持卡体文件，记录 `skipped` 和明确原因，不把其他文件伪装成卡体。
 
 ## 7. 归一化最终状态
 
 完成所有请求项后，从 `get <jobId>` 核对 `importItems`：
 
 - 已发布或已关联公共区重复作品的角色卡为 `imported`。
-- 没有有效 PNG 或明确不支持的资源为 `skipped`。
+- 没有任何受支持卡体或明确不支持的资源为 `skipped`。
 - 已执行但失败的项目为 `failed`，并保留具体错误。
 - 不允许留下 `pending` 或 `importing`。
 
@@ -197,7 +197,7 @@ git diff --check
 - 本地热门列表非空，没有框架错误覆盖层。
 - 所有授权项都有逐项结果。
 - 所有成功角色卡都显示“已发布”，并能通过结果入口打开公共作品。
-- 主项目 Discord 页面只显示手动 PNG 公共发布入口。
+- 主项目 Discord 页面只显示手动卡体公共发布入口。
 - 控制台没有相关应用错误。
 - 截图能证明本地榜单结果和主项目 PNG 入口。
 
@@ -207,7 +207,7 @@ git diff --check
 同步总数：N
 请求发布：N
 公共作品：新发布 N，重复关联 N
-跳过：N（无有效 PNG/只有安装包或源码）
+跳过：N（无受支持卡体/只有安装包或源码）
 最终失败：N
 验证：后端、服务和前端质量门禁、diff check、浏览器公共发布链路、控制台
 未验证：明确列出外部副作用、其他浏览器或未覆盖视口

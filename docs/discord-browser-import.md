@@ -2,7 +2,7 @@
 
 实际同步、下载、重试和验收步骤见 [`discord-hot-import-runbook.md`](./discord-hot-import-runbook.md)。本文只定义数据与安全契约。
 
-本文定义本机 Discord 编排服务与浏览器 worker 通过用户已登录的 Chrome 协作同步并公开发布角色卡的版本 1 契约。热门清单、勾选、发布授权和逐项结果由 `discord-import-service` 本地控制台持有；AIBAR 主项目不再展示 manifest 或热门榜，只保留手动 Discord PNG 公共发布入口。浏览器 worker 取得用户授权后逐项把短期 PNG 链接和帖子来源交给该入口，由远端服务器解析并发布为公共社区作品。
+本文定义本机 Discord 编排服务与浏览器 worker 通过用户已登录的 Chrome 协作同步并公开发布角色卡的版本 1 契约。热门清单、勾选、发布授权和逐项结果由 `discord-import-service` 本地控制台持有；AIBAR 主项目不再展示 manifest 或热门榜，只保留手动 Discord 卡体公共发布入口（支持 PNG / JSON / CHARX / BYAF / YAML）。浏览器 worker 取得用户授权后逐项把短期卡体链接和帖子来源交给该入口，由远端服务器解析并发布为公共社区作品。
 
 ## 固定来源
 
@@ -33,26 +33,26 @@
 1. 用户在本地控制台勾选需要的角色卡。
 2. 用户点击本地控制台的“发布已选”。该点击写入持久化请求，并明确授权浏览器 worker 执行后续浏览器操作。
 3. 本地服务为该点击启动新的单次浏览器助手；它读取其中仍被勾选且尚未成功导入的项目，不要求用户再回对话发送命令。
-4. 浏览器助手使用已登录的 Chrome 打开这些项目的 `sourceUrl`，只选择 PNG 卡体并取得短期 Discord CDN 链接。
-5. worker 把固定 guild、来源栏目、thread/card ID、帖子 URL、标题、作者和标签编码进 `AIBAR_DISCORD_AIBAR_URL` 的 hash 路由查询参数，再把短期链接填入已部署 AIBAR 服务器手动 PNG 入口。
+4. 浏览器助手使用已登录的 Chrome 打开这些项目的 `sourceUrl`，按 PNG > JSON > CHARX > BYAF > YAML 优先级选择卡体并取得短期 Discord CDN 链接。
+5. worker 把固定 guild、来源栏目、thread/card ID、帖子 URL、标题、作者和标签编码进 `AIBAR_DISCORD_AIBAR_URL` 的 hash 路由查询参数，再把短期链接填入已部署 AIBAR 服务器手动卡体入口。
 6. 远端 AIBAR 下载并由 SillyTavern 解析角色卡；私人角色文件只是解析暂存。管理员专用接口从服务器端 PNG 计算 SHA-256，按哈希关联公共区重复作品，或把同 thread 的新内容发布成公共作品版本。
 7. 页面只有在公共发布返回 `published` 或 `duplicate` 并给出作品入口时才显示成功。worker 随后把每项 `imported`、`failed` 或 `skipped` 结果写回本地服务；单项失败不得回滚已成功项目。
 
-网页应用和非 PNG 角色卡不进入阶段二，也不在本地角色卡选择表中提供自动导入。
+网页应用、压缩包和无卡体附件的帖子不进入阶段二，也不在本地角色卡选择表中提供自动导入。
 
 阶段一由用户向浏览器助手主动发起，阶段二由用户点击“发布已选”主动确认。仅打开页面、刷新列表或勾选项目不构成执行浏览器操作的授权；点击该按钮才构成授权。
 
 ## 能力边界
 
-部署端 AIBAR 本身不能唤起浏览器 worker，也不能自行打开或控制 Chrome。本机控制台在用户点击“开始同步”或“发布已选”时，使用本机 Codex CLI 启动一条 `--ephemeral` 单次 Worker；进程完成或阻塞后退出，不存在 heartbeat 轮询。若 Codex CLI、桌面认证或 Chrome 扩展不可用，请求保留在本地服务并显示失败/阻塞状态，等待用户再次明确操作。AIBAR 负责接受短期 PNG 链接、服务器端解析、可信哈希去重和公共作品发布。
+部署端 AIBAR 本身不能唤起浏览器 worker，也不能自行打开或控制 Chrome。本机控制台在用户点击“开始同步”或“发布已选”时，使用本机 Codex CLI 启动一条 `--ephemeral` 单次 Worker；进程完成或阻塞后退出，不存在 heartbeat 轮询。若 Codex CLI、桌面认证或 Chrome 扩展不可用，请求保留在本地服务并显示失败/阻塞状态，等待用户再次明确操作。AIBAR 负责接受短期卡体链接、服务器端解析、可信哈希去重和公共作品发布。
 
-同步阶段不向 AIBAR 传输 manifest。第二阶段把 Discord 页面返回的短期 PNG 附件链接交给 AIBAR 手动入口，使用现有 CSRF 和管理员会话完成导入；链接使用后立即丢弃，不写入本地任务状态、仓库或聊天。
+同步阶段不向 AIBAR 传输 manifest。第二阶段把 Discord 页面返回的短期卡体附件链接交给 AIBAR 手动入口，使用现有 CSRF 和管理员会话完成导入；链接使用后立即丢弃，不写入本地任务状态、仓库或聊天。
 
 浏览器助手只能使用 Chrome 中现有的登录会话进行可见页面操作。禁止读取、复制、记录、上传或转交 Discord 用户 token、Cookie、Authorization 请求头或其他会话凭据；禁止使用用户 token 调 Discord API；禁止 self-bot；禁止通过开发者工具或脚本提取浏览器认证信息。Discord 凭据不得进入 manifest、AIBAR 设置、日志或聊天内容。
 
 ## 支持的资源
 
-当前自动导入只支持 `.png`，匹配时不区分大小写。manifest schema 继续兼容历史资源描述，但本地控制台不得让已知为 JSON、YAML、CHARX、BYAF 或压缩包的资源进入自动导入请求。
+当前自动发布支持 `.png`、`.json`、`.yaml`/`.yml`、`.charx`、`.byaf`，匹配时不区分大小写。压缩包、APK 与普通图片仍不进入自动发布请求。
 
 以下资源标记为不支持，不得尝试安装或执行：
 
@@ -216,9 +216,9 @@ manifest 只描述同步结果。用户选择和导入结果保存在 `discord-i
 
 - `importRequest.cardIds`：用户点击“发布已选”时确认的卡 ID。
 - `pending`：请求已保存，等待 worker。
-- `importing`：worker 正在取得 PNG 并调用 AIBAR 公共发布入口。
+- `importing`：worker 正在取得卡体链接并调用 AIBAR 公共发布入口。
 - `imported`：兼容状态名；表示角色卡已发布为公共作品或已关联公共区重复作品。
 - `failed`：本次下载、解析或公共发布失败，记录明确原因。
-- `skipped`：没有有效 PNG、资源不支持或存在不可继续的外部条件。
+- `skipped`：没有任何受支持卡体、资源不支持或存在不可继续的外部条件。
 
 任务只有在所有请求项都进入 `imported`、`failed` 或 `skipped` 后才能标记 `workflowStatus: complete`。短期 CDN URL、帖子密码和浏览器凭据不得写入任何这些字段。
