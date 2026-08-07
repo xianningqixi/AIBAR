@@ -46,12 +46,12 @@ function required(value, label) {
 let result;
 if (command === 'latest') {
     result = await request('GET', '/api/v1/jobs/latest');
+} else if (command === 'get') {
+    result = await request('GET', `/api/v1/jobs/${encodeURIComponent(required(args[0], 'jobId'))}`);
 } else if (command === 'list') {
     result = await request('GET', '/api/v1/jobs');
-} else if (command === 'trigger') {
-    const trigger = args[0] ? { sourceDate: args[0] } : {};
-    if (args[1]) trigger.filters = await fileBody(args[1]);
-    result = await request('POST', '/api/v1/jobs/trigger', trigger);
+} else if (command === 'dashboard') {
+    result = { url: new URL('/', baseUrl).toString() };
 } else if (command === 'claim') {
     result = await request('POST', `/api/v1/jobs/${encodeURIComponent(required(args[0], 'jobId'))}/claim`, {
         workerId: required(args[1], 'workerId'),
@@ -63,17 +63,49 @@ if (command === 'latest') {
         `/api/v1/jobs/${encodeURIComponent(required(args[0], 'jobId'))}/${action}`,
         await fileBody(args[1]),
     );
-} else if (['complete', 'delivered'].includes(command)) {
+} else if (command === 'complete') {
     result = await request(
         'POST',
-        `/api/v1/jobs/${encodeURIComponent(required(args[0], 'jobId'))}/${command}`,
+        `/api/v1/jobs/${encodeURIComponent(required(args[0], 'jobId'))}/complete`,
         {},
+    );
+} else if (command === 'delivered') {
+    result = await request(
+        'POST',
+        `/api/v1/jobs/${encodeURIComponent(required(args[0], 'jobId'))}/delivered`,
+        { batchId: required(args[1], 'batchId') },
+    );
+} else if (command === 'workflow') {
+    result = await request(
+        'POST',
+        `/api/v1/jobs/${encodeURIComponent(required(args[0], 'jobId'))}/workflow`,
+        {
+            state: required(args[1], 'state'),
+            ...(args[2] ? { message: args.slice(2).join(' ') } : {}),
+        },
+    );
+} else if (command === 'import-item') {
+    result = await request(
+        'POST',
+        `/api/v1/jobs/${encodeURIComponent(required(args[0], 'jobId'))}/import-item`,
+        {
+            cardId: required(args[1], 'cardId'),
+            state: required(args[2], 'state'),
+            ...(args[3] ? { message: args.slice(3).join(' ') } : {}),
+        },
     );
 } else if (command === 'manifest') {
     result = await request('GET', `/api/v1/jobs/${encodeURIComponent(required(args[0], 'jobId'))}/manifest`);
 } else if (command === 'fail') {
     result = await request('POST', `/api/v1/jobs/${encodeURIComponent(required(args[0], 'jobId'))}/fail`, {
         error: required(args.slice(1).join(' '), 'error'),
+    });
+} else if (command === 'heartbeat') {
+    result = await request('POST', '/api/v1/worker/heartbeat', {
+        workerId: required(args[0], 'workerId'),
+        state: required(args[1], 'state'),
+        ...(args[2] ? { jobId: args[2] } : {}),
+        ...(args[3] ? { message: args.slice(3).join(' ') } : {}),
     });
 } else {
     throw new Error(`Unknown command: ${command}`);

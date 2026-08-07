@@ -10,6 +10,6 @@
     "start": "node src/server.js",
     "client": "node src/client.js",
     "test": "node --test",
-    "check": "node --test && node --check src/server.js && node --check src/client.js"
+    "check": "node --test && node --check src/server.js && node --check src/client.js && node --check src/worker-launcher.js && node --check public/dashboard.js"
   }
 }

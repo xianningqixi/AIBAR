@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="color-scheme" content="light" />
+  <title>Discord 公共发布控制台</title>
+  <link rel="stylesheet" href="/dashboard.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="topbar__inner">
+      <a class="brand" href="/" aria-label="Discord 公共发布控制台">AIBAR <span>Discord 发布</span></a>
+      <div class="health" aria-live="polite">
+        <span class="status-dot status-dot--online"></span>
+        <span>本地服务在线</span>
+        <span class="health__divider"></span>
+        <span id="worker-dot" class="status-dot"></span>
+        <span id="worker-label">Worker 未运行</span>
+      </div>
+    </div>
+  </header>
+
+  <main>
+    <section class="command-band" aria-labelledby="page-title">
+      <div class="command-band__content">
+        <p class="date-label" id="snapshot-date">今日快照</p>
+        <h1 id="page-title">同步 Discord 今日热门</h1>
+        <p class="snapshot-window" id="snapshot-window">上海时区 · 等待手动触发</p>
+        <div class="command-actions">
+          <button id="trigger-button" data-testid="dashboard-trigger" type="button">开始同步</button>
+          <a id="aibar-link" class="text-link" href="#" target="_blank" rel="noreferrer">打开 AIBAR</a>
+        </div>
+        <nav id="discord-links" class="source-links" aria-label="Discord 来源栏目"></nav>
+        <p id="action-message" class="action-message" role="status" aria-live="polite"></p>
+      </div>
+
+      <aside class="current-status" aria-labelledby="current-status-title">
+        <div class="section-heading">
+          <h2 id="current-status-title">当前任务</h2>
+          <span id="job-status" class="job-status">尚未创建</span>
+        </div>
+        <p id="job-id" class="job-id">-</p>
+        <dl class="metrics">
+          <div><dt>候选</dt><dd id="card-count">0</dd></div>
+          <div><dt>栏目</dt><dd id="source-count">0 / 3</dd></div>
+          <div><dt>标签</dt><dd id="tag-count">0</dd></div>
+          <div><dt>覆盖</dt><dd id="pass-count">0</dd></div>
+          <div><dt>批次</dt><dd id="batch-count">0</dd></div>
+        </dl>
+      </aside>
+    </section>
+
+    <section class="progress-band" aria-labelledby="progress-title">
+      <div class="section-heading">
+        <h2 id="progress-title">处理进度</h2>
+        <span id="worker-message" class="muted">等待 Worker</span>
+      </div>
+      <ol class="progress" id="progress-list">
+        <li data-step="queued"><span>1</span><div><strong>创建任务</strong><small>本地快照</small></div></li>
+        <li data-step="scanning"><span>2</span><div><strong>扫描 Discord</strong><small>标签覆盖</small></div></li>
+        <li data-step="ready"><span>3</span><div><strong>应用清单</strong><small>热门排序</small></div></li>
+        <li data-step="delivered"><span>4</span><div><strong>选择并发布</strong><small>公共区作品</small></div></li>
+      </ol>
+    </section>
+
+    <section class="candidates" aria-labelledby="candidates-title">
+      <div class="section-heading">
+        <h2 id="candidates-title">今日热门角色卡</h2>
+        <span id="candidate-summary" class="muted">等待同步列表</span>
+      </div>
+      <div class="table-wrap candidate-table-wrap">
+        <table class="candidate-table">
+          <thead>
+            <tr>
+              <th class="select-column"><span class="sr-only">选择</span></th>
+              <th>角色卡</th>
+              <th>来源栏目</th>
+              <th>标签</th>
+              <th>热度</th>
+              <th>处理结果</th>
+            </tr>
+          </thead>
+          <tbody id="cards-body">
+            <tr><td colspan="6" class="empty-row">等待同步列表</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="candidate-actions">
+        <button id="import-selected-button" type="button" disabled>发布已选</button>
+        <p id="import-message" class="action-message" role="status" aria-live="polite"></p>
+      </div>
+    </section>
+
+    <section class="history" aria-labelledby="history-title">
+      <div class="section-heading">
+        <h2 id="history-title">最近任务</h2>
+        <span id="last-updated" class="muted">正在连接</span>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>触发时间</th>
+              <th>状态</th>
+              <th>候选</th>
+              <th>标签覆盖</th>
+              <th>交接批次</th>
+            </tr>
+          </thead>
+          <tbody id="jobs-body">
+            <tr><td colspan="5" class="empty-row">尚无手动同步任务</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+
+  <script src="/dashboard.js" defer></script>
+</body>
+</html>

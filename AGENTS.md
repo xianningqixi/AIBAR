@@ -9,7 +9,7 @@ This repo is two coupled parts plus local/optional companions:
 - `web/` — **AIBAR**, a standalone Vue 3 + TypeScript SPA. This is the app you'll almost always be editing. It is a character.ai / aifuck.cc-style "browse cards → enter chat" frontend.
 - `SillyTavern/` — a git submodule (fork `xianningqixi/SillyTavern`, branch `main`) that provides the **backend HTTP API**. AIBAR has no backend of its own; it reuses SillyTavern's routes plus custom `/api/aibar` endpoints added in the fork.
 - `telegram-bot/` — optional Telegram companion using a dedicated AIBAR account.
-- `discord-import-service/` — local-only Node 20 T+1 orchestrator for Discord discovery coverage and manifest generation. It runs on the administrator's computer, never on the deployed AIBAR server, and never owns Discord credentials.
+- `discord-import-service/` — local-only Node 20 manual-run orchestrator for Discord discovery coverage and manifest generation. It runs on the administrator's computer, never on the deployed AIBAR server, and never owns Discord credentials.
 
 `docs/PLAN.md` (Chinese) is the original implementation/parity plan and is the best source for *why* things are built the way they are. The app UI, code comments, and LLM prompts are in Chinese.
 
@@ -27,7 +27,11 @@ Backend (`cd SillyTavern`, Node >= 20):
 
 Local Discord import service (`cd discord-import-service`, Node >= 20):
 - `npm start` — loopback service on `127.0.0.1:4317`
-- `npm run client -- latest` — inspect the latest local T+1 job
+- `npm run client -- latest` — inspect the latest locally triggered job
+- `npm run client -- get <jobId>` — inspect the full job, including the local dashboard import request
+- `npm run client -- heartbeat <workerId> <state> [jobId] [message]` — report the browser worker state to the local dashboard
+- `npm run client -- workflow <jobId> <waiting-selection|importing|complete|blocked> [message]` — persist the post-handoff import phase
+- `npm run client -- import-item <jobId> <cardId> <importing|imported|failed|skipped> [message]` — persist a selected card outcome
 - `npm run check` — Node tests and syntax check
 
 ## How the frontend reaches the backend
@@ -60,8 +64,10 @@ None of these custom routes exist in upstream SillyTavern. When changing anythin
 
 ## Discord hot-resource workflow
 
-When the user asks to refresh Discord hot resources, import selected cards, retry failed imports, or classify standalone frontends (e.g. via `/discord-import`), read and follow [`docs/discord-hot-import-runbook.md`](docs/discord-hot-import-runbook.md) before operating the browser. It is the executable runbook for the fixed Discord source, manifest handoff, `/下载` interaction, card validation, web-app classification, retries, and final QA.
+When the user asks to refresh Discord hot resources, import selected cards, retry failed imports, or classify standalone frontends (e.g. via `/discord-import`), read and follow [`docs/discord-hot-import-runbook.md`](docs/discord-hot-import-runbook.md) before operating the browser. It is the executable runbook for the three fixed Discord sources, manifest handoff, `/下载` interaction, card validation, web-app classification, retries, and final QA.
 
-For scheduled T+1 discovery, the local service contract and ownership boundary are defined in [`docs/local-discord-import-service.md`](docs/local-discord-import-service.md). Keep browser automation local and visible; do not move its scheduler, state, or Discord session into SillyTavern.
+For manually triggered discovery, the local service contract and ownership boundary are defined in [`docs/local-discord-import-service.md`](docs/local-discord-import-service.md). Keep browser automation local and visible; do not move its state or Discord session into SillyTavern.
+Only an explicit click on "开始同步" in the loopback dashboard at `http://127.0.0.1:4317/` creates a manual job and launches one ephemeral Codex browser worker. Clicking "发布已选" launches a separate one-shot publish worker; after a blocked or interrupted publish, clicking "继续发布" relaunches one using the already-persisted request. Startup, SSE connections, worker heartbeats, and worker CLI commands must never create jobs or launch workers; no scheduled polling is used. Detailed job data, passes, manifests, and worker heartbeats remain token-authenticated.
+The local dashboard owns the synchronized hot list, checkbox selection, publish request, and per-item outcomes. The AIBAR `/hub?source=discord` page exposes the manual Discord PNG public-publishing entry. A private character file is only server-side parsing staging; success requires a visible public community work or a server-hash duplicate link.
 
 Never persist Discord passwords, cookies, tokens, authorization headers, or signed CDN URLs in the repository. Use only the visible logged-in browser session, and treat attachment URLs as short-lived handoff data.

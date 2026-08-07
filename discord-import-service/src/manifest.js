@@ -1,4 +1,4 @@
-import { DISCORD_CHANNEL_ID, DISCORD_GUILD_ID } from './config.js';
+import { DISCORD_CHANNEL_ID, DISCORD_GUILD_ID, DISCORD_SOURCES } from './config.js';
 
 const SNOWFLAKE_PATTERN = /^[1-9]\d{16,19}$/;
 const ISO_TIMESTAMP_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?(?:Z|[+-]\d{2}:\d{2})$/;
@@ -15,6 +15,7 @@ const RESOURCE_AVAILABILITY = new Set(['ready', 'browser', 'unsupported']);
 const TAG_MATCH = new Set(['any', 'all']);
 const VIEW_SORT = new Set(['created-at', 'recent-activity']);
 const WEB_APP_PERMISSIONS = new Set(['generation', 'storage']);
+const SOURCE_NAMES = new Map(DISCORD_SOURCES.map(source => [source.channelId, source.channelName]));
 
 function object(value, label) {
     if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error(`${label} must be an object`);
@@ -70,7 +71,13 @@ function optionalText(record, key, label, maximum) {
     return key in record ? text(record[key], `${label}.${key}`, maximum) : undefined;
 }
 
-function sourceUrl(value, threadId, cardId) {
+function sourceChannelId(value, label = 'sourceChannelId') {
+    const normalized = snowflake(value, label);
+    if (!SOURCE_NAMES.has(normalized)) throw new Error(`${label} is not a configured Discord source`);
+    return normalized;
+}
+
+function sourceUrl(value, sourceId, threadId, cardId) {
     let parsed;
     try {
         parsed = new URL(text(value, 'post.sourceUrl', 2048));
@@ -95,7 +102,7 @@ function sourceUrl(value, threadId, cardId) {
         || segments[0] !== 'channels'
         || segments[1] !== DISCORD_GUILD_ID
         || !matchesThread
-        || (channelRef !== threadId && channelRef !== DISCORD_CHANNEL_ID)
+        || (channelRef !== threadId && channelRef !== sourceId)
     ) throw new Error('post.sourceUrl does not match the configured Discord thread');
     return parsed.toString();
 }
@@ -201,8 +208,9 @@ export function normalizeFilters(value = { tags: [], tagMatch: 'any' }) {
 
 export function normalizeCatalog(value) {
     const record = object(value, 'catalog');
-    exactKeys(record, new Set(['tags', 'observedAt']), 'catalog');
+    exactKeys(record, new Set(['sourceChannelId', 'tags', 'observedAt']), 'catalog');
     return {
+        sourceChannelId: sourceChannelId(record.sourceChannelId, 'catalog.sourceChannelId'),
         tags: tags(record.tags, 'catalog.tags'),
         observedAt: timestamp(record.observedAt, 'catalog.observedAt'),
     };
@@ -231,7 +239,7 @@ function matchesView(cardTags, view) {
     return matchesFilters(cardTags, { tags: view.tags, tagMatch: view.tagMatch });
 }
 
-export function normalizePost(value, job) {
+export function normalizePost(value, job, sourceId) {
     const record = object(value, 'post');
     exactKeys(record, ALLOWED_CARD_KEYS, 'post');
     const id = snowflake(record.id, 'post.id');
@@ -239,14 +247,15 @@ export function normalizePost(value, job) {
     const publishedAt = timestamp(record.publishedAt, 'post.publishedAt');
     const publishedTime = Date.parse(publishedAt);
     if (publishedTime < Date.parse(job.window.start) || publishedTime >= Date.parse(job.window.end)) {
-        throw new Error(`post ${threadId} is outside the T+1 source window`);
+        throw new Error(`post ${threadId} is outside the manual snapshot window`);
     }
     const normalized = {
         id,
         threadId,
         title: text(record.title, 'post.title', 240),
         authorName: text(record.authorName, 'post.authorName', 120),
-        sourceUrl: sourceUrl(record.sourceUrl, threadId, id),
+        sourceChannelId: sourceId,
+        sourceUrl: sourceUrl(record.sourceUrl, sourceId, threadId, id),
         ...(record.previewUrl ? { previewUrl: previewUrl(record.previewUrl) } : {}),
         tags: tags(record.tags, 'post.tags', 16),
         publishedAt,
@@ -268,15 +277,47 @@ export function passSignature(view) {
     return `${view.tagMatch}:${JSON.stringify(sorted)}`;
 }
 
+function usesSourceCoverage(job) {
+    return Array.isArray(job.sources) && job.sources.length > 0;
+}
+
+function coverageSignature(job, sourceId, view) {
+    const signature = passSignature(view);
+    return usesSourceCoverage(job) ? `${sourceId}/${signature}` : signature;
+}
+
+function jobSources(job) {
+    if (usesSourceCoverage(job)) {
+        return job.sources.map(source => ({
+            channelId: sourceChannelId(source.channelId, 'job.sources.channelId'),
+            channelName: SOURCE_NAMES.get(source.channelId),
+        }));
+    }
+    const legacyId = job.channelId || DISCORD_CHANNEL_ID;
+    return [{
+        channelId: sourceChannelId(legacyId, 'job.channelId'),
+        channelName: job.channelName || SOURCE_NAMES.get(legacyId),
+    }];
+}
+
+function sourceCatalog(job, sourceId) {
+    if (usesSourceCoverage(job)) return job.tagCatalogBySource?.[sourceId] || [];
+    return job.tagCatalog || [];
+}
+
 export function normalizePass(value, job) {
     const record = object(value, 'pass');
-    exactKeys(record, new Set(['observedAt', 'view', 'posts']), 'pass');
+    exactKeys(record, new Set(['sourceChannelId', 'observedAt', 'view', 'posts']), 'pass');
+    const normalizedSourceId = sourceChannelId(record.sourceChannelId, 'pass.sourceChannelId');
+    const allowedSources = new Set(jobSources(job).map(source => source.channelId));
+    if (!allowedSources.has(normalizedSourceId)) throw new Error('pass.sourceChannelId is not part of this job');
     const observedAt = timestamp(record.observedAt, 'pass.observedAt');
     const view = normalizeView(record.view);
-    if (view.sort !== 'created-at') throw new Error('T+1 discovery passes must use Discord post-date sorting');
+    if (view.sort !== 'created-at') throw new Error('Manual discovery passes must use Discord post-date sorting');
     if (!Array.isArray(record.posts) || record.posts.length > 200) throw new Error('pass.posts must contain at most 200 items');
-    if (job.tagCatalog?.length) {
-        const catalog = new Set(job.tagCatalog.map(tag => tag.toLocaleLowerCase('en-US')));
+    const configuredTags = sourceCatalog(job, normalizedSourceId);
+    if (configuredTags.length) {
+        const catalog = new Set(configuredTags.map(tag => tag.toLocaleLowerCase('en-US')));
         const unknown = view.tags.find(tag => !catalog.has(tag.toLocaleLowerCase('en-US')));
         if (unknown) throw new Error(`pass.view.tags contains an unknown Discord tag: ${unknown}`);
     }
@@ -284,15 +325,16 @@ export function normalizePass(value, job) {
         const expected = passSignature({ tags: job.filters.tags, tagMatch: job.filters.tagMatch });
         if (passSignature(view) !== expected) throw new Error('pass.view does not match the job filters');
     }
-    const posts = record.posts.map(post => normalizePost(post, job));
+    const posts = record.posts.map(post => normalizePost(post, job, normalizedSourceId));
     const mismatched = posts.find(post => !matchesView(post.tags, view));
     if (mismatched) {
         throw new Error(`post ${mismatched.threadId} does not satisfy the Discord view filters`);
     }
     return {
+        sourceChannelId: normalizedSourceId,
         observedAt,
         view,
-        signature: passSignature(view),
+        signature: coverageSignature(job, normalizedSourceId, view),
         posts,
     };
 }
@@ -304,6 +346,9 @@ export function mergePassCards(existingCards, discoveryPass) {
         if (!current) {
             byThread.set(post.threadId, { ...post, observedAt: discoveryPass.observedAt });
             continue;
+        }
+        if (current.sourceChannelId && current.sourceChannelId !== post.sourceChannelId) {
+            throw new Error(`post ${post.threadId} was reported under multiple Discord sources`);
         }
         const newer = Date.parse(discoveryPass.observedAt) >= Date.parse(current.observedAt);
         const tagMap = new Map([...current.tags, ...post.tags].map(tag => [tag.toLocaleLowerCase('en-US'), tag]));
@@ -321,47 +366,69 @@ export function mergePassCards(existingCards, discoveryPass) {
 
 export function missingCoverage(job) {
     const covered = new Set(Object.keys(job.coverage || {}));
-    if (job.filters.tags.length) {
-        const required = passSignature({ tags: job.filters.tags, tagMatch: job.filters.tagMatch });
-        return covered.has(required) ? [] : [required];
+    const filters = job.filters || { tags: [], tagMatch: 'any' };
+    const required = [];
+    for (const source of jobSources(job)) {
+        if (filters.tags.length) {
+            required.push(coverageSignature(job, source.channelId, filters));
+            continue;
+        }
+        required.push(coverageSignature(job, source.channelId, { tags: [], tagMatch: 'any' }));
+        for (const tag of sourceCatalog(job, source.channelId)) {
+            required.push(coverageSignature(job, source.channelId, { tags: [tag], tagMatch: 'any' }));
+        }
     }
-    const required = ['unfiltered', ...(job.tagCatalog || []).map(tag => passSignature({ tags: [tag], tagMatch: 'any' }))];
     return required.filter(signature => !covered.has(signature));
 }
 
 // AIBAR 前端单个 manifest 的硬上限；超出的卡拆成后续批次逐批交接
 export const MANIFEST_BATCH_SIZE = 200;
-// 单个 T+1 任务的总量护栏：超过说明筛选条件太宽，应显式失败而不是无限拆批
+// 单次手动任务的总量护栏：超过说明筛选条件太宽，应显式失败而不是无限拆批。
 export const MAX_TOTAL_CARDS = 1000;
 
 export function buildManifests(job, syncedAt) {
     const missing = missingCoverage(job);
     if (missing.length) throw new Error(`Discord filter coverage is incomplete: ${missing.join(', ')}`);
-    if (job.cards.length > MAX_TOTAL_CARDS) {
-        throw new Error(`T+1 job exceeds ${MAX_TOTAL_CARDS} cards; narrow the job filters before completing`);
+    const jobCards = job.cards || [];
+    if (jobCards.length > MAX_TOTAL_CARDS) {
+        throw new Error(`Manual job exceeds ${MAX_TOTAL_CARDS} cards; narrow the job filters before completing`);
     }
     const normalizedSyncedAt = timestamp(syncedAt, 'syncedAt');
-    const cards = [...job.cards]
+    const sources = jobSources(job);
+    const cards = [...jobCards]
         .sort((left, right) => (
             right.reactionCount - left.reactionCount
             || Date.parse(right.publishedAt) - Date.parse(left.publishedAt)
             || left.threadId.localeCompare(right.threadId)
         ))
-        .map(({ observedAt: _observedAt, ...card }) => card);
-    const manifests = [];
-    for (let start = 0; start < cards.length; start += MANIFEST_BATCH_SIZE) {
-        manifests.push({
-            version: 1,
-            guildId: DISCORD_GUILD_ID,
-            channelId: DISCORD_CHANNEL_ID,
-            channelName: job.channelName,
-            syncedAt: normalizedSyncedAt,
-            timezone: 'Asia/Shanghai',
-            period: 'previous-day',
-            sort: 'reactions',
-            filters: job.filters,
-            cards: cards.slice(start, start + MANIFEST_BATCH_SIZE),
+        .map((card) => {
+            const sourceId = card.sourceChannelId || (sources.length === 1 ? sources[0].channelId : '');
+            if (!sourceId || !sources.some(source => source.channelId === sourceId)) {
+                throw new Error(`post ${card.threadId} is missing a configured Discord source`);
+            }
+            return { ...card, sourceChannelId: sourceId };
         });
+    const manifests = [];
+    for (const source of sources) {
+        const sourceCards = cards.filter(card => card.sourceChannelId === source.channelId);
+        for (let start = 0; start < sourceCards.length; start += MANIFEST_BATCH_SIZE) {
+            manifests.push({
+                version: 1,
+                guildId: DISCORD_GUILD_ID,
+                channelId: source.channelId,
+                channelName: source.channelName,
+                syncedAt: normalizedSyncedAt,
+                timezone: 'Asia/Shanghai',
+                period: job.period || 'today',
+                sort: 'reactions',
+                filters: job.filters,
+                cards: sourceCards.slice(start, start + MANIFEST_BATCH_SIZE).map(({
+                    sourceChannelId: _sourceChannelId,
+                    observedAt: _observedAt,
+                    ...card
+                }) => card),
+            });
+        }
     }
     return manifests;
 }

@@ -83,6 +83,23 @@ export interface CommunityWorkList {
   hasMore: boolean
 }
 
+export interface DiscordCommunitySource {
+  guildId: string
+  channelId: string
+  threadId: string
+  cardId: string
+  sourceUrl: string
+  title: string
+  authorName: string
+  tags: string[]
+}
+
+export interface DiscordCommunityPublishResult {
+  status: 'published' | 'duplicate'
+  versionId: string
+  work: CommunityWork
+}
+
 export interface CommunityLaunchResult {
   launchId: string
   type: CommunityWorkType
@@ -120,6 +137,13 @@ export function publishCommunityWork(input: {
   versionNote: string
 }): Promise<CommunityWork> {
   return apiPost('/api/aibar/works/publish', input)
+}
+
+export function publishDiscordCommunityWork(input: {
+  sourceId: string
+  source: DiscordCommunitySource
+}): Promise<DiscordCommunityPublishResult> {
+  return apiPost('/api/aibar/works/publish-discord', input)
 }
 
 export function setCommunityFavorite(id: string, favorite: boolean): Promise<CommunityWork> {

@@ -2,61 +2,57 @@
 
 实际同步、下载、重试和验收步骤见 [`discord-hot-import-runbook.md`](./discord-hot-import-runbook.md)。本文只定义数据与安全契约。
 
-本文定义 AIBAR 与“浏览器助手”通过用户已登录的 Chrome 协作同步 Discord 角色卡与网页应用的版本 1 契约。浏览器助手指任何能在用户已登录的 Chrome 中执行可见页面操作的协作方：可以是 AI 编码代理（如 Claude Code，通过 `/discord-import` 命令执行；历史上也用过 Codex），也可以是用户本人手动操作——契约不绑定任何特定工具。管理员载入清单后，候选项同步到服务端导入批次；角色卡经服务端下载、校验和原文件归档后，先进入管理员私人资料库供 SillyTavern 解析，再自动发布为社区作品。普通用户仍只走私人资料库导入。网页应用只进入隔离启动流程，不会被当成角色卡下载或导入。这不是后台爬虫，也不是 AIBAR 对浏览器助手或浏览器的远程控制接口。
+本文定义本机 Discord 编排服务与浏览器 worker 通过用户已登录的 Chrome 协作同步并公开发布角色卡的版本 1 契约。热门清单、勾选、发布授权和逐项结果由 `discord-import-service` 本地控制台持有；AIBAR 主项目不再展示 manifest 或热门榜，只保留手动 Discord PNG 公共发布入口。浏览器 worker 取得用户授权后逐项把短期 PNG 链接和帖子来源交给该入口，由远端服务器解析并发布为公共社区作品。
 
 ## 固定来源
 
 - Discord guild：`1380075940285124724`
-- Discord channel：`1478612237869519021`
+- Discord sources：
+  - 纯文字：`1478601254312874024`
+  - 轻前端·美化：`1478601664838766723`
+  - 重前端·独立前端：`1478612237869519021`
 - 日期时区：`Asia/Shanghai`
 
-浏览器助手只能从上述固定 guild/channel 构建此流程的 manifest。manifest 中出现其他 guild/channel 时，AIBAR 必须拒绝载入。
+浏览器助手只能从上述固定 guild/sources 构建此流程的 manifest。catalog/pass 必须声明来源栏目；manifest 中出现其他 guild/channel 时，本地服务必须拒绝。
 
 ## 双阶段流程
 
 ### 阶段一：同步候选列表
 
-1. 用户向浏览器助手主动发起同步，例如在 Claude Code 中执行 `/discord-import` 或直接说：`同步 Discord 今日热门`；也可以创建每日自动化，在 T+1 同步前一自然日。
-2. 浏览器助手使用用户已经登录的 Chrome 打开固定 guild/channel，按 Discord 原生标签按钮和标签匹配方式筛选，读取候选帖子及其公开可见的标题、作者、时间、热度、标签、预览和资源提示，并区分角色卡与网页应用。
-3. 浏览器助手按本文 schema 生成 manifest，并通过 AIBAR 的 Discord 导入面板将 manifest 载入 AIBAR。用户手动操作时，可自行整理 manifest JSON 并粘贴到面板。
-4. AIBAR 校验 manifest、展示候选资源并保存角色卡勾选状态。管理员载入的清单同时登记到服务端导入批次；此阶段不下载角色卡或运行网页应用。
+1. 用户在本地控制台点击“开始同步”，创建一条手动任务。本地服务不会定时创建任务，Worker heartbeat 和 `/discord-import` 也不得创建任务。
+2. 浏览器助手使用用户已经登录的 Chrome 依次打开固定 guild 下的三个来源栏目，按每个栏目的 Discord 原生标签按钮和标签匹配方式筛选，读取候选帖子及其公开可见的标题、作者、时间、热度、标签、预览和资源提示，并区分角色卡与网页应用。
+3. 浏览器助手把观察结果按 `sourceChannelId` 逐 pass 上报本地服务；三个栏目及其标签覆盖全部完成后，本地服务按来源生成本文 schema 的 manifest。
+4. worker 逐批确认 manifest 后，本地控制台把三个来源合并为一个热门榜，并显示每项来源栏目。此阶段不下载角色卡。
 
-`period: "today"` 表示 `Asia/Shanghai` 当前自然日；`period: "previous-day"` 表示同步发生日的前一自然日，用于每日 T+1；`period: "rolling-24h"` 表示同步时刻之前连续 24 小时。`sort: "reactions"` 按反应数排序，`sort: "activity"` 按最近活跃度排序。
+`period: "today"` 表示 `Asia/Shanghai` 当前自然日，手动服务使用触发当日 00:00 到触发时刻的快照；`period: "previous-day"` 和 `rolling-24h` 仅为旧清单兼容值。`sort: "reactions"` 按反应数排序，`sort: "activity"` 按最近活跃度排序。
 
 `filters.tags` 记录本次结果必须满足的 Discord 标签；空数组表示不限制标签。`filters.tagMatch: "any"` 对应 Discord 的“匹配部分”，`"all"` 对应“全部匹配”。筛选按钮只用于可见页面采集，manifest 仍必须逐项保存帖子实际展示的全部标签；声明了标签条件时，每个 `cards[]` 项都必须满足该条件。
 
-### 阶段二：导入已选资源
+### 阶段二：发布已选资源
 
-1. 用户在 AIBAR 面板勾选需要的角色卡。
-2. 用户点击面板中的“导入已选”。该点击写入持久化导入请求，并明确授权当前仍在运行的浏览器助手任务执行后续浏览器操作。
-3. 浏览器助手保持同步任务运行并等待该请求；观察到请求后，读取其中仍被勾选且尚未成功导入的项目，不要求用户再回对话发送命令。
-4. 浏览器助手使用已登录的 Chrome 打开这些项目的 `sourceUrl`，只下载本文列出的受支持文件。用户手动操作时，可逐项把短期 CDN 链接粘贴进对应行的“接收链接”，或使用本地文件上传。
-5. AIBAR 服务端接收短期 CDN URL 或上传文件，按原始字节计算 SHA-256，并以内容寻址方式归档原文件；浏览器不作为可信哈希来源。
-6. SillyTavern 解析角色卡并写入管理员私人资料库，随后把规范化角色快照发布为社区作品。相同 thread 的新内容生成新版本，全局相同原文件哈希关联已有作品而不重复发布。
-7. AIBAR 显示每项结果和入库作品入口。单项失败不得回滚已经成功的其他项目，也不得把已成功导入角色但后续社区发布或故事生成失败的项目重新当作未导入角色卡；失败项可复用已导入角色继续重试发布。
+1. 用户在本地控制台勾选需要的角色卡。
+2. 用户点击本地控制台的“发布已选”。该点击写入持久化请求，并明确授权浏览器 worker 执行后续浏览器操作。
+3. 本地服务为该点击启动新的单次浏览器助手；它读取其中仍被勾选且尚未成功导入的项目，不要求用户再回对话发送命令。
+4. 浏览器助手使用已登录的 Chrome 打开这些项目的 `sourceUrl`，只选择 PNG 卡体并取得短期 Discord CDN 链接。
+5. worker 把固定 guild、来源栏目、thread/card ID、帖子 URL、标题、作者和标签编码进 `AIBAR_DISCORD_AIBAR_URL` 的 hash 路由查询参数，再把短期链接填入已部署 AIBAR 服务器手动 PNG 入口。
+6. 远端 AIBAR 下载并由 SillyTavern 解析角色卡；私人角色文件只是解析暂存。管理员专用接口从服务器端 PNG 计算 SHA-256，按哈希关联公共区重复作品，或把同 thread 的新内容发布成公共作品版本。
+7. 页面只有在公共发布返回 `published` 或 `duplicate` 并给出作品入口时才显示成功。worker 随后把每项 `imported`、`failed` 或 `skipped` 结果写回本地服务；单项失败不得回滚已成功项目。
 
-网页应用不进入阶段二。用户点击网页应用条目的“启动应用”后，会先看到来源、运行方式与权限确认，再进入 AIBAR 的隔离运行页。`standalone` 应用不获得任何 AIBAR 权限；`aibar-bridge` 应用只能调用清单中声明且用户确认过的桥接能力。
+网页应用和非 PNG 角色卡不进入阶段二，也不在本地角色卡选择表中提供自动导入。
 
-阶段一由用户向浏览器助手主动发起，阶段二由用户点击“导入已选”主动确认。仅打开页面、刷新列表或勾选项目不构成执行浏览器操作的授权；点击该按钮才构成授权。
+阶段一由用户向浏览器助手主动发起，阶段二由用户点击“发布已选”主动确认。仅打开页面、刷新列表或勾选项目不构成执行浏览器操作的授权；点击该按钮才构成授权。
 
 ## 能力边界
 
-AIBAR 不能唤起已经结束的浏览器助手任务，也不能自行打开或控制 Chrome。一次完整流程中，浏览器助手必须在同步列表后保持同一任务运行并等待“导入已选”请求；如果该任务已经结束，网页按钮无法重新唤醒它，用户需要重新发起同步（或改为手动逐项提交）。AIBAR 负责载入 manifest、保存勾选和导入请求、登记管理员服务端批次、接收卡体、归档原文件并展示结果。
+部署端 AIBAR 本身不能唤起浏览器 worker，也不能自行打开或控制 Chrome。本机控制台在用户点击“开始同步”或“发布已选”时，使用本机 Codex CLI 启动一条 `--ephemeral` 单次 Worker；进程完成或阻塞后退出，不存在 heartbeat 轮询。若 Codex CLI、桌面认证或 Chrome 扩展不可用，请求保留在本地服务并显示失败/阻塞状态，等待用户再次明确操作。AIBAR 负责接受短期 PNG 链接、服务器端解析、可信哈希去重和公共作品发布。
 
-同步阶段可由浏览器助手直接把 JSON 填入面板，不依赖本地文件权限。第二阶段优先把 Discord 页面返回的短期 CDN 附件链接交给 AIBAR；服务端只接受通过固定 Discord CDN 校验且扩展名受支持的链接，以无凭据请求获取卡体，并执行统一的大小、哈希、归档和导入校验。Discord 卡体大小上限为 64 MB，足以覆盖带大量内嵌资源的真实角色卡，同时保留服务端的显式内存预算。若改用本地文件输入框且助手通过浏览器扩展操作 Chrome，该扩展必须在 `chrome://extensions` 的扩展详情中开启“允许访问文件网址（Allow access to file URLs）”。两种方式都不需要用户逐项选择文件，也不得读取 Cookie、用户 token 或其他认证信息。
+同步阶段不向 AIBAR 传输 manifest。第二阶段把 Discord 页面返回的短期 PNG 附件链接交给 AIBAR 手动入口，使用现有 CSRF 和管理员会话完成导入；链接使用后立即丢弃，不写入本地任务状态、仓库或聊天。
 
 浏览器助手只能使用 Chrome 中现有的登录会话进行可见页面操作。禁止读取、复制、记录、上传或转交 Discord 用户 token、Cookie、Authorization 请求头或其他会话凭据；禁止使用用户 token 调 Discord API；禁止 self-bot；禁止通过开发者工具或脚本提取浏览器认证信息。Discord 凭据不得进入 manifest、AIBAR 设置、日志或聊天内容。
 
 ## 支持的资源
 
-支持直接导入的扩展名如下，匹配时不区分大小写：
-
-- `.png`
-- `.json`
-- `.yaml`
-- `.yml`
-- `.charx`
-- `.byaf`
+当前自动导入只支持 `.png`，匹配时不区分大小写。manifest schema 继续兼容历史资源描述，但本地控制台不得让已知为 JSON、YAML、CHARX、BYAF 或压缩包的资源进入自动导入请求。
 
 以下资源标记为不支持，不得尝试安装或执行：
 
@@ -77,8 +73,8 @@ manifest 是 UTF-8 JSON 对象。版本 1 的固定字段如下：
 | --- | --- | --- |
 | `version` | number | 必须为整数 `1` |
 | `guildId` | string | 必须为 `1380075940285124724` |
-| `channelId` | string | 必须为 `1478612237869519021` |
-| `channelName` | string | Discord 栏目显示名 |
+| `channelId` | string | 必须为三个固定来源栏目之一 |
+| `channelName` | string | 必须是对应来源栏目显示名 |
 | `syncedAt` | string | ISO 8601 时间戳 |
 | `timezone` | string | 必须为 `Asia/Shanghai` |
 | `period` | string | `today`、`previous-day` 或 `rolling-24h` |
@@ -148,7 +144,7 @@ manifest 是 UTF-8 JSON 对象。版本 1 的固定字段如下：
   "channelName": "今日热门角色卡",
   "syncedAt": "2026-07-31T15:19:04Z",
     "timezone": "Asia/Shanghai",
-    "period": "previous-day",
+    "period": "today",
     "sort": "reactions",
     "filters": {
       "tags": [],
@@ -214,43 +210,15 @@ manifest 是 UTF-8 JSON 对象。版本 1 的固定字段如下：
 }
 ```
 
-## 服务端存储
+## 本地选择与结果状态
 
-管理员清单及处理状态写入 `DATA_ROOT/_aibar/community.sqlite`：
+manifest 只描述同步结果。用户选择和导入结果保存在 `discord-import-service/data/state.json` 的对应 job 中，不写入浏览器 `localStorage`：
 
-- `discord_import_batches` 保存原始 manifest、同步时间、请求管理员和批次状态。
-- `discord_import_items` 保存每项 Discord 来源、处理状态、服务端 SHA-256、原文件路径以及关联的社区作品/版本。
-- 原始卡体按 SHA-256 存入 `DATA_ROOT/_aibar/imports/discord/sha256/<前两位>/<sha256>.<ext>`，落盘后设为只读。
-- 社区规范化快照继续使用 `DATA_ROOT/_aibar/works/`；数据库事务把作品版本和导入项状态一并提交。
+- `importRequest.cardIds`：用户点击“发布已选”时确认的卡 ID。
+- `pending`：请求已保存，等待 worker。
+- `importing`：worker 正在取得 PNG 并调用 AIBAR 公共发布入口。
+- `imported`：兼容状态名；表示角色卡已发布为公共作品或已关联公共区重复作品。
+- `failed`：本次下载、解析或公共发布失败，记录明确原因。
+- `skipped`：没有有效 PNG、资源不支持或存在不可继续的外部条件。
 
-只有管理员能调用服务端 Discord 导入接口。manifest、来源字段和服务端哈希是发布时的权威依据，浏览器提交的标题、作者或哈希不能覆盖它们。
-
-## 选择队列与状态
-
-manifest 只描述同步结果，不保存用户选择和导入结果。AIBAR 在本地队列中维护这些运行状态：
-
-- `ready`：可以勾选并等待第二阶段。
-- `importing`：浏览器助手正通过面板处理该项。
-- `imported`：角色卡已经成功导入。
-- `unsupported`：资源类型不支持。
-- `failed`：本次下载或导入失败，可在用户再次点击“导入已选”后重试。
-
-载入更新后的 manifest 时，AIBAR 应保留同一 `id` 的 `selected`、`imported`、`failed` 和已导入去重记录；遗留的 `importing` 必须恢复为 `ready` 或 `unsupported`，不得假定中断前已经成功。
-
-### 账号隔离与存储键
-
-浏览器交互队列保存在当前浏览器的 `localStorage`，并按当前登录的 AIBAR 账号隔离。管理员另有服务端批次作为可恢复的权威处理记录；重新打开页面时会合并最新批次状态，但选择和浏览器授权请求仍只留在本地。Discord 导入面板根节点通过 `data-discord-import-queue-storage-key` 暴露本次会话应使用的完整键；协作中的浏览器助手必须读取这个属性，不能使用固定的全局键，也不能读写其他账号的队列。
-
-键格式为 `aibar.discord-import.<guildId>.<channelId>.v1.<encodedHandle>`，其中账号部分使用 `encodeURIComponent`。旧版本不带账号后缀的键归属无法确认，AIBAR 会直接删除且不会迁移到当前账号。退出登录或切换账号后，原账号队列不会显示在新账号中。
-
-## 去重规则
-
-第二阶段对每个实际下载的受支持文件计算小写十六进制 SHA-256，并构造：
-
-```text
-dedupeKey = threadId + ":" + sha256
-```
-
-AIBAR 在成功导入后保存该 `dedupeKey`。后续出现相同 `threadId` 和相同文件 SHA-256 时必须跳过私人库重复写入，并显示“已导入”。只有下载或导入全部成功后才能登记本地去重键；失败、取消和不支持项目不能登记。
-
-服务端以原始文件 SHA-256 做全局去重：同一 thread 的内容变化发布到该 thread 已关联作品的新版本；不同 thread 出现完全相同的文件时，导入项标记为 `duplicate` 并关联已有作品，不再复制社区版本。哈希基于下载文件原始字节，任何预览转换、解压或内容重写都必须发生在计算原始哈希之后。
+任务只有在所有请求项都进入 `imported`、`failed` 或 `skipped` 后才能标记 `workflowStatus: complete`。短期 CDN URL、帖子密码和浏览器凭据不得写入任何这些字段。
