@@ -245,9 +245,12 @@ export function normalizePost(value, job, sourceId) {
     const id = snowflake(record.id, 'post.id');
     const threadId = snowflake(record.threadId, 'post.threadId');
     const publishedAt = timestamp(record.publishedAt, 'post.publishedAt');
-    const publishedTime = Date.parse(publishedAt);
-    if (publishedTime < Date.parse(job.window.start) || publishedTime >= Date.parse(job.window.end)) {
-        throw new Error(`post ${threadId} is outside the manual snapshot window`);
+    // 热度榜模式不限发布日期；旧的今日快照任务仍按其持久化窗口校验
+    if (job.window) {
+        const publishedTime = Date.parse(publishedAt);
+        if (publishedTime < Date.parse(job.window.start) || publishedTime >= Date.parse(job.window.end)) {
+            throw new Error(`post ${threadId} is outside the manual snapshot window`);
+        }
     }
     const normalized = {
         id,
@@ -313,7 +316,13 @@ export function normalizePass(value, job) {
     if (!allowedSources.has(normalizedSourceId)) throw new Error('pass.sourceChannelId is not part of this job');
     const observedAt = timestamp(record.observedAt, 'pass.observedAt');
     const view = normalizeView(record.view);
-    if (view.sort !== 'created-at') throw new Error('Manual discovery passes must use Discord post-date sorting');
+    // 热度榜按最近活跃发现候选；旧的今日快照任务按发帖日期保证时间窗完整
+    const requiredSort = job.mode === 'hot-top' ? 'recent-activity' : 'created-at';
+    if (view.sort !== requiredSort) {
+        throw new Error(job.mode === 'hot-top'
+            ? 'Hot-top discovery passes must use Discord recent-activity sorting'
+            : 'Manual discovery passes must use Discord post-date sorting');
+    }
     if (!Array.isArray(record.posts) || record.posts.length > 200) throw new Error('pass.posts must contain at most 200 items');
     const configuredTags = sourceCatalog(job, normalizedSourceId);
     if (configuredTags.length) {
@@ -373,7 +382,9 @@ export function missingCoverage(job) {
             required.push(coverageSignature(job, source.channelId, filters));
             continue;
         }
+        // 热度榜只要求每栏目一个无标签的最近活跃视图；今日快照仍要求全标签枚举
         required.push(coverageSignature(job, source.channelId, { tags: [], tagMatch: 'any' }));
+        if (job.mode === 'hot-top') continue;
         for (const tag of sourceCatalog(job, source.channelId)) {
             required.push(coverageSignature(job, source.channelId, { tags: [tag], tagMatch: 'any' }));
         }
@@ -395,12 +406,13 @@ export function buildManifests(job, syncedAt) {
     }
     const normalizedSyncedAt = timestamp(syncedAt, 'syncedAt');
     const sources = jobSources(job);
-    const cards = [...jobCards]
-        .sort((left, right) => (
-            right.reactionCount - left.reactionCount
-            || Date.parse(right.publishedAt) - Date.parse(left.publishedAt)
-            || left.threadId.localeCompare(right.threadId)
-        ))
+    const ranked = [...jobCards].sort((left, right) => (
+        right.reactionCount - left.reactionCount
+        || Date.parse(right.publishedAt) - Date.parse(left.publishedAt)
+        || left.threadId.localeCompare(right.threadId)
+    ));
+    // 热度榜：全局按回应数排序后只保留前 limit 张
+    const cards = (job.limit ? ranked.slice(0, job.limit) : ranked)
         .map((card) => {
             const sourceId = card.sourceChannelId || (sources.length === 1 ? sources[0].channelId : '');
             if (!sourceId || !sources.some(source => source.channelId === sourceId)) {

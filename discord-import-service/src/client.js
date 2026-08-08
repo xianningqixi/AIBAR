@@ -100,6 +100,18 @@ if (command === 'latest') {
     result = await request('POST', `/api/v1/jobs/${encodeURIComponent(required(args[0], 'jobId'))}/fail`, {
         error: required(args.slice(1).join(' '), 'error'),
     });
+} else if (command === 'progress') {
+    // progress <jobId> <state> <done> <total> [label...]：带进度的心跳，控制台渲染进度条
+    result = await request('POST', '/api/v1/worker/heartbeat', {
+        workerId: 'codex-browser',
+        state: required(args[1], 'state'),
+        jobId: required(args[0], 'jobId'),
+        progress: {
+            done: Number(required(args[2], 'done')),
+            total: Number(required(args[3], 'total')),
+            ...(args[4] ? { label: args.slice(4).join(' ') } : {}),
+        },
+    });
 } else if (command === 'heartbeat') {
     result = await request('POST', '/api/v1/worker/heartbeat', {
         workerId: required(args[0], 'workerId'),

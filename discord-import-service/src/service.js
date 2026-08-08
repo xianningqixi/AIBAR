@@ -10,7 +10,7 @@ import {
     normalizeFilters,
     normalizePass,
 } from './manifest.js';
-import { manualTodayWindow } from './time.js';
+import { dateKeyInShanghai } from './time.js';
 
 const TERMINAL_STATUSES = new Set(['delivered', 'failed']);
 const WORKER_STATES = new Set(['starting', 'idle', 'scanning', 'applying', 'waiting-selection', 'importing', 'blocked']);
@@ -47,16 +47,28 @@ function manifestBatchId(manifest) {
     return crypto.createHash('sha256').update(JSON.stringify(manifest)).digest('hex');
 }
 
+const HOT_TOP_DEFAULT_LIMIT = 100;
+const HOT_TOP_MIN_LIMIT = 10;
+const HOT_TOP_MAX_LIMIT = 300;
+
 function normalizeTrigger(value) {
     if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('trigger must be an object');
-    const unsupported = Object.keys(value).find(key => key !== 'filters');
+    const allowed = new Set(['filters', 'limit']);
+    const unsupported = Object.keys(value).find(key => !allowed.has(key));
     if (unsupported) throw new Error(`trigger.${unsupported} is not allowed`);
-    return normalizeFilters(value.filters);
+    let limit = HOT_TOP_DEFAULT_LIMIT;
+    if (value.limit !== undefined) {
+        limit = Number(value.limit);
+        if (!Number.isInteger(limit) || limit < HOT_TOP_MIN_LIMIT || limit > HOT_TOP_MAX_LIMIT) {
+            throw new Error(`trigger.limit must be an integer between ${HOT_TOP_MIN_LIMIT} and ${HOT_TOP_MAX_LIMIT}`);
+        }
+    }
+    return { filters: normalizeFilters(value.filters), limit };
 }
 
 function normalizeWorkerHeartbeat(value) {
     if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('heartbeat must be an object');
-    const allowed = new Set(['workerId', 'state', 'jobId', 'message']);
+    const allowed = new Set(['workerId', 'state', 'jobId', 'message', 'progress']);
     const unsupported = Object.keys(value).find(key => !allowed.has(key));
     if (unsupported) throw new Error(`heartbeat.${unsupported} is not allowed`);
     const workerId = String(value.workerId || '').trim();
@@ -67,7 +79,21 @@ function normalizeWorkerHeartbeat(value) {
     if (!WORKER_STATES.has(state)) throw new Error('heartbeat.state is invalid');
     if (jobId.length > 160) throw new Error('heartbeat.jobId is too long');
     if (message.length > 500) throw new Error('heartbeat.message is too long');
-    return { workerId, state, jobId, message };
+    let progress = null;
+    if (value.progress !== undefined && value.progress !== null) {
+        if (typeof value.progress !== 'object' || Array.isArray(value.progress)) throw new Error('heartbeat.progress must be an object');
+        const progressAllowed = new Set(['done', 'total', 'label']);
+        const progressUnsupported = Object.keys(value.progress).find(key => !progressAllowed.has(key));
+        if (progressUnsupported) throw new Error(`heartbeat.progress.${progressUnsupported} is not allowed`);
+        const done = Number(value.progress.done);
+        const total = Number(value.progress.total);
+        const label = String(value.progress.label || '').trim();
+        if (!Number.isInteger(done) || done < 0 || done > 100000) throw new Error('heartbeat.progress.done is invalid');
+        if (!Number.isInteger(total) || total < 1 || total > 100000) throw new Error('heartbeat.progress.total is invalid');
+        if (label.length > 120) throw new Error('heartbeat.progress.label is too long');
+        progress = { done: Math.min(done, total), total, label };
+    }
+    return { workerId, state, jobId, message, progress };
 }
 
 function normalizeWorkflowUpdate(value) {
@@ -152,6 +178,8 @@ function assertCatalogReported(job, onlySourceId = '') {
         error.statusCode = 409;
         throw error;
     }
+    // 热度榜靠卡片自带标签做筛选，不再强制 worker 读取整份标签目录
+    if (job.mode === 'hot-top') return;
     const missing = sources.find(source => (
         !sourceCatalogObservedAt(job, source.channelId) || !sourceCatalog(job, source.channelId).length
     ));
@@ -241,12 +269,16 @@ function summary(job) {
     const filters = job.filters || { tags: [], tagMatch: 'any' };
     const tagCount = sources.reduce((total, source) => total + sourceCatalog(job, source.channelId).length, 0);
     const scannedSourceCount = sources.filter(source => sourceCatalogObservedAt(job, source.channelId)).length;
+    const passTargetCount = job.mode === 'hot-top'
+        ? sources.length
+        : (filters.tags.length ? sources.length : tagCount + sources.length);
     return {
         id: job.id,
         mode: job.mode || (job.sourceDate ? 'legacy-t1' : 'manual'),
         period: job.period || (job.sourceDate ? 'previous-day' : 'today'),
+        limit: job.limit || 0,
         localDate: job.localDate || job.sourceDate || '',
-        window: job.window,
+        window: job.window || null,
         status: job.status,
         workflowStatus: job.workflowStatus || (job.status === 'delivered' ? 'complete' : ''),
         workflowMessage: job.workflowMessage || '',
@@ -258,7 +290,7 @@ function summary(job) {
         scannedSourceCount,
         tagCount,
         passCount: Object.keys(job.coverage || {}).length,
-        passTargetCount: filters.tags.length ? sources.length : tagCount + sources.length,
+        passTargetCount,
         cardCount: (job.cards || []).length,
         batchCount: jobManifests(job).length,
         deliveredBatches: job.deliveredBatches || 0,
@@ -286,18 +318,18 @@ export class DiscordImportService {
     }
 
     async trigger(value = {}) {
-        const normalizedFilters = normalizeTrigger(value);
+        const { filters: normalizedFilters, limit } = normalizeTrigger(value);
         const triggeredAt = iso(this.clock);
-        const window = manualTodayWindow(new Date(triggeredAt));
         return this.store.update((state) => {
             const id = manualJobId(triggeredAt, state.jobs);
             const job = {
                 id,
-                mode: 'manual',
-                period: 'today',
-                localDate: window.localDate,
+                mode: 'hot-top',
+                period: 'hot-top',
+                limit,
+                localDate: dateKeyInShanghai(new Date(triggeredAt)),
                 triggeredAt,
-                window: { start: window.start, end: window.end },
+                window: null,
                 status: 'queued',
                 workflowStatus: '',
                 workflowMessage: '',
@@ -352,7 +384,7 @@ export class DiscordImportService {
 
     workerStatus() {
         if (!this.workerHeartbeat) {
-            return { online: false, state: 'offline', workerId: '', jobId: '', message: '', observedAt: '' };
+            return { online: false, state: 'offline', workerId: '', jobId: '', message: '', progress: null, observedAt: '' };
         }
         const now = this.clock();
         if (!(now instanceof Date) || !Number.isFinite(now.getTime())) throw new Error('Clock returned an invalid date');
