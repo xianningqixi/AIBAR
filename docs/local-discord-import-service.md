@@ -58,6 +58,7 @@ flowchart LR
 - 目标数量 `limit` 默认 100，可在控制台输入 10–300。
 - 不限帖子发布日期：worker 在每个栏目按“最近活跃”排序收集最多 `limit` 个候选，服务端在 `complete` 时全局按回应数排序并截取前 `limit` 张。
 - manifest 的 `period` 为 `hot-top`，`syncedAt` 为触发时刻。
+- 两级去重：历史任务里已发布（`imported`）的卡在 `complete` 时被硬去重（`dedupedImportedCount` 记录数量，重发同帖新版本走 AIBAR 单项手动入口）；更早任务榜单里出现过但未发布的卡带 `previouslySeen` 标记，控制台默认隐藏、可切换显示。
 - worker 通过带 `progress` 的 heartbeat 上报采集/发布进度，控制台渲染进度条（进度不持久化）。
 
 可通过 `filters` 限制最终标签；不传时扫描全部标签并用无标签视图补漏。

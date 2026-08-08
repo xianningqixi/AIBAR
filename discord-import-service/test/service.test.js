@@ -420,3 +420,81 @@ test('old persisted single-source empty jobs remain readable', async (context) =
     assert.equal(legacy.sourceScopeComplete, false);
     assert.deepEqual(service.dashboardSnapshot().cards, []);
 });
+
+test('previously published cards are excluded from later hot-top rankings', async (context) => {
+    let now = new Date('2026-08-06T02:00:00.000Z');
+    const { service } = await fixture(context, () => now);
+
+    // 第一轮：发布 threadId 这张卡
+    const first = await scanCompleteJob(service);
+    const firstBatch = service.getManifest(first.id);
+    await service.markDelivered(first.id, { batchId: firstBatch.batchId });
+    await service.requestImport(first.id, { cardIds: [threadId] });
+    await service.updateWorkflow(first.id, { state: 'importing' });
+    await service.updateImportItem(first.id, { cardId: threadId, state: 'imported' });
+    await service.updateWorkflow(first.id, { state: 'complete' });
+
+    // 第二轮：同一张热卡再次上榜，另有一张新卡
+    now = new Date('2026-08-06T03:00:00.000Z');
+    const freshId = '1478612237869519905';
+    const fresh = card({
+        id: freshId,
+        threadId: freshId,
+        sourceUrl: `https://discord.com/channels/1380075940285124724/${freshId}`,
+        reactionCount: 1,
+    });
+    const second = await scanCompleteJob(service, [card(), fresh]);
+    assert.equal(second.ready.status, 'ready');
+    assert.equal(second.ready.dedupedImportedCount, 1, '已发布的卡被硬去重');
+    const manifest = service.getManifest(second.id).manifest;
+    assert.deepEqual(manifest.cards.map(item => item.id), [freshId], '榜单只剩未发布的新卡');
+});
+
+test('cards seen in earlier jobs are flagged for the dashboard', async (context) => {
+    let now = new Date('2026-08-06T02:00:00.000Z');
+    const { service } = await fixture(context, () => now);
+
+    // 第一轮：卡上榜但没有发布
+    const first = await scanCompleteJob(service);
+    await service.markDelivered(first.id, { batchId: service.getManifest(first.id).batchId });
+
+    now = new Date('2026-08-06T03:00:00.000Z');
+    const freshId = '1478612237869519906';
+    const fresh = card({
+        id: freshId,
+        threadId: freshId,
+        sourceUrl: `https://discord.com/channels/1380075940285124724/${freshId}`,
+        reactionCount: 1,
+    });
+    const second = await scanCompleteJob(service, [card(), fresh]);
+    await service.markDelivered(second.id, { batchId: service.getManifest(second.id).batchId });
+
+    const snapshot = service.dashboardSnapshot();
+    assert.equal(snapshot.latestJob.id, second.id);
+    const seenCard = snapshot.cards.find(item => item.id === threadId);
+    const freshCard = snapshot.cards.find(item => item.id === freshId);
+    assert.equal(seenCard.previouslySeen, true, '上一轮出现过的卡被标记');
+    assert.equal(freshCard.previouslySeen, false, '新卡不被标记');
+});
+
+test('a completed run with failed items can be resumed to retry them', async (context) => {
+    const { service } = await fixture(context);
+    const { id } = await scanCompleteJob(service);
+    await service.markDelivered(id, { batchId: service.getManifest(id).batchId });
+    await service.requestImport(id, { cardIds: [threadId] });
+    await service.updateWorkflow(id, { state: 'importing' });
+    await service.updateImportItem(id, { cardId: threadId, state: 'failed', message: 'bot 冷却' });
+    await service.updateWorkflow(id, { state: 'complete' });
+
+    // complete 但有 failed：可恢复重试，workflow 允许回到 importing
+    assert.equal(service.resumeImport(id).importRetryableCount, 1);
+    assert.equal((await service.updateWorkflow(id, { state: 'importing' })).workflowStatus, 'importing');
+    await service.updateImportItem(id, { cardId: threadId, state: 'imported' });
+    await service.updateWorkflow(id, { state: 'complete' });
+    // 全部成功后不再提供恢复
+    assert.throws(() => service.resumeImport(id), /already complete/);
+    await assert.rejects(
+        service.updateWorkflow(id, { state: 'importing' }),
+        /cannot transition from complete/,
+    );
+});

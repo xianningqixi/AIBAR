@@ -14,6 +14,7 @@
 - 超过 200 项时拆成多批交接，总量上限 1000。
 - 使用稳定 `batchId` 确认交接；重复确认不会跳过下一批。
 - 在本地控制台展示热门角色卡、保存用户勾选和逐项发布结果。
+- 两级去重：历史已发布的卡从榜单硬去重，之前扫过未发布的卡默认隐藏、可一键显示。
 - 发布受阻或 Worker 中途退出后，“继续发布”按钮用已持久化的请求重启一次性发布 Worker，重试剩余项。
 
 服务通过 `codex exec --ephemeral` 启动临时浏览器 Worker，但自身不接触 Chrome 会话、不调用 Discord 私有 API，也不下载角色卡。同步 Worker 负责读取 Discord 后退出；用户点击“发布已选”时再启动一条发布 Worker，取得临时卡体文件链接（支持 PNG/JSON/CHARX/BYAF/YAML），通过 `AIBAR_DISCORD_AIBAR_URL` 指定的已部署 AIBAR 服务器解析卡体并发布为公共社区作品。默认目标是 `https://172.86.116.166/aibar/#/hub?source=discord`，不是本地 Vite 或本地 SillyTavern；本机只保存任务编排状态。远端私人角色写入只是 SillyTavern 解析所需的内部暂存，不能作为成功结果。
