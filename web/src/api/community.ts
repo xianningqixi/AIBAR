@@ -123,6 +123,16 @@ export function listCommunityWorks(input: {
   return apiPost('/api/aibar/works/list', input)
 }
 
+export interface CommunityWorkTag {
+  tag: string
+  count: number
+}
+
+// 已发布作品最新版本的标签聚合，社区页筛选 chips 数据源
+export function listCommunityWorkTags(type?: '' | CommunityWorkType): Promise<{ tags: CommunityWorkTag[] }> {
+  return apiPost('/api/aibar/works/tags', type ? { type } : {})
+}
+
 export function getCommunityWork(id: string): Promise<CommunityWorkDetail> {
   return apiPost('/api/aibar/works/get', { id })
 }

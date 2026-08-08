@@ -5,7 +5,9 @@ import { useSessionStore } from '@/stores/session'
 import { useUiStore } from '@/stores/ui'
 import {
   listCommunityWorks,
+  listCommunityWorkTags,
   publishDiscordCommunityBatch,
+  type CommunityWorkTag,
   type CommunityWork,
   type CommunityWorkType,
   type DiscordCommunitySource,
@@ -48,6 +50,22 @@ const page = ref(1)
 const hasMore = ref(false)
 let searchTimer: ReturnType<typeof setTimeout> | null = null
 let requestSequence = 0
+
+const activeTag = ref('')
+const availableTags = ref<CommunityWorkTag[]>([])
+
+async function loadTags() {
+  try {
+    const result = await listCommunityWorkTags(type.value)
+    availableTags.value = result.tags
+    // 类型切换后旧标签可能不存在，静默清除
+    if (activeTag.value && !result.tags.some(item => item.tag === activeTag.value)) {
+      activeTag.value = ''
+    }
+  } catch {
+    availableTags.value = []
+  }
+}
 
 const importUrl = ref('')
 const importing = ref(false)
@@ -107,6 +125,7 @@ async function loadWorks(append = false) {
   try {
     const result = await listCommunityWorks({
       search: search.value,
+      tag: activeTag.value,
       type: type.value,
       ranking: ranking.value,
       favoritesOnly: favoritesOnly.value,
@@ -158,7 +177,8 @@ watch(
     if (next === 'community' && !works.value.length) void loadWorks()
   },
 )
-watch([type, ranking, favoritesOnly, mineOnly], loadCommunityWorks)
+watch([type, ranking, favoritesOnly, mineOnly, activeTag], loadCommunityWorks)
+watch(type, () => { void loadTags() })
 watch(search, () => {
   if (searchTimer) clearTimeout(searchTimer)
   searchTimer = setTimeout(loadCommunityWorks, 250)
@@ -340,7 +360,10 @@ async function runBatchPublish() {
 }
 
 onMounted(() => {
-  if (source.value === 'community') void loadWorks()
+  if (source.value === 'community') {
+    void loadWorks()
+    void loadTags()
+  }
 })
 
 onBeforeUnmount(() => {
@@ -396,6 +419,20 @@ onBeforeUnmount(() => {
               <div :class="segmentedClass" role="group" aria-label="排序榜单">
                 <button v-for="item in rankings" :key="item.value" :class="[segmentedItemClass, ranking === item.value ? 'bg-brand-500/10 text-brand-300' : 'text-ink-secondary hover:bg-surface-sunken']" :aria-pressed="ranking === item.value" @click="ranking = item.value">{{ item.label }}</button>
               </div>
+            </div>
+            <div v-if="availableTags.length" class="-mx-1 flex gap-2 overflow-x-auto px-1 pb-1" role="group" aria-label="标签筛选">
+              <button
+                :class="[chipClass, !activeTag ? 'border-brand-500 bg-brand-500/10 text-brand-300' : 'border-border bg-surface text-ink-secondary hover:bg-surface-sunken']"
+                :aria-pressed="!activeTag"
+                @click="activeTag = ''"
+              >全部标签</button>
+              <button
+                v-for="item in availableTags"
+                :key="item.tag"
+                :class="[chipClass, activeTag === item.tag ? 'border-brand-500 bg-brand-500/10 text-brand-300' : 'border-border bg-surface text-ink-secondary hover:bg-surface-sunken']"
+                :aria-pressed="activeTag === item.tag"
+                @click="activeTag = activeTag === item.tag ? '' : item.tag"
+              >#{{ item.tag }} <span class="ml-0.5 opacity-70">{{ item.count }}</span></button>
             </div>
           </div>
 
