@@ -24,7 +24,7 @@ function pass(tags, posts, sourceChannelId = HEAVY_SOURCE.channelId) {
     return {
         sourceChannelId,
         observedAt: '2026-08-06T02:05:00.000Z',
-        view: { tags, tagMatch: 'any', sort: 'created-at' },
+        view: { tags, tagMatch: 'any', sort: 'recent-activity' },
         posts,
     };
 }
@@ -58,49 +58,39 @@ async function fixture(context, clock = () => NOW) {
     return { directory, service, store };
 }
 
-async function reportCatalogs(service, jobId, tags = ['原创', '多路线']) {
-    for (const source of DISCORD_SOURCES) {
-        await service.recordCatalog(jobId, {
-            sourceChannelId: source.channelId,
-            tags,
-            observedAt: '2026-08-06T02:01:00.000Z',
-        });
-    }
-}
-
-async function scanCompleteJob(service, posts = [card()]) {
-    const queued = await service.trigger();
+async function scanCompleteJob(service, posts = [card()], trigger = {}) {
+    const queued = await service.trigger(trigger);
     await service.claim(queued.id, 'browser-worker');
-    await reportCatalogs(service, queued.id);
     for (const source of DISCORD_SOURCES) {
         const sourcePosts = source.channelId === HEAVY_SOURCE.channelId ? posts : [];
         await service.recordPass(queued.id, pass([], sourcePosts, source.channelId));
-        await service.recordPass(queued.id, pass(['原创'], sourcePosts, source.channelId));
-        await service.recordPass(queued.id, pass(['多路线'], sourcePosts, source.channelId));
     }
     return { id: queued.id, ready: await service.complete(queued.id) };
 }
 
-test('startup creates no job and every local trigger creates an independent today snapshot', async (context) => {
+test('startup creates no job and every local trigger creates an independent hot-top job', async (context) => {
     const { service } = await fixture(context);
     assert.equal(service.latestJob(), null);
 
     const first = await service.trigger();
-    const second = await service.trigger();
+    const second = await service.trigger({ limit: 50 });
     assert.notEqual(first.id, second.id);
     assert.match(first.id, /^manual-/);
-    assert.equal(first.mode, 'manual');
-    assert.equal(first.period, 'today');
+    assert.equal(first.mode, 'hot-top');
+    assert.equal(first.period, 'hot-top');
+    assert.equal(first.limit, 100, '默认目标数量是 100');
+    assert.equal(second.limit, 50);
     assert.equal(first.sourceCount, 3);
     assert.equal(first.sourceTargetCount, 3);
     assert.equal(first.sourceScopeComplete, true);
     assert.equal(first.localDate, '2026-08-06');
-    assert.deepEqual(first.window, {
-        start: '2026-08-05T16:00:00.000Z',
-        end: '2026-08-06T02:00:00.000Z',
-    });
+    assert.equal(first.window, null, '热度榜不再有快照窗口');
+    assert.equal(first.passTargetCount, 3, '每栏目只要求一个最近活跃视图');
     assert.equal(service.listJobs().length, 2);
     await assert.rejects(service.trigger({ sourceDate: '2026-08-05' }), /not allowed/);
+    await assert.rejects(service.trigger({ limit: 5 }), /between 10 and 300/);
+    await assert.rejects(service.trigger({ limit: 301 }), /between 10 and 300/);
+    await assert.rejects(service.trigger({ limit: 66.6 }), /between 10 and 300/);
 });
 
 test('worker heartbeats appear online briefly without being persisted as job data', async (context) => {
@@ -112,9 +102,21 @@ test('worker heartbeats appear online briefly without being persisted as job dat
         state: 'idle',
         jobId: '',
         message: '',
+        progress: null,
         observedAt: '2026-08-06T02:00:00.000Z',
         online: true,
     });
+    // 进度心跳：done 超出 total 时钳到 total，供控制台渲染进度条
+    const progressed = service.reportWorker({
+        workerId: 'codex-heartbeat',
+        state: 'scanning',
+        progress: { done: 120, total: 100, label: '纯文字' },
+    });
+    assert.deepEqual(progressed.progress, { done: 100, total: 100, label: '纯文字' });
+    assert.throws(
+        () => service.reportWorker({ workerId: 'codex-heartbeat', state: 'idle', progress: { done: -1, total: 10 } }),
+        /progress.done is invalid/,
+    );
     // 一次性 Worker 的最终 idle 心跳不带 jobId；对应进程退出时仍要立即清掉。
     assert.equal(service.clearWorker('manual-finished-job').online, false);
     service.reportWorker({ workerId: 'codex-one-shot', state: 'starting' });
@@ -132,7 +134,7 @@ test('the local service persists a completed manual job without contacting AIBAR
     const batch = service.getManifest(id);
     assert.equal(batch.batchIndex, 0);
     assert.equal(batch.batchCount, 1);
-    assert.equal(batch.manifest.period, 'today');
+    assert.equal(batch.manifest.period, 'hot-top');
     assert.equal(batch.manifest.cards.length, 1);
     const delivered = await service.markDelivered(id, { batchId: batch.batchId });
     assert.equal(delivered.status, 'delivered');
@@ -267,7 +269,6 @@ test('dashboard exposes safe ranked cards and persists one validated import requ
 test('dashboard merges cards from all three sources into one hot-ranked list', async (context) => {
     const { service } = await fixture(context);
     const queued = await service.trigger();
-    await reportCatalogs(service, queued.id, ['原创']);
     for (const [index, source] of DISCORD_SOURCES.entries()) {
         const id = `147861223786951991${index}`;
         const sourceCard = card({
@@ -278,7 +279,6 @@ test('dashboard merges cards from all three sources into one hot-ranked list', a
             tags: ['原创'],
         });
         await service.recordPass(queued.id, pass([], [sourceCard], source.channelId));
-        await service.recordPass(queued.id, pass(['原创'], [sourceCard], source.channelId));
     }
     await service.complete(queued.id);
     for (let batch = service.getManifest(queued.id);;) {
@@ -297,18 +297,22 @@ test('dashboard merges cards from all three sources into one hot-ranked list', a
     assert.ok(snapshot.cards.every(item => item.previewUrl === undefined));
 });
 
-test('passes and completion require a non-empty observed tag catalog', async (context) => {
+test('hot-top jobs skip the tag catalog and cap the final list at the requested limit', async (context) => {
     const { service } = await fixture(context);
-    const queued = await service.trigger();
-    await service.claim(queued.id, 'browser-worker');
-    await assert.rejects(service.recordPass(queued.id, pass([], [card()])), /non-empty Discord tag catalog/);
-    await service.recordCatalog(queued.id, {
-        sourceChannelId: HEAVY_SOURCE.channelId,
-        tags: [],
-        observedAt: '2026-08-06T02:01:00.000Z',
-    });
-    await assert.rejects(service.recordPass(queued.id, pass([], [card()])), /non-empty Discord tag catalog/);
-    await assert.rejects(service.complete(queued.id), /non-empty Discord tag catalog/);
+    // 12 张卡、limit 10：完成时全局按回应数排序只保留前 10
+    const posts = Array.from({ length: 12 }, (_, index) => card({
+        id: `147861223786${String(9530000 + index)}`,
+        threadId: `147861223786${String(9530000 + index)}`,
+        sourceUrl: `https://discord.com/channels/1380075940285124724/147861223786${String(9530000 + index)}`,
+        reactionCount: index,
+    }));
+    const { id, ready } = await scanCompleteJob(service, posts, { limit: 10 });
+    assert.equal(ready.status, 'ready', '没有 catalog 也能完成热度榜任务');
+    const manifest = service.getManifest(id).manifest;
+    assert.equal(manifest.cards.length, 10);
+    // 回应数最高的排最前，最低的两张被截掉
+    assert.equal(manifest.cards[0].reactionCount, 11);
+    assert.equal(manifest.cards.at(-1).reactionCount, 2);
 });
 
 test('re-claiming a ready job keeps its manifest deliverable', async (context) => {
@@ -321,73 +325,37 @@ test('re-claiming a ready job keeps its manifest deliverable', async (context) =
     await assert.rejects(service.claim(id, 'another-worker'), /claimed by browser-worker/);
 });
 
-test('manual jobs reject posts outside the trigger-time snapshot', async (context) => {
+test('hot-top jobs accept any publish date but require recent-activity sorting', async (context) => {
     const { service } = await fixture(context);
     const queued = await service.trigger();
-    await service.recordCatalog(queued.id, {
-        sourceChannelId: HEAVY_SOURCE.channelId,
-        tags: ['原创'],
-        observedAt: '2026-08-06T02:01:00.000Z',
-    });
+    // 一年前发布的老热卡也能进榜
+    const oldHot = card({ publishedAt: '2025-01-01T00:00:00.000Z', reactionCount: 999 });
+    await service.recordPass(queued.id, pass([], [oldHot]));
+    // 旧的发帖日期排序视图被拒绝
     await assert.rejects(
-        service.recordPass(queued.id, pass([], [card({ publishedAt: '2026-08-06T02:01:00.000Z' })])),
-        /manual snapshot window/,
+        service.recordPass(queued.id, {
+            ...pass([], []),
+            view: { tags: [], tagMatch: 'any', sort: 'created-at' },
+        }),
+        /recent-activity sorting/,
     );
-    await assert.rejects(
-        service.recordPass(queued.id, pass([], [card({ publishedAt: '2026-08-05T15:59:59.999Z' })])),
-        /manual snapshot window/,
-    );
-});
-
-test('a job completed after midnight keeps the original manual snapshot date', async (context) => {
-    let now = new Date('2026-08-06T15:59:00.000Z');
-    const { service } = await fixture(context, () => now);
-    const queued = await service.trigger();
-    for (const source of DISCORD_SOURCES) {
-        await service.recordCatalog(queued.id, {
-            sourceChannelId: source.channelId,
-            tags: ['原创'],
-            observedAt: '2026-08-06T15:59:10.000Z',
-        });
-    }
-    const snapshotCard = card({ publishedAt: '2026-08-06T15:58:00.000Z' });
-    for (const source of DISCORD_SOURCES) {
-        const sourcePosts = source.channelId === HEAVY_SOURCE.channelId ? [snapshotCard] : [];
-        await service.recordPass(queued.id, {
-            ...pass([], sourcePosts, source.channelId),
-            observedAt: '2026-08-06T15:59:20.000Z',
-        });
-        await service.recordPass(queued.id, {
-            ...pass(['原创'], sourcePosts, source.channelId),
-            observedAt: '2026-08-06T15:59:30.000Z',
-        });
-    }
-
-    now = new Date('2026-08-06T16:01:00.000Z');
-    await service.complete(queued.id);
-    const manifest = service.getManifest(queued.id).manifest;
-    assert.equal(manifest.syncedAt, '2026-08-06T15:59:00.000Z');
-    assert.equal(manifest.period, 'today');
 });
 
 test('batch delivery acknowledgements are ordered and idempotent', async (context) => {
     const { service } = await fixture(context);
-    const queued = await service.trigger();
+    const queued = await service.trigger({ limit: 300 });
     await service.claim(queued.id, 'browser-worker');
-    await reportCatalogs(service, queued.id, ['原创']);
     const posts = Array.from({ length: 250 }, (_, index) => card({
         id: `147861223786${String(9520000 + index)}`,
         threadId: `147861223786${String(9520000 + index)}`,
         sourceUrl: `https://discord.com/channels/1380075940285124724/147861223786${String(9520000 + index)}`,
         reactionCount: index,
     }));
+    // 同一栏目分多次 pass 上报是合法的（worker 每 30-50 个帖子上报一批）
     await service.recordPass(queued.id, pass([], posts.slice(0, 125)));
     await service.recordPass(queued.id, pass([], posts.slice(125)));
-    await service.recordPass(queued.id, pass(['原创'], posts.slice(0, 125)));
-    await service.recordPass(queued.id, pass(['原创'], posts.slice(125)));
     for (const source of [TEXT_SOURCE, LIGHT_SOURCE]) {
         await service.recordPass(queued.id, pass([], [], source.channelId));
-        await service.recordPass(queued.id, pass(['原创'], [], source.channelId));
     }
     const ready = await service.complete(queued.id);
     assert.equal(ready.batchCount, 2);
@@ -408,13 +376,11 @@ test('batch delivery acknowledgements are ordered and idempotent', async (contex
     assert.equal((await service.markDelivered(queued.id, { batchId: second.batchId })).status, 'delivered');
 });
 
-test('an empty fully covered manual job cannot produce a handoff manifest', async (context) => {
+test('an empty fully covered hot-top job cannot produce a handoff manifest', async (context) => {
     const { service } = await fixture(context);
     const queued = await service.trigger();
-    await reportCatalogs(service, queued.id, ['原创']);
     for (const source of DISCORD_SOURCES) {
         await service.recordPass(queued.id, pass([], [], source.channelId));
-        await service.recordPass(queued.id, pass(['原创'], [], source.channelId));
     }
     assert.equal((await service.complete(queued.id)).status, 'empty');
     assert.throws(() => service.getManifest(queued.id), /must not overwrite/);

@@ -50,30 +50,21 @@ flowchart LR
 
 本地控制台创建任务后立即启动一条临时 `codex exec --ephemeral` 浏览器 worker；同步结束后进程退出，不等待也不轮询“发布已选”。用户点击“发布已选”时再启动第二条一次性 worker，只处理该次持久化请求并在完成或阻塞后退出。发布受阻或 worker 中途退出时，控制台会显示“继续发布”，点击后用同一份已持久化请求重启一条一次性发布 worker，剩余项（含 `failed` 重试）逐项处理；勾选内容不可更改。控制台状态通过 SSE 事件推送更新，没有定时任务或页面轮询；快照中的 `launcher` 字段反映一次性 worker 进程是否仍在运行，与 90 秒心跳窗口互补。
 
-## 3. 手动快照语义
+## 3. 热度榜语义
 
 - 服务启动后不会自动生成 job。
-- 每次点击控制台“开始同步”都会通过 `POST /api/v1/dashboard/trigger` 创建一个新的 `manual-*` job，不复用旧任务。
+- 每次点击控制台“开始同步”都会通过 `POST /api/v1/dashboard/trigger` 创建一个新的 `manual-*` job（`mode: "hot-top"`），不复用旧任务。
 - 服务启动、SSE 连接、Worker heartbeat 和 worker CLI 都不能创建任务或启动 Worker。
-- 默认周期是 `period: "today"`。
-- 快照窗口固定为触发当日 `Asia/Shanghai 00:00` 到触发时刻。
-- manifest 的 `syncedAt` 固定为触发时刻；即使扫描跨过午夜，`period: "today"` 仍对应原快照日期。
-- 触发后新发布的帖子不进入本轮；用户再次同步会创建覆盖到新触发时刻的新任务。
-- 候选发现使用 Discord“发帖日期”排序以完整覆盖时间窗，manifest 最终按回应数降序展示热门项。
+- 目标数量 `limit` 默认 100，可在控制台输入 10–300。
+- 不限帖子发布日期：worker 在每个栏目按“最近活跃”排序收集最多 `limit` 个候选，服务端在 `complete` 时全局按回应数排序并截取前 `limit` 张。
+- manifest 的 `period` 为 `hot-top`，`syncedAt` 为触发时刻。
+- worker 通过带 `progress` 的 heartbeat 上报采集/发布进度，控制台渲染进度条（进度不持久化）。
 
 可通过 `filters` 限制最终标签；不传时扫描全部标签并用无标签视图补漏。
 
-## 4. 标签覆盖
+## 4. 覆盖要求
 
-worker 必须对三个固定栏目分别读取“查看所有标签”并上报非空标签目录。任一栏目实际出现空目录时应视为页面未加载完成或 Discord UI 异常，不能用空目录完成任务。
-
-无最终标签限制时，完成条件是：
-
-```text
-coverage = every(source, unfiltered(source) + every(tagCatalog(source), tag => any:<tag>))
-```
-
-指定标签时，只要求与任务 `filters.tags` 和 `filters.tagMatch` 完全一致的 pass。多个视图中的帖子按 `threadId` 合并，回应数和回复数保留最大观察值。
+热度榜不再要求读取标签目录或逐标签遍历：完成条件是每个栏目至少一个无标签“最近活跃”视图的 pass（指定 `filters` 时为与之完全一致的视图）。卡片自带的标签随 pass 上报，控制台据此提供标签筛选。多个视图中的帖子按 `threadId` 合并，回应数和回复数保留最大观察值。旧的今日快照任务仍按原全标签覆盖规则校验，保证历史 state 可读。
 
 ## 5. 状态与批次
 
@@ -146,6 +137,7 @@ worker 逐批读取 `manifest`，确认本地榜单已可展示后向 `delivered
 
 ```json
 {
+  "limit": 100,
   "filters": {
     "tags": [],
     "tagMatch": "any"
@@ -153,15 +145,15 @@ worker 逐批读取 `manifest`，确认本地榜单已可展示后向 `delivered
 }
 ```
 
-`filters` 可省略。`sourceDate`、调度时间和历史回填参数均不再接受。
+`limit`（10–300，默认 100）与 `filters` 均可省略。`sourceDate`、调度时间和历史回填参数均不再接受。
 
 ## 7. 浏览器 worker 流程
 
 1. 用户点击“开始同步”后，本地服务为新建 job 启动一次性 worker；worker 只读取该 job ID 的 `queued/scanning` 状态，绝不调用 `trigger`，也不查找或等待其他任务。
-2. `claim` 后依次打开“纯文字”“轻前端·美化”“重前端·独立前端”三个固定 Discord forum，确认登录和成人内容状态正常。
-3. 每个栏目都选择“发帖日期”，读取完整标签目录，并用该栏目的 `sourceChannelId` 上报 `catalog`。
-4. 在每个栏目遍历其所有标签视图，再扫描无标签视图；pass 必须携带同一 `sourceChannelId`，只收集 job 快照窗口内的帖子。
-5. 调用 `complete`，缺少覆盖时只补扫明确列出的视图。
+2. `claim` 后打开“纯文字”“轻前端·美化”“重前端·独立前端”三个固定 Discord forum（可最多 3 个标签页并行），确认登录和成人内容状态正常。
+3. 每个栏目把排序设为“最近活跃”，从无标签视图自上而下收集最多 `limit` 个候选；每 30-50 个帖子上报一次 `pass`（携带对应 `sourceChannelId`），并用 `progress` 命令上报全局进度。
+4. 不需要读取标签目录；卡片可见标签随 pass 一起上报。
+5. 三个栏目收集完调用 `complete`，服务端全局按回应数排序截取前 `limit` 张。
 6. 服务按真实来源栏目分别生成 manifest v1 批次；逐批读取信封并用其中的 `batchId` 调用 `delivered`，使三个栏目的结果合并显示在本地热门榜。
 7. 任务进入 `waiting-selection` 后立即结束同步 worker，不等待、不轮询发布请求。
 8. 用户勾选并点击“发布已选”后，本地服务启动新的单次 worker；它用 `get <jobId>` 读取已持久化请求，把 workflow 更新为 `importing`，按 [`discord-hot-import-runbook.md`](./discord-hot-import-runbook.md) 分两阶段执行：阶段A 在最多 3 个标签页并行完成 `/下载`（按 PNG > JSON > CHARX > BYAF > YAML 优先级）收集短期链接与来源信息；阶段B 打开远端 AIBAR 批量发布入口一次性提交 JSON 数组。

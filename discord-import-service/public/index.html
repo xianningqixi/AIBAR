@@ -24,11 +24,14 @@
   <main>
     <section class="command-band" aria-labelledby="page-title">
       <div class="command-band__content">
-        <p class="date-label" id="snapshot-date">今日快照</p>
-        <h1 id="page-title">同步 Discord 今日热门</h1>
-        <p class="snapshot-window" id="snapshot-window">上海时区 · 等待手动触发</p>
+        <p class="date-label" id="snapshot-date">热度榜</p>
+        <h1 id="page-title">同步 Discord 热度榜</h1>
+        <p class="snapshot-window" id="snapshot-window">全栏目最近活跃 · 等待手动触发</p>
         <div class="command-actions">
           <button id="trigger-button" data-testid="dashboard-trigger" type="button">开始同步</button>
+          <label class="limit-field">目标
+            <input id="limit-input" type="number" min="10" max="300" step="10" value="100" aria-label="采集目标数量" />
+          </label>
           <a id="aibar-link" class="text-link" href="#" target="_blank" rel="noreferrer">打开 AIBAR</a>
         </div>
         <nav id="discord-links" class="source-links" aria-label="Discord 来源栏目"></nav>
@@ -43,8 +46,8 @@
         <p id="job-id" class="job-id">-</p>
         <dl class="metrics">
           <div><dt>候选</dt><dd id="card-count">0</dd></div>
+          <div><dt>目标</dt><dd id="target-count">100</dd></div>
           <div><dt>栏目</dt><dd id="source-count">0 / 3</dd></div>
-          <div><dt>标签</dt><dd id="tag-count">0</dd></div>
           <div><dt>覆盖</dt><dd id="pass-count">0</dd></div>
           <div><dt>批次</dt><dd id="batch-count">0</dd></div>
         </dl>
@@ -56,6 +59,10 @@
         <h2 id="progress-title">处理进度</h2>
         <span id="worker-message" class="muted">等待 Worker</span>
       </div>
+      <div id="worker-progress" class="worker-progress" hidden>
+        <div class="worker-progress__track"><div id="worker-progress-fill" class="worker-progress__fill"></div></div>
+        <span id="worker-progress-text" class="worker-progress__text"></span>
+      </div>
       <ol class="progress" id="progress-list">
         <li data-step="queued"><span>1</span><div><strong>创建任务</strong><small>本地快照</small></div></li>
         <li data-step="scanning"><span>2</span><div><strong>扫描 Discord</strong><small>标签覆盖</small></div></li>
@@ -66,9 +73,10 @@
 
     <section class="candidates" aria-labelledby="candidates-title">
       <div class="section-heading">
-        <h2 id="candidates-title">今日热门角色卡</h2>
+        <h2 id="candidates-title">热度榜角色卡</h2>
         <span id="candidate-summary" class="muted">等待同步列表</span>
       </div>
+      <div id="tag-filters" class="tag-filters" hidden></div>
       <div class="table-wrap candidate-table-wrap">
         <table class="candidate-table">
           <thead>
@@ -88,6 +96,8 @@
       </div>
       <div class="candidate-actions">
         <button id="import-selected-button" type="button" disabled>发布已选</button>
+        <button id="select-filtered-button" class="secondary-button" type="button" disabled>全选当前筛选</button>
+        <button id="clear-selection-button" class="secondary-button" type="button" disabled>清空选择</button>
         <p id="import-message" class="action-message" role="status" aria-live="polite"></p>
       </div>
     </section>

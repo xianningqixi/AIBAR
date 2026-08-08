@@ -34,13 +34,15 @@ const importStatusLabels = {
   skipped: ['已跳过', ''],
 }
 const elements = Object.fromEntries([
-  'worker-dot', 'worker-label', 'snapshot-date', 'snapshot-window', 'trigger-button',
+  'worker-dot', 'worker-label', 'snapshot-date', 'snapshot-window', 'trigger-button', 'limit-input',
   'discord-links', 'aibar-link', 'action-message', 'job-status', 'job-id', 'card-count', 'source-count',
-  'tag-count', 'pass-count', 'batch-count', 'worker-message', 'progress-list',
-  'jobs-body', 'last-updated', 'cards-body', 'candidate-summary',
-  'import-selected-button', 'import-message',
+  'target-count', 'pass-count', 'batch-count', 'worker-message', 'progress-list',
+  'worker-progress', 'worker-progress-fill', 'worker-progress-text',
+  'jobs-body', 'last-updated', 'cards-body', 'candidate-summary', 'tag-filters',
+  'import-selected-button', 'select-filtered-button', 'clear-selection-button', 'import-message',
 ].map(id => [id, document.getElementById(id)]))
 const selectedCardIds = new Set()
+const activeTagFilters = new Set()
 let latestSnapshot = null
 let renderedJobId = ''
 
@@ -95,6 +97,7 @@ function updateImportButton(job, selectableCount) {
         ? `已提交 ${job.importRequestedCount} 项`
         : `发布已选${selectedCardIds.size ? `（${selectedCardIds.size}）` : ''}`
   }
+  const filteredNote = activeTagFilters.size ? `已筛选 ${[...activeTagFilters].join('、')} · ` : ''
   elements['candidate-summary'].textContent = !job
     ? '等待同步列表'
     : job.sourceScopeComplete === false
@@ -102,26 +105,84 @@ function updateImportButton(job, selectableCount) {
     : job.importRequestedCount
       ? `${job.importTerminalCount} / ${job.importRequestedCount} 项已处理`
       : selectableCount
-        ? `${selectableCount} 项可发布`
-        : '暂无可发布角色卡'
+        ? `${filteredNote}${selectableCount} 项可发布，已选 ${selectedCardIds.size}`
+        : `${filteredNote}暂无可发布角色卡`
+  const batchLocked = !job || job.status !== 'delivered' || job.importRequestedCount > 0 || launcherBusy()
+  elements['select-filtered-button'].disabled = batchLocked || !selectableCount
+  elements['clear-selection-button'].disabled = batchLocked || selectedCardIds.size === 0
+}
+
+function renderTagFilters(cards) {
+  const container = elements['tag-filters']
+  container.replaceChildren()
+  const counts = new Map()
+  for (const card of cards) {
+    for (const tag of card.tags) counts.set(tag, (counts.get(tag) || 0) + 1)
+  }
+  if (!counts.size) {
+    container.hidden = true
+    return
+  }
+  container.hidden = false
+  const all = document.createElement('button')
+  all.type = 'button'
+  all.className = `tag-chip${activeTagFilters.size ? '' : ' tag-chip--active'}`
+  all.textContent = `全部 ${cards.length}`
+  all.addEventListener('click', () => {
+    activeTagFilters.clear()
+    rerenderCandidates()
+  })
+  container.append(all)
+  const sorted = [...counts.entries()].sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0]))
+  for (const [tag, count] of sorted.slice(0, 40)) {
+    const chip = document.createElement('button')
+    chip.type = 'button'
+    chip.className = `tag-chip${activeTagFilters.has(tag) ? ' tag-chip--active' : ''}`
+    chip.dataset.tag = tag
+    chip.append(document.createTextNode(tag))
+    const small = document.createElement('small')
+    small.textContent = String(count)
+    chip.append(small)
+    chip.addEventListener('click', () => {
+      if (activeTagFilters.has(tag)) activeTagFilters.delete(tag)
+      else activeTagFilters.add(tag)
+      rerenderCandidates()
+    })
+    container.append(chip)
+  }
+}
+
+function visibleCardsOf(cards) {
+  if (!activeTagFilters.size) return cards
+  return cards.filter(card => card.tags.some(tag => activeTagFilters.has(tag)))
+}
+
+function rerenderCandidates() {
+  if (!latestSnapshot) return
+  renderCards(latestSnapshot.cards || [], latestSnapshot.latestJob)
 }
 
 function renderCards(cards, job) {
   elements['cards-body'].replaceChildren()
   if (renderedJobId !== (job?.id || '')) {
     selectedCardIds.clear()
+    activeTagFilters.clear()
     renderedJobId = job?.id || ''
   }
   const availableIds = new Set(cards.map(card => card.id))
   for (const cardId of selectedCardIds) {
     if (!availableIds.has(cardId)) selectedCardIds.delete(cardId)
   }
+  renderTagFilters(cards)
+  cards = visibleCardsOf(cards)
   if (!cards.length) {
     const row = document.createElement('tr')
     const empty = cell(
-      job?.sourceScopeComplete === false
-        ? '旧任务未覆盖三个栏目，请点击开始同步'
-        : job?.status === 'empty' ? '今日没有候选角色卡' : '等待同步列表',
+      activeTagFilters.size
+        ? '当前标签筛选下没有角色卡'
+        : job?.sourceScopeComplete === false
+          ? '旧任务未覆盖三个栏目，请点击开始同步'
+          : job?.status === 'empty' ? '没有候选角色卡' : '等待同步列表',
       'empty-row',
     )
     empty.colSpan = 6
@@ -263,18 +324,33 @@ function render(snapshot) {
   elements['trigger-button'].textContent = workerBusy
     ? (launcher.phase === 'import' ? '发布运行中' : '同步运行中')
     : '开始同步'
-  elements['snapshot-date'].textContent = `${day} 今日快照`
+  elements['snapshot-date'].textContent = job?.limit
+    ? `${day} · 热度 Top ${job.limit}`
+    : `${day} 热度榜`
   elements['snapshot-window'].textContent = job
-    ? `上海时区 · 00:00 至 ${formatDate(job.window.end, { hour: '2-digit', minute: '2-digit' }).split(' ')[1] || formatDate(job.window.end)}`
-    : '上海时区 · 等待手动触发'
+    ? (job.limit
+      ? `全栏目最近活跃 · 目标 ${job.limit} 张 · ${formatDate(job.createdAt)} 触发`
+      : `旧快照任务 · ${formatDate(job.createdAt)} 触发`)
+    : '全栏目最近活跃 · 等待手动触发'
   elements['job-status'].textContent = job ? statusLabel : '尚未创建'
   elements['job-status'].dataset.tone = job ? statusTone : ''
   elements['job-id'].textContent = job?.id || '-'
   elements['card-count'].textContent = String(job?.cardCount || 0)
   elements['source-count'].textContent = `${job?.scannedSourceCount || 0} / ${job?.sourceTargetCount || snapshot.sources.length}`
-  elements['tag-count'].textContent = String(job?.tagCount || 0)
+  elements['target-count'].textContent = String(job?.limit || Number(elements['limit-input'].value) || 100)
   elements['pass-count'].textContent = String(job?.passCount || 0)
   elements['batch-count'].textContent = String(job?.batchCount || 0)
+  const progress = worker.online ? worker.progress : null
+  if (progress) {
+    elements['worker-progress'].hidden = false
+    const percent = Math.max(0, Math.min(100, Math.round((progress.done / progress.total) * 100)))
+    elements['worker-progress-fill'].style.width = `${percent}%`
+    elements['worker-progress-text'].textContent = `${progress.label ? `${progress.label} · ` : ''}${progress.done} / ${progress.total}`
+  } else {
+    elements['worker-progress'].hidden = true
+    elements['worker-progress-fill'].style.width = '0'
+    elements['worker-progress-text'].textContent = ''
+  }
   renderSourceLinks(snapshot.sources || [])
   elements['aibar-link'].href = snapshot.aibarUrl
   elements['last-updated'].textContent = `更新于 ${formatDate(snapshot.now)}`
@@ -310,10 +386,14 @@ elements['trigger-button'].addEventListener('click', async () => {
   elements['action-message'].className = 'action-message'
   elements['action-message'].textContent = ''
   try {
+    const limit = Number(elements['limit-input'].value)
+    if (!Number.isInteger(limit) || limit < 10 || limit > 300) {
+      throw new Error('目标数量必须是 10 到 300 之间的整数')
+    }
     const job = await request('/api/v1/dashboard/trigger', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: '{}',
+      body: JSON.stringify({ limit }),
     })
     elements['action-message'].textContent = `任务已创建，Worker 已启动：${job.id}`
   } catch (error) {
@@ -356,6 +436,20 @@ elements['import-selected-button'].addEventListener('click', async () => {
     elements['import-message'].className = 'action-message action-message--error'
     elements['import-selected-button'].disabled = false
   }
+})
+
+elements['select-filtered-button'].addEventListener('click', () => {
+  if (!latestSnapshot) return
+  const cards = visibleCardsOf(latestSnapshot.cards || [])
+  for (const card of cards) {
+    if (card.selectable) selectedCardIds.add(card.id)
+  }
+  rerenderCandidates()
+})
+
+elements['clear-selection-button'].addEventListener('click', () => {
+  selectedCardIds.clear()
+  rerenderCandidates()
 })
 
 connectDashboardEvents()

@@ -71,7 +71,7 @@ test('the HTTP API stays loopback-oriented and requires JSON POST bodies', async
     const dashboardPage = await fetch(`${baseUrl}/`);
     assert.equal(dashboardPage.status, 200);
     assert.match(dashboardPage.headers.get('content-type'), /text\/html/);
-    assert.match(await dashboardPage.text(), /同步 Discord 今日热门/);
+    assert.match(await dashboardPage.text(), /同步 Discord 热度榜/);
     assert.match(dashboardPage.headers.get('content-security-policy'), /default-src 'self'/);
 
     const dashboard = await fetch(`${baseUrl}/api/v1/dashboard`);

@@ -372,3 +372,92 @@ tbody tr:last-child td { border-bottom: 0; }
 @media (prefers-reduced-motion: reduce) {
   * { scroll-behavior: auto !important; transition: none !important; }
 }
+
+/* 热度榜目标数量输入 */
+.limit-field {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--muted);
+}
+.limit-field input {
+  width: 72px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  font: inherit;
+  font-weight: 600;
+  color: var(--ink);
+  background: #fff;
+}
+.limit-field input:focus-visible { outline: 3px solid rgba(36, 95, 199, .22); outline-offset: 1px; }
+
+/* Worker 进度条 */
+.worker-progress {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 12px;
+}
+.worker-progress__track {
+  flex: 1;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--border);
+  overflow: hidden;
+}
+.worker-progress__fill {
+  height: 100%;
+  width: 0;
+  border-radius: 999px;
+  background: var(--accent);
+  transition: width .3s ease;
+}
+.worker-progress__text {
+  font-size: 12px;
+  color: var(--muted);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+/* 标签筛选 chips */
+.tag-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0 0 14px;
+}
+.tag-chip {
+  border: 1px solid var(--border);
+  background: #fff;
+  color: var(--muted);
+  border-radius: 999px;
+  padding: 5px 12px;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  transition: border-color .15s ease, color .15s ease, background .15s ease;
+}
+.tag-chip:hover { border-color: var(--accent); color: var(--ink); }
+.tag-chip--active {
+  border-color: var(--accent);
+  background: rgba(36, 95, 199, .1);
+  color: var(--accent-dark, var(--accent));
+  font-weight: 600;
+}
+.tag-chip small { opacity: .7; margin-left: 4px; }
+
+/* 次级批量操作按钮 */
+.secondary-button {
+  border: 1px solid var(--border);
+  background: #fff;
+  color: var(--ink);
+  border-radius: 10px;
+  padding: 9px 14px;
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+.secondary-button:hover:not(:disabled) { border-color: var(--accent); color: var(--accent-dark, var(--accent)); }
+.secondary-button:disabled { cursor: not-allowed; opacity: .5; }
