@@ -21,7 +21,7 @@ const WORKFLOW_TRANSITIONS = new Map([
     ['waiting-selection', new Set(['waiting-selection', 'importing', 'complete', 'blocked'])],
     ['importing', new Set(['waiting-selection', 'importing', 'complete', 'blocked'])],
     ['blocked', new Set(['waiting-selection', 'importing', 'complete', 'blocked'])],
-    ['complete', new Set(['complete'])],
+    ['complete', new Set(['complete', 'importing'])],
 ]);
 const WORKER_ONLINE_WINDOW_MS = 90_000;
 
@@ -226,7 +226,47 @@ function selectableCard(card) {
         && (!fileName || CARD_EXTENSIONS.has(extension));
 }
 
-function dashboardCards(job) {
+// 历史 imported 终态的卡（按 id 与 threadId 双键）：热度榜完成时硬去重，名额留给未发布的卡。
+function publishedCardKeys(state, excludeJobId = '') {
+    const keys = new Set();
+    for (const job of state.jobs) {
+        if (job.id === excludeJobId) continue;
+        const items = job.importItems || {};
+        const importedIds = new Set(
+            Object.entries(items)
+                .filter(([, item]) => item?.status === 'imported')
+                .map(([cardId]) => cardId),
+        );
+        if (!importedIds.size) continue;
+        for (const card of jobManifests(job).flatMap(manifest => manifest.cards || [])) {
+            if (!importedIds.has(card.id)) continue;
+            keys.add(card.id);
+            if (card.threadId) keys.add(card.threadId);
+        }
+        // 找不到对应卡时至少按 id 去重
+        for (const cardId of importedIds) keys.add(cardId);
+    }
+    return keys;
+}
+
+// 出现在更早任务榜单里的 threadId：控制台据此标记“之前扫过”。
+function previouslySeenThreadIds(state, currentJobId) {
+    const seen = new Set();
+    const current = state.jobs.find(job => job.id === currentJobId);
+    const currentCreatedAt = Date.parse(current?.createdAt || '') || Number.POSITIVE_INFINITY;
+    for (const job of state.jobs) {
+        if (job.id === currentJobId) continue;
+        if ((Date.parse(job.createdAt || '') || 0) >= currentCreatedAt) continue;
+        for (const manifest of jobManifests(job)) {
+            for (const card of manifest.cards || []) {
+                seen.add(card.threadId || card.id);
+            }
+        }
+    }
+    return seen;
+}
+
+function dashboardCards(job, seenThreadIds = new Set()) {
     if (!job || !['ready', 'delivered'].includes(job.status)) return [];
     return manifestCards(job)
         .filter(card => (card.resource?.kind || 'character-card') === 'character-card')
@@ -244,6 +284,7 @@ function dashboardCards(job) {
                 replyCount: card.replyCount,
                 availability: card.resource?.availability || 'browser',
                 selectable: selectableCard(card),
+                previouslySeen: seenThreadIds.has(card.threadId || card.id),
                 importStatus: item?.status || '',
                 importMessage: item?.message || '',
             };
@@ -297,6 +338,7 @@ function summary(job) {
         importRequestedCount: progress.requested,
         importTerminalCount: progress.terminal,
         importRetryableCount: progress.retryable,
+        dedupedImportedCount: job.dedupedImportedCount || 0,
         missingCoverage: missingCoverage(job),
         workerId: job.workerId || '',
         error: job.error || '',
@@ -370,6 +412,7 @@ export class DiscordImportService {
     dashboardSnapshot() {
         const state = this.store.read();
         const latest = state.jobs[0] || null;
+        const seen = latest ? previouslySeenThreadIds(state, latest.id) : new Set();
         return {
             mode: 'manual',
             timezone: 'Asia/Shanghai',
@@ -377,7 +420,7 @@ export class DiscordImportService {
             now: iso(this.clock),
             worker: this.workerStatus(),
             latestJob: latest ? summary(latest) : null,
-            cards: dashboardCards(latest),
+            cards: dashboardCards(latest, seen),
             jobs: state.jobs.slice(0, 12).map(summary),
         };
     }
@@ -485,7 +528,18 @@ export class DiscordImportService {
             if (job.status === 'ready' || job.status === 'empty') return summary(job);
             assertDeliveryNotStarted(job);
             assertCatalogReported(job);
-            const manifests = buildManifests(job, job.triggeredAt || completedAt);
+            // 已发布过的卡从榜单硬去重：热度名额让给尚未发布的卡；
+            // 需要重发同帖新版本时走 AIBAR 单项手动入口。
+            let dedupSource = job;
+            if (job.mode === 'hot-top') {
+                const published = publishedCardKeys(state, job.id);
+                const cards = (job.cards || []).filter(card => (
+                    !published.has(card.id) && !published.has(card.threadId)
+                ));
+                job.dedupedImportedCount = (job.cards || []).length - cards.length;
+                dedupSource = { ...job, cards };
+            }
+            const manifests = buildManifests(dedupSource, job.triggeredAt || completedAt);
             job.manifests = manifests;
             job.manifest = null;
             job.deliveredBatches = 0;
@@ -574,6 +628,12 @@ export class DiscordImportService {
                 error.statusCode = 409;
                 throw error;
             }
+            // complete → importing 仅用于重试失败项：全部成功/跳过时保持终态
+            if (current === 'complete' && workflow.state === 'importing' && !importProgress(job).retryable) {
+                const error = new Error(`Workflow cannot transition from complete to importing without retryable items`);
+                error.statusCode = 409;
+                throw error;
+            }
             if (workflow.state === 'importing' && !job.importRequest?.cardIds?.length) {
                 const error = new Error('Importing requires a dashboard import request');
                 error.statusCode = 409;
@@ -644,7 +704,7 @@ export class DiscordImportService {
             error.statusCode = 409;
             throw error;
         }
-        if (job.workflowStatus === 'complete') {
+        if (job.workflowStatus === 'complete' && !importProgress(job).retryable) {
             const error = new Error('Import is already complete');
             error.statusCode = 409;
             throw error;

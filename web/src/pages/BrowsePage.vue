@@ -203,6 +203,15 @@ function openModelSettings() {
   router.push('/settings')
 }
 
+// 角色卡标签多选筛选（“或”关系，与本地控制台一致）
+const activeCharTags = ref<string[]>([])
+
+function toggleCharTag(tag: string) {
+  activeCharTags.value = activeCharTags.value.includes(tag)
+    ? activeCharTags.value.filter(item => item !== tag)
+    : [...activeCharTags.value, tag]
+}
+
 const popularTags = computed(() => {
   const counter = new Map<string, number>()
   for (const c of store.characters) {
@@ -215,7 +224,7 @@ const popularTags = computed(() => {
   }
   return [...counter.entries()]
     .sort((a, b) => b[1] - a[1])
-    .slice(0, 10)
+    .slice(0, 24)
     .map(([tag, count]) => ({ tag, count }))
 })
 
@@ -307,10 +316,6 @@ async function confirmCharacterStart(selection: CharacterStartSelection) {
   }
 }
 
-function openTag(tag: string) {
-  router.push({ path: '/characters', query: { q: tag } })
-}
-
 function getStoryCharacter(story: StoryCard): Character | undefined {
   return store.findCharacter(story.characterAvatar)
 }
@@ -387,6 +392,10 @@ const filteredCharacters = computed(() => {
         : 0
       return t && (now - t) < 7 * dayMs
     })
+  }
+  if (activeCharTags.value.length) {
+    const wanted = new Set(activeCharTags.value)
+    list = list.filter((c) => getCharacterTags(c).some((tag) => wanted.has(String(tag))))
   }
   if (searchQuery.value.trim()) {
     list = list.filter((c) =>
@@ -699,12 +708,23 @@ onMounted(loadBrowseData)
         </div>
 
         <!-- 标签单行横滑，避免标签多时把内容推下去 -->
-        <div v-if="popularTags.length && charFilter === 'all'" class="-mx-1 mb-5 flex gap-2 overflow-x-auto px-1 pb-1">
+        <div v-if="popularTags.length" class="-mx-1 mb-5 flex gap-2 overflow-x-auto px-1 pb-1" role="group" aria-label="标签筛选">
+          <button
+            v-if="activeCharTags.length"
+            class="shrink-0 text-sm px-3.5 py-1.5 rounded-full bg-brand-500/10 text-brand-300 ring-1 ring-brand-500/40 transition-all font-medium"
+            @click="activeCharTags = []"
+          >清除筛选</button>
           <button
             v-for="t in popularTags"
             :key="t.tag"
-            class="shrink-0 text-sm px-3.5 py-1.5 rounded-full bg-surface text-ink-secondary ring-1 ring-border-subtle hover:text-ink-primary hover:ring-brand-500/40 transition-all font-medium"
-            @click="openTag(t.tag)"
+            :class="[
+              'shrink-0 text-sm px-3.5 py-1.5 rounded-full ring-1 transition-all font-medium',
+              activeCharTags.includes(t.tag)
+                ? 'bg-brand-500/10 text-brand-300 ring-brand-500/60'
+                : 'bg-surface text-ink-secondary ring-border-subtle hover:text-ink-primary hover:ring-brand-500/40',
+            ]"
+            :aria-pressed="activeCharTags.includes(t.tag)"
+            @click="toggleCharTag(t.tag)"
           >
             #{{ t.tag }} <span class="text-ink-muted ml-0.5">{{ t.count }}</span>
           </button>
@@ -739,7 +759,7 @@ onMounted(loadBrowseData)
           :description="searchQuery.trim() ? '换个关键词，或重置筛选。' : '试试切换筛选条件。'"
         >
           <template #actions>
-            <AppButton size="md" variant="secondary" @click="charFilter = 'all'; searchQuery = ''">显示全部</AppButton>
+            <AppButton size="md" variant="secondary" @click="charFilter = 'all'; searchQuery = ''; activeCharTags = []">显示全部</AppButton>
           </template>
         </AppEmpty>
         <div v-else class="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">

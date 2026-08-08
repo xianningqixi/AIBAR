@@ -76,7 +76,7 @@
    - `character-card`：帖子可能提供受支持的角色卡体。
    - `web-app`：帖子提供可直接运行的公网 HTTPS 页面。
    - `unsupported`：只有压缩包、客户端、APK、源码、文档、截图或普通图片。
-7. 三个栏目全部收集完调用 `complete`：服务端全局按回应数降序排序并截取前 `limit` 张，按来源栏目生成 `period: "hot-top"` 的版本 1 manifest。结构、安全约束和字段定义以 [`discord-browser-import.md`](./discord-browser-import.md) 为准。
+7. 三个栏目全部收集完调用 `complete`：服务端先剔除历史任务里已发布过的卡（去重数量见 `dedupedImportedCount`），再全局按回应数降序排序并截取前 `limit` 张，按来源栏目生成 `period: "hot-top"` 的版本 1 manifest。热门帖大多已发布时，最终数量可能低于目标值，属正常现象。结构、安全约束和字段定义以 [`discord-browser-import.md`](./discord-browser-import.md) 为准。
 8. 逐批读取本地服务的 manifest 信封，并使用每批原 `batchId` 调用 `delivered`。不得把 manifest 载入 AIBAR 主项目。
 9. 打开本地控制台，确认榜单数量接近目标值、标签筛选可用、来源帖链接和可选状态正确。
 
@@ -101,7 +101,7 @@
 
 ## 4. Discord 下载流程
 
-对每个已授权角色卡逐项处理，单项失败不能回滚其他成功项。可同时在最多 3 个标签页处理不同帖子的 `/下载`（帖内交互与等待不因并行缩短）；本阶段只收集短期 CDN 链接与来源信息，不逐项打开 AIBAR。
+对每个已授权角色卡逐项处理，单项失败不能回滚其他成功项。`/下载` bot 按用户只维护一个下载会话：**交互必须严格串行**（同一时刻只有一个帖子在 /下载→版本选择→口令→取链接 流程中），并行标签页只用于预加载下一个帖子页面。bot 无响应按退避处理：单项两次无响应等 60 秒再试第三次；连续 2 项无响应视为 bot 冷却，暂停 3 分钟从当前项继续。本阶段只收集短期 CDN 链接与来源信息，不逐项打开 AIBAR。
 
 1. 打开帖子的 thread URL，不要为了执行 `/下载` 追加 message ID。
 2. 等待消息输入框真实出现。Discord 慢加载时至少再等待 3 秒后重试，不能第一次找不到控件就判为“无资源”。
@@ -110,7 +110,7 @@
 5. 按 Enter 提交，等待 `Odysseia-protect` 返回“版本选择”。
 6. 点击“请选择一个公开/受保护的版本进行下载...”按钮，再读取版本选项。
 7. 按 PNG > JSON > CHARX > BYAF > YAML 的优先级选择最新卡体文件。不要机械点击最后一项：最后一项可能是 ZIP/RAR 或安装包；主项目入口只接受这五种卡体格式。
-8. 若出现密码表单，从帖子可见正文或剧透中临时读取对应密码，填写并提交。不要输出或保存密码。
+8. 若出现密码表单，从帖子可见正文或剧透中临时读取对应密码，填写并提交。不要输出或保存密码。帖内找不到口令或口令无效时，该项写 `failed 需要资源口令（帖内未见）` 并继续下一项——单项障碍绝不把整单置为 `blocked`。
 9. 获取“点击这里下载”的短期 Discord CDN URL，并立即交给 AIBAR；签名链接会过期。
 10. 为每个取得链接的项记录 `url`、`cardId`、`threadId`、`channelId`、`sourceUrl`、`title`、`authorName`、`tags` 八个字段。
 11. 全部收集完成后，打开 `AIBAR_DISCORD_AIBAR_URL` 指定的正式服务器地址（不得使用 localhost、127.0.0.1、本地 Vite 或本地 SillyTavern），在“批量发布”卡片把条目组装成 JSON 数组粘贴进 `discord-batch-input`，点击 `discord-batch-submit`。服务器直接从 Discord CDN 抓取附件（内部 3 并发）并逐项导入发布；页面按每批 10 项自动分批。等待 `discord-batch-status` 的 `data-batch-state="done"`，逐项读取 `discord-batch-item` 的 `data-publish-status` 写回结果；随后立即丢弃全部短期 URL。批量入口异常时才退回单项入口（hash 查询参数带来源字段，逐项粘贴）。

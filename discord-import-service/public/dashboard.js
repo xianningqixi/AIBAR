@@ -43,6 +43,8 @@ const elements = Object.fromEntries([
 ].map(id => [id, document.getElementById(id)]))
 const selectedCardIds = new Set()
 const activeTagFilters = new Set()
+// 默认隐藏之前任务里出现过的卡：热度榜每次都会重复出现旧热卡，先看新的
+let showSeenCards = false
 let latestSnapshot = null
 let renderedJobId = ''
 
@@ -72,8 +74,9 @@ function launcherBusy() {
 
 // blocked 或 Worker 中途退出后，用已持久化的请求恢复发布；failed 项会被重试。
 function importResumable(job) {
-  return Boolean(job && job.status === 'delivered' && job.importRequestedCount > 0
-    && job.workflowStatus && job.workflowStatus !== 'complete')
+  if (!job || job.status !== 'delivered' || !job.importRequestedCount || !job.workflowStatus) return false
+  // complete 但存在 failed 可重试项时，仍提供“重试失败项”
+  return job.workflowStatus !== 'complete' || job.importRetryableCount > 0
 }
 
 function updateImportButton(job, selectableCount) {
@@ -86,7 +89,9 @@ function updateImportButton(job, selectableCount) {
     // remaining 为 0 但 workflow 未 complete：Worker 在收尾上报前退出，仍需重启确认。
     button.textContent = launcherBusy()
       ? '发布运行中'
-      : remaining ? `继续发布（剩余 ${remaining}）` : '继续发布（收尾确认）'
+      : job.workflowStatus === 'complete'
+        ? `重试失败项（${remaining}）`
+        : remaining ? `继续发布（剩余 ${remaining}）` : '继续发布（收尾确认）'
   } else {
     const locked = !job || job.status !== 'delivered' || job.importRequestedCount > 0
     button.dataset.mode = 'select'
@@ -97,7 +102,8 @@ function updateImportButton(job, selectableCount) {
         ? `已提交 ${job.importRequestedCount} 项`
         : `发布已选${selectedCardIds.size ? `（${selectedCardIds.size}）` : ''}`
   }
-  const filteredNote = activeTagFilters.size ? `已筛选 ${[...activeTagFilters].join('、')} · ` : ''
+  const dedupNote = job?.dedupedImportedCount ? `已去重 ${job.dedupedImportedCount} 张已发布 · ` : ''
+  const filteredNote = `${dedupNote}${activeTagFilters.size ? `已筛选 ${[...activeTagFilters].join('、')} · ` : ''}`
   elements['candidate-summary'].textContent = !job
     ? '等待同步列表'
     : job.sourceScopeComplete === false
@@ -112,14 +118,14 @@ function updateImportButton(job, selectableCount) {
   elements['clear-selection-button'].disabled = batchLocked || selectedCardIds.size === 0
 }
 
-function renderTagFilters(cards) {
+function renderTagFilters(cards, seenCount) {
   const container = elements['tag-filters']
   container.replaceChildren()
   const counts = new Map()
   for (const card of cards) {
     for (const tag of card.tags) counts.set(tag, (counts.get(tag) || 0) + 1)
   }
-  if (!counts.size) {
+  if (!counts.size && !seenCount) {
     container.hidden = true
     return
   }
@@ -150,6 +156,18 @@ function renderTagFilters(cards) {
     })
     container.append(chip)
   }
+  if (seenCount) {
+    const seenChip = document.createElement('button')
+    seenChip.type = 'button'
+    seenChip.className = `tag-chip tag-chip--seen${showSeenCards ? ' tag-chip--active' : ''}`
+    seenChip.textContent = showSeenCards ? `隐藏之前扫过 ${seenCount}` : `显示之前扫过 ${seenCount}`
+    seenChip.title = '之前任务榜单里出现过、但尚未发布的卡'
+    seenChip.addEventListener('click', () => {
+      showSeenCards = !showSeenCards
+      rerenderCandidates()
+    })
+    container.append(seenChip)
+  }
 }
 
 function visibleCardsOf(cards) {
@@ -167,14 +185,17 @@ function renderCards(cards, job) {
   if (renderedJobId !== (job?.id || '')) {
     selectedCardIds.clear()
     activeTagFilters.clear()
+    showSeenCards = false
     renderedJobId = job?.id || ''
   }
   const availableIds = new Set(cards.map(card => card.id))
   for (const cardId of selectedCardIds) {
     if (!availableIds.has(cardId)) selectedCardIds.delete(cardId)
   }
-  renderTagFilters(cards)
-  cards = visibleCardsOf(cards)
+  const seenCount = cards.filter(card => card.previouslySeen).length
+  const baseCards = showSeenCards ? cards : cards.filter(card => !card.previouslySeen)
+  renderTagFilters(baseCards, seenCount)
+  cards = visibleCardsOf(baseCards)
   if (!cards.length) {
     const row = document.createElement('tr')
     const empty = cell(
@@ -221,6 +242,12 @@ function renderCards(cards, job) {
     const author = document.createElement('small')
     author.textContent = card.authorName || '未知作者'
     titleCell.append(source, author)
+    if (card.previouslySeen) {
+      const seenBadge = document.createElement('span')
+      seenBadge.className = 'seen-badge'
+      seenBadge.textContent = '之前扫过'
+      titleCell.append(seenBadge)
+    }
 
     const [importLabel, importTone] = importStatusLabels[card.importStatus] || [
       card.selectable ? '待选择' : '无可用卡体',

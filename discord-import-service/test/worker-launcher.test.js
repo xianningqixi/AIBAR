@@ -106,9 +106,10 @@ test('public-publish prompts are one-shot and never wait for future requests', (
     assert.match(prompt, /不得读取、复制、输出或保存/);
     assert.match(prompt, /https:\/\/aibar\.example\/aibar\/#\/hub\?source=discord/);
     assert.match(prompt, /严禁改用 localhost、127\.0\.0\.1/);
-    // 两阶段批量流程：并行收集 + 一次批量提交
-    assert.match(prompt, /阶段A（收集 CDN 链接，可并行）/);
-    assert.match(prompt, /最多 3 个标签页/);
+    // 分轮批量流程：/下载 串行 + 退避，批量提交写回
+    assert.match(prompt, /阶段A（收集 CDN 链接）/);
+    assert.match(prompt, /严禁并行发起多个 \/下载/);
+    assert.match(prompt, /bot 在冷却，暂停 3 分钟/);
     assert.match(prompt, /discord-batch-input/);
     assert.match(prompt, /discord-batch-submit/);
     assert.match(prompt, /data-batch-state 变为 done/);
