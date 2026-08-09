@@ -10,6 +10,9 @@ on:
 permissions:
   contents: read
 
+env:
+  TAVERN_HELPER_COMMIT: 69ac6804cf0b2f060ca99c1db64aea6e00da39ee
+
 jobs:
   verify:
     runs-on: ubuntu-latest
@@ -17,6 +20,13 @@ jobs:
       - uses: actions/checkout@v5
         with:
           submodules: recursive
+
+      - name: Checkout pinned TavernHelper runtime
+        uses: actions/checkout@v5
+        with:
+          repository: N0VI028/JS-Slash-Runner
+          ref: ${{ env.TAVERN_HELPER_COMMIT }}
+          path: .vendor/tavern-helper
 
       - uses: actions/setup-node@v5
         with:
@@ -26,6 +36,12 @@ jobs:
             web/package-lock.json
             telegram-bot/package-lock.json
             SillyTavern/package-lock.json
+
+      - name: Verify TavernHelper release provisioning
+        run: |
+          stage_dir="${RUNNER_TEMP}/tavern-helper-smoke"
+          install -d -m 0755 "$stage_dir"
+          scripts/install-tavern-helper.sh .vendor/tavern-helper "$stage_dir"
 
       - name: Verify frontend
         working-directory: web
@@ -68,6 +84,13 @@ jobs:
         with:
           submodules: recursive
 
+      - name: Checkout pinned TavernHelper runtime
+        uses: actions/checkout@v5
+        with:
+          repository: N0VI028/JS-Slash-Runner
+          ref: ${{ env.TAVERN_HELPER_COMMIT }}
+          path: .vendor/tavern-helper
+
       - uses: actions/setup-node@v5
         with:
           node-version: 22
@@ -95,10 +118,12 @@ jobs:
           git -C SillyTavern archive --format=tar HEAD | tar -xf - -C "$stage_dir"
           install -d -m 0755 "$stage_dir/public"
           cp -R web/dist "$stage_dir/public/aibar"
+          scripts/install-tavern-helper.sh .vendor/tavern-helper "$stage_dir"
 
           {
             printf 'main_sha=%s\n' "$GITHUB_SHA"
             printf 'sillytavern_sha=%s\n' "$sillytavern_sha"
+            printf 'tavern_helper_sha=%s\n' "$TAVERN_HELPER_COMMIT"
             printf 'built_at=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
             printf 'github_run=%s/actions/runs/%s\n' "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY" "$GITHUB_RUN_ID"
           } > "$stage_dir/.aibar-release"
