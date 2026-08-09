@@ -18,6 +18,7 @@ import ChatTopBar from '@/components/chat/ChatTopBar.vue'
 import MessageList from '@/components/chat/MessageList.vue'
 import ChatInput from '@/components/chat/ChatInput.vue'
 import CharacterStartDialog from '@/components/chat/CharacterStartDialog.vue'
+import StCompatibilityDialog from '@/components/chat/StCompatibilityDialog.vue'
 import AppDrawer from '@/components/ui/AppDrawer.vue'
 import AppDialog from '@/components/ui/AppDialog.vue'
 import AppButton from '@/components/ui/AppButton.vue'
@@ -34,7 +35,7 @@ import { getApiErrorMessage } from '@/api/client'
 import { testConnection } from '@/api/generate'
 import { PROVIDER_VOICES, TTS_PROVIDERS } from '@/api/tts'
 import { deleteChat, exportChat, importChat, renameChat } from '@/api/chats'
-import { fetchCharacterChats, setCharacterChat } from '@/api/characters'
+import { fetchCharacter, fetchCharacterChats, setCharacterChat } from '@/api/characters'
 import { saveStory } from '@/api/stories'
 import { getChatDraftKey } from '@/lib/accountStorage'
 import { getProviderLabel } from '@/lib/providers'
@@ -43,6 +44,8 @@ import { formatModelPricing } from '@/lib/points'
 import { createChatFromCharacter } from '@/lib/storyStart'
 import type { CharacterStartSelection, ChatEntry, Character, ImageAsset, ModelProfile, TtsProvider } from '@/api/types'
 import type { ReplyDraftOption } from '@/lib/replyDraft'
+import { analyzeCharacterRuntime, type CharacterRuntimeAnalysis } from '@/lib/characterRuntime'
+import { launchStCompatibility } from '@/lib/stCompatibility'
 
 const route = useRoute()
 const router = useRouter()
@@ -73,6 +76,10 @@ const imagePrompt = ref('')
 const inputDraft = ref('')
 const newChatDialogOpen = ref(false)
 const creatingNewChat = ref(false)
+const compatibilityRequired = ref(false)
+const compatibilityDialogOpen = ref(false)
+const compatibilityLaunching = ref(false)
+const runtimeAnalysis = ref<CharacterRuntimeAnalysis | null>(null)
 
 // 右侧高级抽屉分组：模型 / 身份 / 记忆 / 世界与 MOD / 语音
 const drawerTab = ref('model')
@@ -125,18 +132,46 @@ watch(inputDraft, (value) => {
 
 async function initChat() {
   const avatar = routeAvatar.value
+  compatibilityRequired.value = false
+  compatibilityDialogOpen.value = false
+  runtimeAnalysis.value = null
   character.value = chars.findCharacter(avatar) || null
-  if (!character.value) {
-    await chars.load()
-    character.value = chars.findCharacter(avatar) || null
+  try {
+    character.value = await fetchCharacter(avatar)
+    chars.upsertCharacter(character.value)
+  } catch (error: unknown) {
+    ui.addToast(`角色加载失败：${getApiErrorMessage(error)}`, 'error')
+    router.push('/browse')
+    return
   }
   if (!character.value) {
     ui.addToast('角色未找到', 'error')
     router.push('/browse')
     return
   }
+  const analysis = analyzeCharacterRuntime(character.value)
+  if (analysis.requiresCompatibility) {
+    chat.reset()
+    runtimeAnalysis.value = analysis
+    compatibilityRequired.value = true
+    compatibilityDialogOpen.value = true
+    return
+  }
   await chat.loadChat(character.value, routeChatFile.value)
   await loadChatList()
+}
+
+async function confirmCompatibilityLaunch() {
+  if (!character.value || compatibilityLaunching.value) return
+  compatibilityLaunching.value = true
+  try {
+    await launchStCompatibility(character.value, {
+      chat: routeChatFile.value || character.value.chat || undefined,
+    })
+  } catch (error: unknown) {
+    compatibilityLaunching.value = false
+    ui.addToast(`进入兼容模式失败：${getApiErrorMessage(error)}`, 'error')
+  }
 }
 
 async function loadChatList() {
@@ -642,7 +677,49 @@ watch(() => route.fullPath, initChat)
 </script>
 
 <template>
-  <div v-if="chat.character" class="h-[100dvh] flex flex-col bg-bg">
+  <div v-if="compatibilityRequired && character && runtimeAnalysis" class="min-h-[100dvh] bg-bg">
+    <header class="border-b border-border-subtle bg-bg/95 px-4 py-3 backdrop-blur">
+      <div class="mx-auto flex max-w-4xl items-center justify-between gap-3">
+        <AppButton variant="ghost" size="sm" @click="router.push('/browse')">返回</AppButton>
+        <span class="truncate text-sm font-semibold text-ink-primary">{{ character.name }}</span>
+        <span class="rounded bg-amber-500/15 px-2 py-1 text-[11px] font-medium text-amber-700 ring-1 ring-amber-500/25">ST 兼容卡</span>
+      </div>
+    </header>
+    <main class="mx-auto grid max-w-4xl gap-6 px-5 py-10 md:grid-cols-[12rem_minmax(0,1fr)] md:px-8">
+      <img
+        :src="`/thumbnail?type=avatar&file=${encodeURIComponent(character.avatar)}`"
+        :alt="character.name"
+        class="aspect-[3/4] w-full max-w-48 rounded-md object-cover ring-1 ring-border"
+      />
+      <section class="min-w-0">
+        <p class="text-xs font-semibold text-amber-700">需要完整 SillyTavern 运行时</p>
+        <h1 class="mt-2 text-2xl font-semibold text-ink-primary">这张卡不会在简版聊天中打开</h1>
+        <p class="mt-3 max-w-2xl text-sm leading-7 text-ink-secondary">
+          已在读取聊天存档前停止。进入兼容模式后，世界书、正则、TavernHelper、MVU、iframe 和消息事件会由 ST 原生内核处理。
+        </p>
+        <div class="mt-5 flex flex-wrap gap-2">
+          <span
+            v-for="capability in runtimeAnalysis.capabilities"
+            :key="capability.id"
+            class="rounded bg-surface-sunken px-2.5 py-1 text-xs text-ink-secondary ring-1 ring-border-subtle"
+          >{{ capability.label }}<template v-if="capability.count"> · {{ capability.count }}</template></span>
+        </div>
+        <div class="mt-7 flex flex-wrap gap-3">
+          <AppButton @click="compatibilityDialogOpen = true">进入 ST 兼容模式</AppButton>
+          <AppButton variant="secondary" @click="router.push(`/character/${encodeURIComponent(character.avatar)}`)">查看角色详情</AppButton>
+        </div>
+      </section>
+    </main>
+    <StCompatibilityDialog
+      v-model="compatibilityDialogOpen"
+      :character="character"
+      :analysis="runtimeAnalysis"
+      :busy="compatibilityLaunching"
+      @confirm="confirmCompatibilityLaunch"
+    />
+  </div>
+
+  <div v-else-if="chat.character" class="h-[100dvh] flex flex-col bg-bg">
     <ChatTopBar
       :character="chat.character"
       :profile="chat.selectedProfile"
