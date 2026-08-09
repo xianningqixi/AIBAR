@@ -1,5 +1,6 @@
 import type { Character, ChatMessage, WorldInfoEntry, WorldInfoFile } from '@/api/types'
 import { getWorldInfo } from '@/api/worldInfo'
+import { analyzeCharacterBook } from './characterBook'
 
 const cache = new Map<string, WorldInfoFile>()
 let cacheGeneration = 0
@@ -118,13 +119,16 @@ export async function getMatchedWorldInfo(
   character: Character | null,
   messages: ChatMessage[],
 ): Promise<string> {
-  if (!worldName) return ''
-  const file = await loadWorldInfoFile(worldName)
-  if (!file) return ''
-  const entries = entryList(file)
+  const entries: WorldInfoEntry[] = []
+  if (worldName) {
+    const file = await loadWorldInfoFile(worldName)
+    if (file) entries.push(...entryList(file))
+  }
+
+  const embeddedBook = analyzeCharacterBook(character)
+  if (!embeddedBook.requiresCompatibility) entries.push(...embeddedBook.entries)
   if (!entries.length) return ''
   const scan = buildScanText(character, messages)
 
   return renderMatchedWorldInfo(entries, scan)
 }
-

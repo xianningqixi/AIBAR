@@ -21,6 +21,9 @@ export interface CharacterData {
 export interface Character {
   name: string
   avatar: string
+  spec?: string
+  spec_version?: string
+  json_data?: string
   chat?: string
   tags?: string[]
   description?: string
@@ -53,6 +56,8 @@ export interface ChatMessage {
   is_user?: boolean
   is_system?: boolean
   chat_metadata?: Record<string, unknown>
+  /** Exact ST JSONL message fields retained for lossless round-tripping. */
+  serverData?: Record<string, unknown>
 }
 
 export interface ChatEntry {

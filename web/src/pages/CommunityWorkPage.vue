@@ -20,8 +20,9 @@ import {
   type CommunityLaunchResult,
   type CommunityWorkDetail,
 } from '@/api/community'
-import { createChatFromCharacter, createChatFromStory } from '@/lib/storyStart'
+import { createCharacterChatName, createChatFromCharacter, createChatFromStory } from '@/lib/storyStart'
 import CharacterStartDialog from '@/components/chat/CharacterStartDialog.vue'
+import StCompatibilityDialog from '@/components/chat/StCompatibilityDialog.vue'
 import AppButton from '@/components/ui/AppButton.vue'
 import AppEmpty from '@/components/ui/AppEmpty.vue'
 import AppPageHeader from '@/components/ui/AppPageHeader.vue'
@@ -29,6 +30,8 @@ import AppSpinner from '@/components/ui/AppSpinner.vue'
 import AppTextarea from '@/components/ui/AppTextarea.vue'
 import { getApiErrorMessage } from '@/api/client'
 import type { Character, CharacterStartSelection } from '@/api/types'
+import { analyzeCharacterRuntime, type CharacterRuntimeAnalysis } from '@/lib/characterRuntime'
+import { launchStCompatibility } from '@/lib/stCompatibility'
 
 const route = useRoute()
 const router = useRouter()
@@ -44,6 +47,13 @@ const commenting = ref(false)
 const managing = ref(false)
 const startDialogOpen = ref(false)
 const pendingCharacterLaunch = ref<{
+  accountHandle: string
+  character: Character
+  launch: CommunityLaunchResult
+} | null>(null)
+const compatDialogOpen = ref(false)
+const compatAnalysis = ref<CharacterRuntimeAnalysis | null>(null)
+const pendingCompatLaunch = ref<{
   accountHandle: string
   character: Character
   launch: CommunityLaunchResult
@@ -214,6 +224,13 @@ async function useWork(versionId?: string) {
     if (!accountIsCurrent()) return
     chars.upsertCharacter(character)
     if (!launched.story) {
+      const analysis = analyzeCharacterRuntime(character)
+      if (analysis.requiresCompatibility) {
+        pendingCompatLaunch.value = { accountHandle, character, launch: launched }
+        compatAnalysis.value = analysis
+        compatDialogOpen.value = true
+        return
+      }
       pendingCharacterLaunch.value = { accountHandle, character, launch: launched }
       startDialogOpen.value = true
       return
@@ -225,6 +242,31 @@ async function useWork(versionId?: string) {
     ui.addToast(`${isMod.value ? '导入提示词' : '开始聊天'}失败：${getApiErrorMessage(e)}`, 'error')
   } finally {
     starting.value = false
+  }
+}
+
+async function confirmCompatibilityLaunch() {
+  const pending = pendingCompatLaunch.value
+  if (!pending || starting.value) return
+  const accountIsCurrent = () => pending.accountHandle && session.user?.handle === pending.accountHandle
+  starting.value = true
+  try {
+    if (!accountIsCurrent()) {
+      compatDialogOpen.value = false
+      pendingCompatLaunch.value = null
+      ui.addToast('登录账号已变化，请重新打开该作品', 'warning')
+      return
+    }
+    const chatId = createCharacterChatName(pending.character)
+    try {
+      await completeCommunityLaunch(pending.launch.launchId, chatId)
+    } catch (error) {
+      console.warn('Community compatibility launch tracking failed', error)
+    }
+    await launchStCompatibility(pending.character, { chat: chatId })
+  } catch (error: unknown) {
+    starting.value = false
+    ui.addToast(`进入兼容模式失败：${getApiErrorMessage(error)}`, 'error')
   }
 }
 
@@ -374,6 +416,13 @@ onMounted(load)
       :character="pendingCharacterLaunch?.character || null"
       :busy="starting"
       @start="confirmCommunityStart"
+    />
+    <StCompatibilityDialog
+      v-model="compatDialogOpen"
+      :character="pendingCompatLaunch?.character || null"
+      :analysis="compatAnalysis"
+      :busy="starting"
+      @confirm="confirmCompatibilityLaunch"
     />
   </div>
 </template>

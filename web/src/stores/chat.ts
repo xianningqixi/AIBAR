@@ -44,6 +44,7 @@ export const useChatStore = defineStore('chat', () => {
   let replyDraftRequestId = 0
   const messages = ref<ChatMessage[]>([])
   const metadata = ref<Record<string, unknown>>({})
+  const serverHeader = ref<Record<string, unknown> | undefined>()
   const character = ref<Character | null>(null)
   const currentChatFile = ref('')
   const selectedProfileId = ref('')
@@ -86,6 +87,7 @@ export const useChatStore = defineStore('chat', () => {
     streaming.value.controller?.abort()
     messages.value = []
     metadata.value = {}
+    serverHeader.value = undefined
     character.value = null
     currentChatFile.value = ''
     selectedProfileId.value = ''
@@ -124,6 +126,7 @@ export const useChatStore = defineStore('chat', () => {
       if (requestId !== loadRequestId || epoch !== chatEpoch) return
       messages.value = result.messages.map(normalizeSwipeMessage)
       metadata.value = result.metadata
+      serverHeader.value = result.serverHeader
       ready.value = true
     } catch (e) {
       if (requestId !== loadRequestId || epoch !== chatEpoch) return
@@ -170,6 +173,7 @@ export const useChatStore = defineStore('chat', () => {
       currentCharacter.avatar,
       messages.value,
       metadata.value,
+      serverHeader.value,
     )
   }
 

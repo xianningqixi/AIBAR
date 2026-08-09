@@ -18,12 +18,15 @@ import { stripJsonlName } from '@/lib/format'
 import { getApiErrorMessage } from '@/api/client'
 import type { Character, CharacterStartSelection, ChatEntry, StoryCard } from '@/api/types'
 import CharacterStartDialog from '@/components/chat/CharacterStartDialog.vue'
+import StCompatibilityDialog from '@/components/chat/StCompatibilityDialog.vue'
 import AppButton from '@/components/ui/AppButton.vue'
 import AppCard from '@/components/ui/AppCard.vue'
 import AppPageHeader from '@/components/ui/AppPageHeader.vue'
 import AppEmpty from '@/components/ui/AppEmpty.vue'
 import AppSpinner from '@/components/ui/AppSpinner.vue'
 import ModPicker from '@/components/mods/ModPicker.vue'
+import { analyzeCharacterRuntime } from '@/lib/characterRuntime'
+import { launchStCompatibility } from '@/lib/stCompatibility'
 
 const route = useRoute()
 const router = useRouter()
@@ -41,6 +44,13 @@ const loading = ref(false)
 const startingWithMods = ref(false)
 const startDialogOpen = ref(false)
 const savingGreetingIndex = ref<number | null>(null)
+const compatDialogOpen = ref(false)
+const compatLaunching = ref(false)
+const pendingCompatChat = ref('')
+
+const runtimeAnalysis = computed(() => (
+  character.value ? analyzeCharacterRuntime(character.value) : null
+))
 
 const tags = computed(() => {
   return character.value?.tags?.length
@@ -72,6 +82,11 @@ async function loadData() {
 
 function openChat(file?: string) {
   if (!character.value) return
+  if (runtimeAnalysis.value?.requiresCompatibility) {
+    pendingCompatChat.value = file?.replace(/\.jsonl$/i, '') || ''
+    compatDialogOpen.value = true
+    return
+  }
   const query = file ? { chat: file.replace(/\.jsonl$/i, '') } : undefined
   router.push({
     path: `/chat/${encodeURIComponent(character.value.avatar)}`,
@@ -120,7 +135,25 @@ async function startStory(story: StoryCard) {
 }
 
 function startCharacterWithMods() {
+  if (runtimeAnalysis.value?.requiresCompatibility) {
+    pendingCompatChat.value = ''
+    compatDialogOpen.value = true
+    return
+  }
   startDialogOpen.value = true
+}
+
+async function confirmCompatibilityLaunch() {
+  if (!character.value || compatLaunching.value) return
+  compatLaunching.value = true
+  try {
+    await launchStCompatibility(character.value, {
+      chat: pendingCompatChat.value || undefined,
+    })
+  } catch (e: unknown) {
+    compatLaunching.value = false
+    ui.addToast(`进入兼容模式失败：${getApiErrorMessage(e)}`, 'error')
+  }
 }
 
 async function confirmCharacterStart(selection: CharacterStartSelection) {
@@ -210,6 +243,7 @@ async function duplicateCharacter() {
       post_history_instructions: character.value.data?.post_history_instructions || '',
       alternate_greetings: (character.value.data?.alternate_greetings || []).join('\n'),
       world: character.value.data?.world || '',
+      json_data: character.value.json_data,
     }
     const { createCharacter } = await import('@/api/characters')
     const result = await createCharacter(next)
@@ -293,6 +327,10 @@ onMounted(loadData)
               <span v-if="character.data?.character_version" class="text-[11px] text-ink-muted bg-surface/70 backdrop-blur ring-1 ring-border-subtle px-1.5 py-0.5 rounded">
                 v{{ character.data.character_version }}
               </span>
+              <span
+                v-if="runtimeAnalysis?.requiresCompatibility"
+                class="rounded bg-amber-500/15 px-2 py-0.5 text-[11px] font-medium text-amber-700 ring-1 ring-amber-500/25"
+              >ST 兼容卡</span>
             </div>
             <div class="flex flex-wrap items-center gap-3 text-xs text-ink-muted">
               <span v-if="character.data?.creator">作者 · {{ character.data.creator }}</span>
@@ -318,7 +356,7 @@ onMounted(loadData)
                 <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
                 </svg>
-                开始对话
+                {{ runtimeAnalysis?.requiresCompatibility ? '进入兼容模式' : '开始对话' }}
               </AppButton>
               <AppButton variant="secondary" @click="router.push(`/character/${encodeURIComponent(character.avatar)}/edit`)">编辑角色</AppButton>
               <AppButton variant="secondary" @click="router.push({ path: '/story/new', query: { avatar: character.avatar } })">新建故事</AppButton>
@@ -484,6 +522,13 @@ onMounted(loadData)
         :character="character"
         :busy="startingWithMods"
         @start="confirmCharacterStart"
+      />
+      <StCompatibilityDialog
+        v-model="compatDialogOpen"
+        :character="character"
+        :analysis="runtimeAnalysis"
+        :busy="compatLaunching"
+        @confirm="confirmCompatibilityLaunch"
       />
     </main>
   </div>

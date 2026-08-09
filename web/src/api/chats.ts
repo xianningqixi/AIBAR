@@ -1,7 +1,7 @@
 import { apiPost, apiPostForm } from './client'
 import type { ChatMessage, ChatEntry } from './types'
 
-type ServerChatMessage = {
+export type ServerChatMessage = Record<string, unknown> & {
   chat_metadata?: Record<string, unknown>
   mes?: string
   is_user?: boolean
@@ -11,7 +11,7 @@ type ServerChatMessage = {
   swipes?: string[]
   swipe_id?: number
   name?: string
-  extra?: { aibar?: { images?: ChatMessage['images'] } }
+  extra?: { aibar?: { images?: ChatMessage['images']; [key: string]: unknown }; [key: string]: unknown }
 }
 
 // 后端 /api/chats/get 的 strict 契约（SillyTavern/src/endpoints/chats.js）：
@@ -29,7 +29,11 @@ export async function fetchChat(
   chName: string,
   fileName: string,
   avatarUrl: string,
-): Promise<{ metadata: Record<string, unknown>; messages: ChatMessage[] }> {
+): Promise<{
+  metadata: Record<string, unknown>
+  messages: ChatMessage[]
+  serverHeader?: Record<string, unknown>
+}> {
   // strict：让后端在读不动 / 解析失败时返回 500，而不是伪装成空聊天
   const data = await apiPost<unknown>('/api/chats/get', {
     ch_name: chName,
@@ -44,10 +48,14 @@ export async function fetchChat(
     ...(header?.chat_metadata || {}),
   }
   const messages: ChatMessage[] = arr
-    .filter((m) => m && !m.chat_metadata && m.mes)
+    .filter((m) => m && !m.chat_metadata && typeof m.mes === 'string')
     .map(mapServerMessage)
 
-  return { metadata, messages }
+  return {
+    metadata,
+    messages,
+    serverHeader: header ? { ...header } : undefined,
+  }
 }
 
 export async function saveChat(
@@ -56,13 +64,21 @@ export async function saveChat(
   avatarUrl: string,
   messages: ChatMessage[],
   metadata?: Record<string, unknown>,
+  serverHeader?: Record<string, unknown>,
 ): Promise<unknown> {
+  const originalMetadata = (
+    serverHeader?.chat_metadata
+    && typeof serverHeader.chat_metadata === 'object'
+    && !Array.isArray(serverHeader.chat_metadata)
+  ) ? serverHeader.chat_metadata as Record<string, unknown> : {}
   const chatHeader = {
+    ...(serverHeader || {}),
     chat_metadata: {
+      ...originalMetadata,
       simple_ui: true,
       ...(metadata || {}),
     },
-    user_name: 'User',
+    user_name: serverHeader?.user_name || 'User',
     character_name: chName,
   }
   return apiPost('/api/chats/save', {
@@ -154,27 +170,45 @@ export async function importChat(
 
 function mapServerMessage(m: ServerChatMessage): ChatMessage {
   const isUser = m.is_user === true || m.role === 'user'
+  const isSystem = m.is_system === true || m.role === 'system'
   const images = Array.isArray(m.extra?.aibar?.images) ? m.extra.aibar.images : []
   return {
-    role: isUser ? 'user' : 'assistant',
+    role: isSystem ? 'system' : isUser ? 'user' : 'assistant',
     content: m.mes || '',
     date: m.send_date || m.date || new Date().toISOString(),
     swipes: m.swipes || [],
     swipe_id: m.swipe_id,
     name: m.name,
     images,
+    serverData: { ...m },
   }
 }
 
 function mapClientMessage(m: ChatMessage, chName: string): Record<string, unknown> {
   const isUser = m.role === 'user'
+  const isSystem = m.role === 'system'
+  const original = m.serverData || {}
+  const originalExtra = (
+    original.extra
+    && typeof original.extra === 'object'
+    && !Array.isArray(original.extra)
+  ) ? original.extra as Record<string, unknown> : {}
+  const originalAibar = (
+    originalExtra.aibar
+    && typeof originalExtra.aibar === 'object'
+    && !Array.isArray(originalExtra.aibar)
+  ) ? originalExtra.aibar as Record<string, unknown> : {}
   return {
+    ...original,
     name: m.name || (isUser ? 'User' : chName || 'Character'),
     is_user: isUser,
+    is_system: isSystem,
     send_date: m.date || new Date().toISOString(),
     mes: m.content,
     extra: {
+      ...originalExtra,
       aibar: {
+        ...originalAibar,
         images: m.images || [],
       },
     },

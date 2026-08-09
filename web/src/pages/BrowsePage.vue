@@ -8,6 +8,7 @@ import { useSessionStore } from '@/stores/session'
 import type { Character, CharacterStartSelection, ChatEntry, ModelProfile, StoryCard } from '@/api/types'
 import { useStoriesStore } from '@/stores/stories'
 import CharacterStartDialog from '@/components/chat/CharacterStartDialog.vue'
+import StCompatibilityDialog from '@/components/chat/StCompatibilityDialog.vue'
 import AppButton from '@/components/ui/AppButton.vue'
 import AppDrawer from '@/components/ui/AppDrawer.vue'
 import AppEmpty from '@/components/ui/AppEmpty.vue'
@@ -19,6 +20,8 @@ import { stripJsonlName } from '@/lib/format'
 import { createChatFromCharacter } from '@/lib/storyStart'
 import { getProviderLabel } from '@/lib/providers'
 import { formatModelPricing } from '@/lib/points'
+import { analyzeCharacterRuntime, type CharacterRuntimeAnalysis } from '@/lib/characterRuntime'
+import { fetchCharacterForRuntime, launchStCompatibility } from '@/lib/stCompatibility'
 
 type BrowseTab = 'characters' | 'stories' | 'chats'
 
@@ -46,6 +49,11 @@ const startDialogOpen = ref(false)
 const startCharacter = ref<Character | null>(null)
 const modelPickerOpen = ref(false)
 const searchQuery = ref('')
+const compatDialogOpen = ref(false)
+const compatLaunching = ref(false)
+const compatCharacter = ref<Character | null>(null)
+const compatAnalysis = ref<CharacterRuntimeAnalysis | null>(null)
+const pendingCompatChat = ref('')
 
 const searchPlaceholder = computed(() => {
   if (activeTab.value === 'stories') return '搜索故事卡（标题、简介、标签）…'
@@ -228,9 +236,42 @@ const popularTags = computed(() => {
     .map(([tag, count]) => ({ tag, count }))
 })
 
-function openCharacter(character: Character) {
-  startCharacter.value = character
-  startDialogOpen.value = true
+async function resolveRuntime(character: Character, chat = ''): Promise<boolean> {
+  const fullCharacter = await fetchCharacterForRuntime(character)
+  store.upsertCharacter(fullCharacter)
+  const analysis = analyzeCharacterRuntime(fullCharacter)
+  if (!analysis.requiresCompatibility) {
+    startCharacter.value = fullCharacter
+    return false
+  }
+
+  compatCharacter.value = fullCharacter
+  compatAnalysis.value = analysis
+  pendingCompatChat.value = chat.replace(/\.jsonl$/i, '')
+  compatDialogOpen.value = true
+  return true
+}
+
+async function openCharacter(character: Character) {
+  try {
+    if (await resolveRuntime(character)) return
+    startDialogOpen.value = true
+  } catch (e: unknown) {
+    ui.addToast(`读取角色卡失败：${getApiErrorMessage(e)}`, 'error')
+  }
+}
+
+async function confirmCompatibilityLaunch() {
+  if (!compatCharacter.value || compatLaunching.value) return
+  compatLaunching.value = true
+  try {
+    await launchStCompatibility(compatCharacter.value, {
+      chat: pendingCompatChat.value || undefined,
+    })
+  } catch (e: unknown) {
+    compatLaunching.value = false
+    ui.addToast(`进入兼容模式失败：${getApiErrorMessage(e)}`, 'error')
+  }
 }
 
 function getChatCharacter(entry: ChatEntry): Character | undefined {
@@ -261,10 +302,19 @@ function getChatTitle(entry: ChatEntry): string {
   return entry.file_id || stripJsonlName(entry.file_name)
 }
 
-function openChatEntry(entry: ChatEntry) {
+async function openChatEntry(entry: ChatEntry) {
   if (!entry.avatar) {
     ui.addToast('暂不支持从简版 UI 打开群组聊天', 'warning')
     return
+  }
+  const entryCharacter = getChatCharacter(entry)
+  if (entryCharacter) {
+    try {
+      if (await resolveRuntime(entryCharacter, entry.file_name)) return
+    } catch (e: unknown) {
+      ui.addToast(`读取角色卡失败：${getApiErrorMessage(e)}`, 'error')
+      return
+    }
   }
   router.push({
     path: `/chat/${encodeURIComponent(entry.avatar)}`,
@@ -278,7 +328,7 @@ function pickRandom() {
     ui.addToast('还没有角色,先导入或新建一个吧', 'warning')
     return
   }
-  openCharacter(pool[Math.floor(Math.random() * pool.length)])
+  void openCharacter(pool[Math.floor(Math.random() * pool.length)])
 }
 
 function startNewChat() {
@@ -289,7 +339,7 @@ function startNewChat() {
     return
   }
 
-  openCharacter(pool[Math.floor(Math.random() * pool.length)])
+  void openCharacter(pool[Math.floor(Math.random() * pool.length)])
 }
 
 async function confirmCharacterStart(selection: CharacterStartSelection) {
@@ -976,6 +1026,13 @@ onMounted(loadBrowseData)
         :character="startCharacter"
         :busy="startingNewChat"
         @start="confirmCharacterStart"
+      />
+      <StCompatibilityDialog
+        v-model="compatDialogOpen"
+        :character="compatCharacter"
+        :analysis="compatAnalysis"
+        :busy="compatLaunching"
+        @confirm="confirmCompatibilityLaunch"
       />
     </main>
   </div>

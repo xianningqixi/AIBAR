@@ -118,7 +118,9 @@ function payload() {
       .split('\n')
       .map((item) => item.trim())
       .filter(Boolean),
-    json_data: original.value ? JSON.stringify(original.value) : undefined,
+    // Start from the exact embedded Tavern Card JSON so V3 extensions and
+    // unknown vendor fields survive edits made through the simplified form.
+    json_data: original.value?.json_data,
     chat: original.value?.chat,
     create_date: original.value?.create_date,
   }
