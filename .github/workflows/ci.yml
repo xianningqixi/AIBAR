@@ -12,6 +12,7 @@ permissions:
 
 env:
   TAVERN_HELPER_COMMIT: 69ac6804cf0b2f060ca99c1db64aea6e00da39ee
+  PROMPT_TEMPLATE_COMMIT: c80a572839f99a2aaf3d91cf9b7ebfc202c4ef0b
 
 jobs:
   verify:
@@ -28,6 +29,13 @@ jobs:
           ref: ${{ env.TAVERN_HELPER_COMMIT }}
           path: .vendor/tavern-helper
 
+      - name: Checkout pinned Prompt Template runtime
+        uses: actions/checkout@v5
+        with:
+          repository: zonde306/ST-Prompt-Template
+          ref: ${{ env.PROMPT_TEMPLATE_COMMIT }}
+          path: .vendor/prompt-template
+
       - uses: actions/setup-node@v5
         with:
           node-version: 22
@@ -42,6 +50,12 @@ jobs:
           stage_dir="${RUNNER_TEMP}/tavern-helper-smoke"
           install -d -m 0755 "$stage_dir"
           scripts/install-tavern-helper.sh .vendor/tavern-helper "$stage_dir"
+
+      - name: Verify Prompt Template release provisioning
+        run: |
+          stage_dir="${RUNNER_TEMP}/prompt-template-smoke"
+          install -d -m 0755 "$stage_dir"
+          scripts/install-prompt-template.sh .vendor/prompt-template "$stage_dir"
 
       - name: Verify frontend
         working-directory: web
@@ -91,6 +105,13 @@ jobs:
           ref: ${{ env.TAVERN_HELPER_COMMIT }}
           path: .vendor/tavern-helper
 
+      - name: Checkout pinned Prompt Template runtime
+        uses: actions/checkout@v5
+        with:
+          repository: zonde306/ST-Prompt-Template
+          ref: ${{ env.PROMPT_TEMPLATE_COMMIT }}
+          path: .vendor/prompt-template
+
       - uses: actions/setup-node@v5
         with:
           node-version: 22
@@ -119,11 +140,13 @@ jobs:
           install -d -m 0755 "$stage_dir/public"
           cp -R web/dist "$stage_dir/public/aibar"
           scripts/install-tavern-helper.sh .vendor/tavern-helper "$stage_dir"
+          scripts/install-prompt-template.sh .vendor/prompt-template "$stage_dir"
 
           {
             printf 'main_sha=%s\n' "$GITHUB_SHA"
             printf 'sillytavern_sha=%s\n' "$sillytavern_sha"
             printf 'tavern_helper_sha=%s\n' "$TAVERN_HELPER_COMMIT"
+            printf 'prompt_template_sha=%s\n' "$PROMPT_TEMPLATE_COMMIT"
             printf 'built_at=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
             printf 'github_run=%s/actions/runs/%s\n' "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY" "$GITHUB_RUN_ID"
           } > "$stage_dir/.aibar-release"
