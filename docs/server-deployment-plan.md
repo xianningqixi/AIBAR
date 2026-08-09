@@ -494,7 +494,7 @@ server {
 
     # 复杂 Tavern Card 经用户确认后进入原生 ST 兼容运行时。这里只放行
     # 前端壳与静态资源；账号、角色、聊天和扩展数据仍由 ST 自己鉴权。
-    location ~ ^/(st-compat/?|script\.js|style\.css|manifest\.json|favicon\.ico|version)$ {
+    location ~ ^/(st-compat/?|script\.js|lib\.js|style\.css|manifest\.json|favicon\.ico|version)$ {
         proxy_pass http://127.0.0.1:8001;
         include /etc/nginx/proxy-common.conf;
     }
@@ -554,7 +554,7 @@ server {
         proxy_pass http://127.0.0.1:8001;
         include /etc/nginx/proxy-common.conf;
     }
-    location ~ ^/(st-compat/?|script\.js|style\.css|manifest\.json|favicon\.ico|version)$ {
+    location ~ ^/(st-compat/?|script\.js|lib\.js|style\.css|manifest\.json|favicon\.ico|version)$ {
         proxy_pass http://127.0.0.1:8001;
         include /etc/nginx/proxy-common.conf;
     }
