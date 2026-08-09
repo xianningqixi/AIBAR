@@ -18,6 +18,43 @@ describe('analyzeCharacterRuntime', () => {
     expect(result.capabilities).toEqual([])
   })
 
+  it('keeps cards with a basic embedded world book in the AIBAR runtime', () => {
+    const result = analyzeCharacterRuntime(character({
+      name: '港口向导',
+      character_book: {
+        entries: [{
+          keys: ['港口'],
+          content: '港口会在午夜关闭。',
+          enabled: true,
+          extensions: { probability: 100, useProbability: true, depth: 4, position: 0 },
+        }],
+      },
+    }))
+
+    expect(result.runtime).toBe('aibar')
+    expect(result.worldBookEntries).toBe(1)
+  })
+
+  it('routes cards with depth-injected world-book entries to ST', () => {
+    const result = analyzeCharacterRuntime(character({
+      name: '状态卡',
+      character_book: {
+        entries: [{
+          keys: ['状态'],
+          content: '运行时状态',
+          extensions: { position: 4, depth: 2 },
+        }],
+      },
+    }))
+
+    expect(result.runtime).toBe('st-compat')
+    expect(result.capabilities).toContainEqual({
+      id: 'world-book',
+      label: '高级内嵌世界书',
+      count: 1,
+    })
+  })
+
   it('routes executable Tavern Card V3 features to ST compatibility mode', () => {
     const result = analyzeCharacterRuntime(character({
       name: '复杂角色',

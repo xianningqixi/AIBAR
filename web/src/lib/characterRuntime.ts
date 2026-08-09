@@ -1,4 +1,5 @@
 import type { Character } from '@/api/types'
+import { analyzeCharacterBook } from './characterBook'
 
 export type CharacterRuntimeRisk = 'content' | 'local-scripts' | 'remote-code'
 
@@ -47,8 +48,8 @@ function serializeForDetection(value: unknown): string {
 export function analyzeCharacterRuntime(character: Character): CharacterRuntimeAnalysis {
   const data = asRecord(character.data)
   const extensions = asRecord(data.extensions)
-  const characterBook = asRecord(data.character_book)
-  const worldBookEntries = countCollection(characterBook.entries)
+  const characterBook = analyzeCharacterBook(character)
+  const worldBookEntries = characterBook.entryCount
   const regexScripts = countCollection(extensions.regex_scripts)
   const tavernHelper = asRecord(extensions.tavern_helper)
   const helperScripts = countCollection(tavernHelper.scripts)
@@ -69,7 +70,13 @@ export function analyzeCharacterRuntime(character: Character): CharacterRuntimeA
   )
 
   const capabilities: CharacterRuntimeCapability[] = []
-  if (worldBookEntries) capabilities.push({ id: 'world-book', label: '内嵌世界书', count: worldBookEntries })
+  if (worldBookEntries) {
+    capabilities.push({
+      id: 'world-book',
+      label: characterBook.requiresCompatibility ? '高级内嵌世界书' : '内嵌世界书',
+      count: worldBookEntries,
+    })
+  }
   if (regexScripts) capabilities.push({ id: 'regex', label: '角色正则', count: regexScripts })
   if (helperScripts) capabilities.push({ id: 'tavern-helper', label: 'TavernHelper 脚本', count: helperScripts })
   if (depthPromptText) capabilities.push({ id: 'depth-prompt', label: '深度提示词' })
@@ -78,7 +85,7 @@ export function analyzeCharacterRuntime(character: Character): CharacterRuntimeA
   if (usesMvu) capabilities.push({ id: 'mvu', label: 'MVU 变量运行时' })
 
   const requiresCompatibility = Boolean(
-    worldBookEntries
+    characterBook.requiresCompatibility
     || regexScripts
     || helperScripts
     || depthPromptText

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { WorldInfoEntry } from '@/api/types'
-import { renderMatchedWorldInfo } from './worldInfoMatch'
+import { getMatchedWorldInfo, renderMatchedWorldInfo } from './worldInfoMatch'
 
 function entry(overrides: Partial<WorldInfoEntry>): WorldInfoEntry {
   return {
@@ -39,5 +39,26 @@ describe('renderMatchedWorldInfo', () => {
     ]
 
     expect(renderMatchedWorldInfo(entries, 'primary', 8)).toBe('highest\n\nalways-include')
+  })
+
+  it('matches a basic embedded Tavern Card world book without an external world file', async () => {
+    const result = await getMatchedWorldInfo('', {
+      name: 'Harbor guide',
+      avatar: 'harbor.png',
+      data: {
+        name: 'Harbor guide',
+        character_book: {
+          entries: [{
+            keys: ['harbor'],
+            content: 'The harbor closes at midnight.',
+            insertion_order: 10,
+            enabled: true,
+            extensions: { probability: 100, useProbability: true, depth: 4, position: 0 },
+          }],
+        },
+      },
+    }, [])
+
+    expect(result).toBe('The harbor closes at midnight.')
   })
 })
