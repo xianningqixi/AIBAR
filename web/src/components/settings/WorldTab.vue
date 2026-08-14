@@ -2,6 +2,7 @@
 import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useUiStore } from '@/stores/ui'
+import { promptDialog } from '@/composables/useDialog'
 import AppButton from '@/components/ui/AppButton.vue'
 import AppTextarea from '@/components/ui/AppTextarea.vue'
 import AppCard from '@/components/ui/AppCard.vue'
@@ -166,7 +167,7 @@ async function importWorldClick() {
 }
 
 async function createWorld() {
-  const name = window.prompt('新世界书名称', 'AIBAR 示例世界书')
+  const name = await promptDialog({ title: '新世界书名称', defaultValue: 'AIBAR 示例世界书' })
   const trimmed = name?.trim()
   if (!trimmed) return
   try {

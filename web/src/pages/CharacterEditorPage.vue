@@ -9,9 +9,10 @@ import { useImageGenStore } from '@/stores/imageGen'
 import { useWorldInfoStore } from '@/stores/worldInfo'
 import { generateReply } from '@/api/generate'
 import { getApiErrorMessage } from '@/api/client'
+import { confirmDialog } from '@/composables/useDialog'
 import { buildGeneratePayload } from '@/lib/buildPayload'
 import { getMatchedWorldInfo } from '@/lib/worldInfoMatch'
-import type { Character, ImageAsset, ModelProfile } from '@/api/types'
+import type { Character, ImageAsset } from '@/api/types'
 import AppButton from '@/components/ui/AppButton.vue'
 import AppInput from '@/components/ui/AppInput.vue'
 import AppSelect from '@/components/ui/AppSelect.vue'
@@ -25,9 +26,9 @@ import {
   buildCharacterDraftPayload,
   buildCharacterDraftQuestionsPayload,
   parseCharacterDraft,
-  parseDraftQuestions,
-  type DraftQuestion,
+  type CharacterDraft,
 } from '@/lib/aiDraft'
+import { useAiDraft } from '@/composables/useAiDraft'
 import { buildCharacterImagePrompt } from '@/lib/imagePrompts'
 
 const route = useRoute()
@@ -80,14 +81,39 @@ const test = reactive({
   error: '',
 })
 
-const draft = reactive({
-  profileId: '',
-  idea: '',
-  questions: [] as DraftQuestion[],
-  answers: {} as Record<string, string>,
-  asking: false,
-  loading: false,
-  error: '',
+const {
+  draft,
+  getDraftProfile,
+  defaultDraftProfileId,
+  selectDraftOption,
+  useCustomDraftAnswer,
+  isDraftOptionSelected,
+  isCustomDraftAnswer,
+  askDraftQuestions,
+  draftWithAi,
+} = useAiDraft<CharacterDraft>({
+  ideaRequiredMessage: '先写一句你想要的角色方向',
+  draftReadyMessage: 'AI 初稿已填入表单，可以继续手改',
+  buildQuestionsPayload: (profile, idea) => buildCharacterDraftQuestionsPayload(profile, idea, { ...form }),
+  buildDraftPayload: (profile, idea, guidance) => buildCharacterDraftPayload(profile, idea, { ...form }, guidance),
+  parseDraft: parseCharacterDraft,
+  applyDraft: (result) => {
+    if (result.ch_name) form.ch_name = result.ch_name
+    if (result.description) form.description = result.description
+    if (result.personality) form.personality = result.personality
+    if (result.scenario) form.scenario = result.scenario
+    if (result.first_mes) form.first_mes = result.first_mes
+    if (result.mes_example) form.mes_example = result.mes_example
+    if (result.creator_notes) form.creator_notes = result.creator_notes
+    if (result.tags.length) form.tags = result.tags.join(', ')
+    if (result.system_prompt) form.system_prompt = result.system_prompt
+    if (result.post_history_instructions) {
+      form.post_history_instructions = result.post_history_instructions
+    }
+    if (result.alternate_greetings.length) {
+      form.alternate_greetings = result.alternate_greetings.join('\n')
+    }
+  },
 })
 
 function fillForm(character: Character) {
@@ -126,136 +152,14 @@ function payload() {
   }
 }
 
-function getDraftProfile() {
-  return models.getProfile(draft.profileId) || models.activeProfile
-}
-
-function isLocalPlaceholderProfile(profile?: ModelProfile): boolean {
-  return Boolean(profile?.source === 'custom' && /(?:127\.0\.0\.1|localhost):11434/i.test(profile.endpoint || ''))
-}
-
-function defaultDraftProfileId(): string {
-  const active = models.getProfile(models.activeProfileId)
-  if (active && !isLocalPlaceholderProfile(active)) return active.id
-  const remote = models.profiles.find((profile) => (
-    profile.id !== active?.id
-    && !isLocalPlaceholderProfile(profile)
-    && (profile.apiKeySaved || profile.secretId)
-  ))
-  return remote?.id || active?.id || models.profiles[0]?.id || ''
-}
-
-function draftAnswersText(): string {
-  return draft.questions
-    .map((item, index) => {
-      const answer = (draft.answers[item.id] || '').trim()
-      return answer ? `Q${index + 1}: ${item.question}\nA${index + 1}: ${answer}` : ''
-    })
-    .filter(Boolean)
-    .join('\n\n')
-}
-
-function selectDraftOption(question: DraftQuestion, option: string) {
-  draft.answers[question.id] = option
-}
-
-function useCustomDraftAnswer(question: DraftQuestion) {
-  draft.answers[question.id] = ''
-}
-
-function isDraftOptionSelected(question: DraftQuestion, option: string): boolean {
-  return (draft.answers[question.id] || '').trim() === option
-}
-
-function isCustomDraftAnswer(question: DraftQuestion): boolean {
-  const answer = (draft.answers[question.id] || '').trim()
-  return Boolean(answer) && !question.options.includes(answer)
-}
-
-async function askDraftQuestions() {
-  if (!draft.idea.trim()) {
-    ui.addToast('先写一句你想要的角色方向', 'warning')
-    return
-  }
-  const profile = getDraftProfile()
-  if (!profile) {
-    ui.addToast('未配置可用模型', 'warning')
-    return
-  }
-
-  draft.asking = true
-  draft.error = ''
-  try {
-    const reply = await generateReply(
-      buildCharacterDraftQuestionsPayload(profile, draft.idea, { ...form }),
-    )
-    const questions = parseDraftQuestions(reply)
-    if (!questions.length) throw new Error('模型没有返回有效问题')
-    const nextAnswers: Record<string, string> = {}
-    for (const question of questions) {
-      nextAnswers[question.id] = draft.answers[question.id] || ''
-    }
-    draft.questions = questions
-    draft.answers = nextAnswers
-    ui.addToast('问题已生成，按你的偏好回答后再生成', 'success')
-  } catch (e: unknown) {
-    draft.error = getApiErrorMessage(e, '追问生成失败')
-    ui.addToast(`追问生成失败：${draft.error}`, 'error')
-  } finally {
-    draft.asking = false
-  }
-}
-
-async function draftWithAi() {
-  if (!draft.idea.trim()) {
-    ui.addToast('先写一句你想要的角色方向', 'warning')
-    return
-  }
-  const profile = getDraftProfile()
-  if (!profile) {
-    ui.addToast('未配置可用模型', 'warning')
-    return
-  }
-
-  draft.loading = true
-  draft.error = ''
-  try {
-    const reply = await generateReply(
-      buildCharacterDraftPayload(profile, draft.idea, { ...form }, draftAnswersText()),
-    )
-    const result = parseCharacterDraft(reply)
-    if (result.ch_name) form.ch_name = result.ch_name
-    if (result.description) form.description = result.description
-    if (result.personality) form.personality = result.personality
-    if (result.scenario) form.scenario = result.scenario
-    if (result.first_mes) form.first_mes = result.first_mes
-    if (result.mes_example) form.mes_example = result.mes_example
-    if (result.creator_notes) form.creator_notes = result.creator_notes
-    if (result.tags.length) form.tags = result.tags.join(', ')
-    if (result.system_prompt) form.system_prompt = result.system_prompt
-    if (result.post_history_instructions) {
-      form.post_history_instructions = result.post_history_instructions
-    }
-    if (result.alternate_greetings.length) {
-      form.alternate_greetings = result.alternate_greetings.join('\n')
-    }
-    ui.addToast('AI 初稿已填入表单，可以继续手改', 'success')
-  } catch (e: unknown) {
-    draft.error = getApiErrorMessage(e, '起草失败')
-    ui.addToast(`起草失败：${draft.error}`, 'error')
-  } finally {
-    draft.loading = false
-  }
-}
-
 // 未保存离开保护：表单与最近一次保存/载入的快照不一致时拦一次确认。
 let savedFormSnapshot = JSON.stringify(form)
 function markFormSaved() {
   savedFormSnapshot = JSON.stringify(form)
 }
-onBeforeRouteLeave(() => {
+onBeforeRouteLeave(async () => {
   if (JSON.stringify(form) === savedFormSnapshot) return true
-  return window.confirm('有未保存的修改，确定离开吗？AI 生成的草稿也会一并丢失。')
+  return confirmDialog({ title: '离开页面？', message: '有未保存的修改，确定离开吗？AI 生成的草稿也会一并丢失。' })
 })
 
 async function save() {

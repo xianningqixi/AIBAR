@@ -12,6 +12,8 @@ import {
 } from '@/api/characters'
 import type { Character } from '@/api/types'
 import { getApiErrorMessage } from '@/api/client'
+import { parseTags } from '@/lib/format'
+import { confirmDialog, promptDialog } from '@/composables/useDialog'
 import AppButton from '@/components/ui/AppButton.vue'
 import AppCard from '@/components/ui/AppCard.vue'
 import AppPageHeader from '@/components/ui/AppPageHeader.vue'
@@ -58,7 +60,7 @@ const filtered = computed(() => {
 })
 
 async function removeCharacter(avatar: string, name: string) {
-  if (!window.confirm(`删除角色「${name}」及其聊天记录？`)) return
+  if (!await confirmDialog({ title: '删除角色', message: `删除角色「${name}」及其聊天记录？`, danger: true, confirmText: '删除' })) return
   try {
     await deleteCharacter(avatar)
     ui.addToast('角色已删除', 'success')
@@ -104,7 +106,7 @@ async function importCards() {
 }
 
 async function duplicate(character: Character) {
-  const newName = window.prompt('副本角色名', `${character.name} 副本`)
+  const newName = await promptDialog({ title: '副本角色名', defaultValue: `${character.name} 副本` })
   if (!newName?.trim()) return
   try {
     const trimmed = newName.trim()
@@ -134,12 +136,9 @@ async function duplicate(character: Character) {
 
 async function quickTagEdit(character: Character) {
   const current = (character.tags || character.data?.tags || []).join(', ')
-  const next = window.prompt(`编辑「${character.name}」的标签 (逗号分隔)`, current)
+  const next = await promptDialog({ title: `编辑「${character.name}」的标签 (逗号分隔)`, defaultValue: current })
   if (next === null) return
-  const arr = next
-    .split(',')
-    .map((s) => s.trim())
-    .filter(Boolean)
+  const arr = parseTags(next)
   try {
     await chars.updateTags(character, arr)
     ui.addToast('标签已更新', 'success')

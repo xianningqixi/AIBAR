@@ -14,6 +14,7 @@ import AppSelect from '@/components/ui/AppSelect.vue'
 import AppTextarea from '@/components/ui/AppTextarea.vue'
 import AppCard from '@/components/ui/AppCard.vue'
 import { getApiErrorMessage } from '@/api/client'
+import { parseTags } from '@/lib/format'
 
 const route = useRoute()
 const router = useRouter()
@@ -114,7 +115,7 @@ async function submit() {
       workId: workId.value || undefined,
       title: form.title.trim(),
       summary: form.summary.trim(),
-      tags: form.tags.split(/[,，、\n]/).map(item => item.trim()).filter(Boolean),
+      tags: parseTags(form.tags),
       versionNote: form.versionNote.trim(),
     })
     ui.addToast(workId.value ? `已发布 v${work.versionNumber}` : '作品已发布', 'success')

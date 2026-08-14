@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { usePresetsStore } from '@/stores/presets'
+import { confirmDialog } from '@/composables/useDialog'
 import type { Preset } from '@/api/types'
 import AppButton from '@/components/ui/AppButton.vue'
 import AppInput from '@/components/ui/AppInput.vue'
@@ -22,8 +23,8 @@ function addPreset() {
   selectedPresetId.value = p.id
 }
 
-function deleteSelectedPreset(preset: Preset) {
-  if (!window.confirm(`删除预设「${preset.name || '未命名'}」？此操作不可恢复。`)) return
+async function deleteSelectedPreset(preset: Preset) {
+  if (!await confirmDialog({ title: '删除预设', message: `删除预设「${preset.name || '未命名'}」？此操作不可恢复。`, danger: true, confirmText: '删除' })) return
   presets.deletePreset(preset.id)
   selectedPresetId.value = presets.presets[0]?.id || ''
 }

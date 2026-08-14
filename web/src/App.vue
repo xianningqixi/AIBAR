@@ -22,6 +22,7 @@ import {
 } from '@/lib/accountStorage'
 import { clearWorldInfoCache } from '@/lib/worldInfoMatch'
 import AppToast from './components/ui/AppToast.vue'
+import AppDialogHost from './components/ui/AppDialogHost.vue'
 import AppSideNav from './components/layout/AppSideNav.vue'
 import MobileTabBar from './components/layout/MobileTabBar.vue'
 
@@ -93,4 +94,5 @@ watch(
   </div>
   <MobileTabBar v-if="!chromeHidden" />
   <AppToast />
+  <AppDialogHost />
 </template>

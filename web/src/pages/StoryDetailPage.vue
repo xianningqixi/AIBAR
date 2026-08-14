@@ -9,6 +9,8 @@ import { createChatFromStory } from '@/lib/storyStart'
 import { generateReply } from '@/api/generate'
 import { getApiErrorMessage } from '@/api/client'
 import { buildGeneratePayload } from '@/lib/buildPayload'
+import { parseTags } from '@/lib/format'
+import { promptDialog, confirmDialog } from '@/composables/useDialog'
 import { getMatchedWorldInfo } from '@/lib/worldInfoMatch'
 import { useModelProfilesStore } from '@/stores/modelProfiles'
 import { useStoriesStore } from '@/stores/stories'
@@ -113,7 +115,7 @@ async function startStory() {
 
 async function renameStory() {
   if (!story.value) return
-  const next = window.prompt('新的故事标题', story.value.title)
+  const next = await promptDialog({ title: '新的故事标题', defaultValue: story.value.title })
   if (!next?.trim()) return
   try {
     story.value = await saveStory({ ...story.value, title: next.trim() })
@@ -126,12 +128,9 @@ async function renameStory() {
 
 async function quickTagEdit() {
   if (!story.value) return
-  const next = window.prompt('编辑故事标签 (逗号分隔)', tags.value.join(', '))
+  const next = await promptDialog({ title: '编辑故事标签 (逗号分隔)', defaultValue: tags.value.join(', ') })
   if (next === null) return
-  const arr = next
-    .split(/[,，、\n]/)
-    .map((s) => s.trim())
-    .filter(Boolean)
+  const arr = parseTags(next)
   try {
     story.value = await saveStory({ ...story.value, tags: arr })
     storiesStore.invalidate()
@@ -233,7 +232,7 @@ async function importStoryJSON() {
 
 async function duplicateStory() {
   if (!story.value) return
-  const newTitle = window.prompt('副本标题', `${story.value.title} 副本`)
+  const newTitle = await promptDialog({ title: '副本标题', defaultValue: `${story.value.title} 副本` })
   if (!newTitle?.trim()) return
   try {
     const saved = await saveStory({
@@ -251,7 +250,7 @@ async function duplicateStory() {
 
 async function removeStory() {
   if (!story.value) return
-  if (!window.confirm(`删除故事卡「${story.value.title}」？已创建的聊天存档不会删除。`)) return
+  if (!await confirmDialog({ title: '删除故事卡', message: `删除故事卡「${story.value.title}」？已创建的聊天存档不会删除。`, danger: true, confirmText: '删除' })) return
   try {
     await deleteStory(story.value.id)
     storiesStore.invalidate()

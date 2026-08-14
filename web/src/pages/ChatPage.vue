@@ -32,6 +32,7 @@ import AppSpinner from '@/components/ui/AppSpinner.vue'
 import ModPicker from '@/components/mods/ModPicker.vue'
 import ImageGenerateBox from '@/components/image/ImageGenerateBox.vue'
 import { getApiErrorMessage } from '@/api/client'
+import { confirmDialog, promptDialog } from '@/composables/useDialog'
 import { testConnection } from '@/api/generate'
 import { PROVIDER_VOICES, TTS_PROVIDERS } from '@/api/tts'
 import { deleteChat, exportChat, importChat, renameChat } from '@/api/chats'
@@ -283,7 +284,7 @@ async function makeDefault(entry: ChatEntry) {
 
 async function renameEntry(entry: ChatEntry) {
   if (!character.value || !entry.file_name) return
-  const next = window.prompt('新的聊天名称', entry.file_id || entry.file_name.replace(/\.jsonl$/i, ''))
+  const next = await promptDialog({ title: '新的聊天名称', defaultValue: entry.file_id || entry.file_name.replace(/\.jsonl$/i, '') })
   if (!next?.trim()) return
   try {
     await renameChat(character.value.name, entry.file_name, next.trim(), character.value.avatar)
@@ -299,7 +300,7 @@ async function renameEntry(entry: ChatEntry) {
 
 async function deleteEntry(entry: ChatEntry) {
   if (!character.value || !entry.file_name) return
-  if (!window.confirm(`删除聊天「${entry.file_id || entry.file_name}」？`)) return
+  if (!await confirmDialog({ title: '删除聊天', message: `删除聊天「${entry.file_id || entry.file_name}」？`, danger: true, confirmText: '删除' })) return
   try {
     await deleteChat(character.value.name, entry.file_name, character.value.avatar)
     ui.addToast('聊天已删除', 'success')
@@ -357,7 +358,7 @@ async function onImportFile(e: Event) {
 
 async function clearCurrent() {
   if (!character.value) return
-  if (!window.confirm('清空当前聊天的所有消息？文件会保留,但内容会全部删除。')) return
+  if (!await confirmDialog({ title: '清空聊天', message: '清空当前聊天的所有消息？文件会保留，但内容会全部删除。', danger: true, confirmText: '清空' })) return
   try {
     await chat.clearCurrentChat()
     ui.addToast('已清空当前聊天', 'success')
@@ -377,7 +378,7 @@ async function saveChatAsStory() {
     ui.addToast('当前聊天没有任何消息，无法保存为故事', 'warning')
     return
   }
-  const title = window.prompt('故事标题', `${character.value.name} - 故事`)
+  const title = await promptDialog({ title: '故事标题', defaultValue: `${character.value.name} - 故事` })
   if (!title?.trim()) return
   try {
     const aibar = chat.metadata?.aibar && typeof chat.metadata.aibar === 'object'

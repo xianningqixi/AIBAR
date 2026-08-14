@@ -5,6 +5,7 @@ import { useCharactersStore } from '@/stores/characters'
 import { useUiStore } from '@/stores/ui'
 import { useStoriesStore } from '@/stores/stories'
 import type { Character, StoryCard } from '@/api/types'
+import { getCharacterDescription, storyThumbnail } from '@/lib/characterMeta'
 import AppButton from '@/components/ui/AppButton.vue'
 import AppPageHeader from '@/components/ui/AppPageHeader.vue'
 
@@ -100,10 +101,6 @@ function createTarget() {
   }
 }
 
-function getCharacterDescription(character: Character): string {
-  return character.description || character.data?.description || '还没有简介'
-}
-
 function openCharacter(character: Character) {
   router.push(`/character/${encodeURIComponent(character.avatar)}`)
 }
@@ -112,10 +109,8 @@ function getStoryCharacter(story: StoryCard): Character | undefined {
   return chars.findCharacter(story.characterAvatar)
 }
 
-function storyThumbnail(story: StoryCard): string {
-  const character = getStoryCharacter(story)
-  if (!character?.avatar || character.avatar === 'none') return ''
-  return `/thumbnail?type=avatar&file=${encodeURIComponent(character.avatar)}`
+function storyCover(story: StoryCard): string {
+  return storyThumbnail(story, getStoryCharacter(story))
 }
 
 function openStory(story: StoryCard) {
@@ -218,8 +213,8 @@ onMounted(async () => {
               >
                 <div class="flex flex-1 gap-4">
                   <img
-                    v-if="storyThumbnail(story)"
-                    :src="storyThumbnail(story)"
+                    v-if="storyCover(story)"
+                    :src="storyCover(story)"
                     class="h-20 w-14 shrink-0 rounded-lg object-cover ring-1 ring-border-subtle"
                     loading="lazy"
                   />
@@ -265,7 +260,7 @@ onMounted(async () => {
                     <h4 class="truncate text-base font-semibold text-ink-primary">{{ character.name }}</h4>
                     <p class="mt-1 text-sm text-ink-muted">{{ character.chat_size ? `${character.chat_size} 条聊天` : '未开始' }}</p>
                     <p class="mt-auto line-clamp-2 min-h-[2.75rem] pt-2 text-sm leading-relaxed text-ink-secondary">
-                      {{ getCharacterDescription(character) }}
+                      {{ getCharacterDescription(character) || '还没有简介' }}
                     </p>
                   </div>
                 </div>

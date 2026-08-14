@@ -297,7 +297,7 @@ function parseBatchInput(raw: string): DiscordBatchInputItem[] {
 }
 
 async function runBatchPublish() {
-  if (batchRunning.value || !batchInput.value.trim()) return
+  if (!session.isAdmin || batchRunning.value || !batchInput.value.trim()) return
   batchError.value = ''
   batchDone.value = false
   let items: DiscordBatchInputItem[]
@@ -492,8 +492,8 @@ onBeforeUnmount(() => {
             </div>
           </AppCard>
 
-          <!-- 批量发布：Worker 一次粘贴全部条目，服务器端并发抓取与发布 -->
-          <AppCard padding="lg" class="mt-6">
+          <!-- 批量发布：仅管理员可见。Worker 一次粘贴全部条目，服务器端并发抓取与发布 -->
+          <AppCard v-if="session.isAdmin" padding="lg" class="mt-6">
             <div class="space-y-4">
               <div>
                 <h2 class="text-base font-semibold text-ink-primary">批量发布</h2>
@@ -512,7 +512,7 @@ onBeforeUnmount(() => {
               <div class="flex flex-wrap items-center gap-3">
                 <AppButton
                   data-testid="discord-batch-submit"
-                  :disabled="batchRunning || !batchInput.trim() || !session.isAdmin"
+                  :disabled="batchRunning || !batchInput.trim()"
                   @click="runBatchPublish"
                 >{{ batchRunning ? '批量发布中…' : '批量发布' }}</AppButton>
                 <p

@@ -20,6 +20,7 @@ import {
 import { getApiErrorMessage } from '@/api/client'
 import { useBillingStore } from '@/stores/billing'
 import { formatPoints } from '@/lib/points'
+import { formatDateTime } from '@/lib/format'
 import { useSessionStore } from '@/stores/session'
 import { useUiStore } from '@/stores/ui'
 import AppButton from '@/components/ui/AppButton.vue'
@@ -82,11 +83,6 @@ function clearAdminState() {
 }
 
 const pending = computed(() => overview.value?.registrations.filter(item => item.status === 'pending') || [])
-
-function formatDate(value?: string | number) {
-  if (!value) return '长期有效'
-  return new Intl.DateTimeFormat('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }).format(new Date(value))
-}
 
 function accountAvailable(handle: string): number | null {
   return pointOverview.value?.accounts.find(account => account.handle === handle)?.available ?? null
@@ -271,7 +267,7 @@ watch(
           <div v-for="item in pending" :key="item.id" class="flex flex-col gap-3 py-4 sm:flex-row sm:items-center">
             <div class="min-w-0 flex-1">
               <p class="font-medium text-ink-primary">{{ item.name }} <span class="font-normal text-ink-muted">@{{ item.handle }}</span></p>
-              <p class="mt-1 text-xs text-ink-muted">{{ formatDate(item.createdAt) }} · {{ item.id }}</p>
+              <p class="mt-1 text-xs text-ink-muted">{{ formatDateTime(item.createdAt) }} · {{ item.id }}</p>
             </div>
             <div class="flex gap-2"><AppButton size="sm" variant="danger" @click="review(item.id, 'reject')">拒绝</AppButton><AppButton size="sm" @click="review(item.id, 'approve')">批准</AppButton></div>
           </div>
@@ -308,7 +304,7 @@ watch(
             <div class="min-w-0 flex-1">
               <p class="font-medium text-ink-primary">{{ card.label || '未命名额度卡' }} · {{ formatPoints(card.amount) }} 积分</p>
               <p class="mt-1 text-xs text-ink-muted">
-                {{ card.redeemedBy ? `已由 @${card.redeemedBy} 兑换` : card.enabled ? '未兑换' : '已停用' }} · {{ card.expiresAt ? formatDate(card.expiresAt) : '长期有效' }}
+                {{ card.redeemedBy ? `已由 @${card.redeemedBy} 兑换` : card.enabled ? '未兑换' : '已停用' }} · {{ card.expiresAt ? formatDateTime(card.expiresAt) : '长期有效' }}
               </p>
             </div>
             <button v-if="!card.redeemedBy" class="text-xs font-medium" :class="card.enabled ? 'text-red-600' : 'text-emerald-700'" @click="changeCreditCode(card)">
@@ -334,7 +330,7 @@ watch(
         </div>
         <div class="mt-4 divide-y divide-border-subtle border-y border-border-subtle">
           <div v-for="invite in overview.invites" :key="invite.id" class="flex items-center gap-4 py-3 text-sm">
-            <div class="min-w-0 flex-1"><p class="font-medium text-ink-primary">{{ invite.label || '未命名邀请码' }}</p><p class="mt-1 text-xs text-ink-muted">已用 {{ invite.useCount }}/{{ invite.maxUses }} · {{ invite.expiresAt ? formatDate(invite.expiresAt) : '长期有效' }}</p></div>
+            <div class="min-w-0 flex-1"><p class="font-medium text-ink-primary">{{ invite.label || '未命名邀请码' }}</p><p class="mt-1 text-xs text-ink-muted">已用 {{ invite.useCount }}/{{ invite.maxUses }} · {{ invite.expiresAt ? formatDateTime(invite.expiresAt) : '长期有效' }}</p></div>
             <button class="text-xs font-medium" :class="invite.enabled ? 'text-red-600' : 'text-emerald-700'" @click="changeInvite(invite)">{{ invite.enabled ? '停用' : '启用' }}</button>
           </div>
         </div>
