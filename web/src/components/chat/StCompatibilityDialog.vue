@@ -25,7 +25,7 @@ const emit = defineEmits<{
     @update:model-value="emit('update:modelValue', $event)"
   >
     <div v-if="character && analysis" class="space-y-4">
-      <div class="rounded-md border border-amber-300/60 bg-amber-500/10 px-4 py-3">
+      <div class="rounded-md border border-warning/40 bg-warning/10 px-4 py-3">
         <p class="text-sm font-medium text-ink-primary">「{{ character.name }}」依赖完整的 SillyTavern 运行时</p>
         <p class="mt-1 text-xs leading-5 text-ink-secondary">
           AIBAR 会保留这张卡的扩展数据，并交给 ST 处理世界书、正则、变量、消息事件和交互界面。
@@ -47,7 +47,7 @@ const emit = defineEmits<{
 
       <div
         v-if="analysis.risk !== 'content'"
-        class="rounded-md border border-red-300/60 bg-red-500/10 px-4 py-3 text-xs leading-5 text-red-700"
+        class="rounded-md border border-danger/40 bg-danger/10 px-4 py-3 text-xs leading-5 text-danger-strong"
       >
         这张卡包含可执行脚本<template v-if="analysis.usesRemoteCode">，并可能加载远程代码</template>。脚本会在你的 ST 账号环境中运行，只在你信任卡片来源时继续。
       </div>

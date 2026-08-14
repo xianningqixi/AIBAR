@@ -102,7 +102,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onGlobalKey))
               <slot name="title">{{ title }}</slot>
             </h3>
             <button
-              class="text-ink-muted hover:text-ink-primary transition-colors p-1 -m-1 rounded"
+              class="text-ink-muted hover:text-ink-primary transition-colors p-2 -m-2 rounded"
               aria-label="关闭对话框"
               @click="close"
             >

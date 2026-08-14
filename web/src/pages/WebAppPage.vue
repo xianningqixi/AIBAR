@@ -369,7 +369,7 @@ onBeforeUnmount(() => {
 
     <main v-else-if="!started" class="flex flex-1 items-center justify-center px-5 py-10">
       <section class="w-full max-w-2xl rounded-md border border-border bg-surface p-5 sm:p-7" data-testid="web-app-consent">
-        <p class="text-xs font-semibold text-emerald-700">第三方网页应用</p>
+        <p class="text-xs font-semibold text-success-strong">第三方网页应用</p>
         <h2 class="mt-2 text-lg font-semibold">确认运行权限</h2>
         <dl class="mt-5 grid gap-3 text-sm sm:grid-cols-[8rem_minmax(0,1fr)]">
           <dt class="text-ink-muted">来源域名</dt>
@@ -378,26 +378,31 @@ onBeforeUnmount(() => {
           <dd>{{ runtime === 'aibar-bridge' ? 'AIBAR 隔离桥接' : '第三方独立运行' }}</dd>
           <dt class="text-ink-muted">AIBAR 权限</dt>
           <dd v-if="permissions.length" class="flex flex-wrap gap-2">
-            <span v-for="permission in permissions" :key="permission" class="rounded bg-emerald-50 px-2 py-1 text-xs text-emerald-700">
+            <span v-for="permission in permissions" :key="permission" class="rounded bg-success-soft px-2 py-1 text-xs text-success-strong">
               {{ permissionLabel(permission) }}
             </span>
           </dd>
           <dd v-else>无</dd>
         </dl>
-        <p class="mt-5 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-relaxed text-amber-800">
+        <p class="mt-5 rounded-md border border-warning/20 bg-warning-soft px-3 py-2 text-xs leading-relaxed text-warning-strong">
           {{ runtime === 'aibar-bridge'
             ? '应用在无同源权限的 sandbox 中运行，只能调用上方已授权的桥接方法；AIBAR 不会发送 Cookie 或模型密钥。'
             : '应用与 AIBAR 数据隔离，不会获得 AIBAR 模型、存档或账号信息；第三方页面仍可按自身代码访问外部网络。' }}
         </p>
-        <p v-if="pageError" class="mt-3 text-sm text-red-700">{{ pageError }}</p>
+        <p v-if="pageError" class="mt-3 flex items-start gap-2 text-sm text-danger-strong">
+          <svg class="mt-0.5 h-4 w-4 shrink-0" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+            <path fill-rule="evenodd" d="M18 10a8 8 0 1 1-16 0 8 8 0 0 1 16 0Zm-7 4a1 1 0 1 1-2 0 1 1 0 0 1 2 0Zm-1-9a1 1 0 0 0-1 1v4a1 1 0 1 0 2 0V6a1 1 0 0 0-1-1Z" clip-rule="evenodd" />
+          </svg>
+          {{ pageError }}
+        </p>
         <div class="mt-6 flex flex-wrap justify-end gap-2">
           <AppButton variant="ghost" @click="openExternal">在新标签打开</AppButton>
-          <AppButton data-testid="web-app-start" @click="startApp">允许并启动</AppButton>
+          <AppButton data-testid="web-app-start" :loading="loading" @click="startApp">允许并启动</AppButton>
         </div>
       </section>
     </main>
 
-    <main v-else class="relative min-h-0 flex-1 bg-black" data-testid="web-app-runtime">
+    <main v-else class="relative min-h-0 flex-1 bg-bg" data-testid="web-app-runtime">
       <div v-if="loading" class="absolute inset-0 z-10 flex items-center justify-center bg-surface text-sm text-ink-secondary">
         正在启动应用…
       </div>
@@ -409,7 +414,7 @@ onBeforeUnmount(() => {
         :sandbox="sandbox"
         allow="camera 'none'; microphone 'none'; geolocation 'none'; payment 'none'; clipboard-read 'none'; clipboard-write 'none'"
         referrerpolicy="no-referrer"
-        class="h-full min-h-[calc(100dvh-3.5rem)] w-full border-0 bg-white"
+        class="h-full min-h-[calc(100dvh-3.5rem)] w-full border-0 bg-surface"
         data-testid="web-app-frame"
         @load="onFrameLoad"
       />

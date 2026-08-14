@@ -41,6 +41,17 @@ const providerText = computed(() => {
   return `${imageGen.providerMeta.label} · ${model}`
 })
 
+// 根据设置给出建议预览比例
+const previewAspect = computed(() => {
+  const w = draftSettings.value?.width || imageGen.settings.width
+  const h = draftSettings.value?.height || imageGen.settings.height
+  if (!w || !h) return '3/4'
+  const ratio = w / h
+  if (Math.abs(ratio - 1) < 0.15) return '1/1'
+  if (ratio > 1.3) return '16/9'
+  return '3/4'
+})
+
 const draftParameterText = computed(() => {
   const settings = draftSettings.value
   if (!settings) return ''
@@ -149,18 +160,18 @@ async function optimizePrompt() {
 </script>
 
 <template>
-  <div class="rounded-xl border border-border-subtle bg-surface/45 p-4">
+  <div class="rounded-xl border border-border-subtle bg-surface-elevated p-4 shadow-sm">
     <div class="flex flex-wrap items-start justify-between gap-3">
       <div class="min-w-0">
         <h3 class="text-sm font-semibold text-ink-primary">{{ title }}</h3>
         <p v-if="description" class="mt-1 text-xs leading-relaxed text-ink-muted">{{ description }}</p>
         <p class="mt-1 text-[11px] text-ink-muted">{{ providerText }}</p>
-        <p v-if="draftParameterText" class="mt-1 text-[11px] text-brand-start">
+        <p v-if="draftParameterText" class="mt-1 text-[11px] text-brand-300">
           建议参数 · {{ draftParameterText }}
         </p>
       </div>
       <div class="flex shrink-0 items-center gap-2">
-        <AppButton size="sm" variant="secondary" @click="router.push({ path: '/settings', query: { tab: 'image' } })">
+        <AppButton size="sm" variant="ghost" @click="router.push({ path: '/settings', query: { tab: 'image' } })">
           图像配置
         </AppButton>
       </div>
@@ -174,40 +185,54 @@ async function optimizePrompt() {
           auto-grow
           placeholder="先用自然语言描述画面，再点“优化提示词”生成更适合文生图的 Prompt"
         />
-        <div class="mt-2 flex flex-wrap items-center justify-between gap-2">
-          <p class="text-[11px] leading-relaxed text-ink-muted">
-            优化后会替换成英文成图 Prompt，并把敏感桥段修饰成更含蓄的镜头语言。
-          </p>
-          <AppButton size="sm" variant="secondary" :disabled="optimizing" @click="optimizePrompt">
-            {{ optimizing ? '优化中…' : '优化提示词' }}
-          </AppButton>
-        </div>
+        <p class="mt-2 text-[11px] leading-relaxed text-ink-muted">
+          优化后会替换成英文成图 Prompt，并把敏感桥段修饰成更含蓄的镜头语言。
+        </p>
         <p v-if="draftReason" class="mt-2 rounded-md bg-surface-sunken px-3 py-2 text-[11px] leading-relaxed text-ink-muted ring-1 ring-border-subtle">
           优化说明：{{ draftReason }}
         </p>
       </AppFormField>
 
       <div class="space-y-3">
-        <div class="aspect-[3/4] overflow-hidden rounded-lg bg-surface-sunken ring-1 ring-border-subtle">
+        <div
+          class="overflow-hidden rounded-lg bg-surface-sunken ring-1 ring-border-subtle"
+          :style="{ aspectRatio: previewAspect }"
+        >
           <img
             v-if="generatedAsset"
             :src="generatedAsset.url"
             class="h-full w-full object-cover"
             alt=""
           />
-          <div v-else class="flex h-full items-center justify-center px-4 text-center text-xs text-ink-muted">
+          <div v-else class="flex h-full flex-col items-center justify-center gap-2 px-4 text-center text-xs text-ink-muted">
+            <svg class="h-8 w-8 text-ink-muted/50" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+            </svg>
             生成结果会显示在这里
           </div>
         </div>
-        <AppButton
-          class="w-full"
-          size="sm"
-          variant="gradient"
-          :disabled="imageGen.generating"
-          @click="generate"
-        >
-          {{ imageGen.generating ? '生成中…' : actionLabel || '生成图片' }}
-        </AppButton>
+        <div class="flex gap-2">
+          <AppButton
+            class="flex-1"
+            size="sm"
+            variant="secondary"
+            :loading="optimizing"
+            :disabled="optimizing"
+            @click="optimizePrompt"
+          >
+            {{ optimizing ? '优化中…' : '优化提示词' }}
+          </AppButton>
+          <AppButton
+            class="flex-1"
+            size="sm"
+            variant="gradient"
+            :loading="imageGen.generating"
+            :disabled="imageGen.generating"
+            @click="generate"
+          >
+            {{ imageGen.generating ? '生成中…' : actionLabel || '生成图片' }}
+          </AppButton>
+        </div>
       </div>
     </div>
   </div>

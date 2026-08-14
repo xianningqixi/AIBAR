@@ -13,6 +13,7 @@ import AppPageHeader from '@/components/ui/AppPageHeader.vue'
 import AppSelect from '@/components/ui/AppSelect.vue'
 import AppTextarea from '@/components/ui/AppTextarea.vue'
 import AppCard from '@/components/ui/AppCard.vue'
+import AppSegmentedControl from '@/components/ui/AppSegmentedControl.vue'
 import { getApiErrorMessage } from '@/api/client'
 import { parseTags } from '@/lib/format'
 
@@ -139,11 +140,15 @@ onMounted(load)
           <h2 class="mb-3 text-base font-semibold text-ink-primary">选择私人来源</h2>
           <div class="grid gap-4 sm:grid-cols-2">
             <AppFormField label="作品类型" required>
-              <AppSelect v-model="form.sourceType" :disabled="Boolean(workId)">
-                <option value="character">角色卡</option>
-                <option value="story">故事卡</option>
-                <option value="mod">提示词</option>
-              </AppSelect>
+              <AppSegmentedControl
+                v-model="form.sourceType"
+                :options="[
+                  { value: 'character', label: '角色卡' },
+                  { value: 'story', label: '故事卡' },
+                  { value: 'mod', label: '提示词' },
+                ]"
+                :disabled="Boolean(workId)"
+              />
             </AppFormField>
             <AppFormField :label="form.sourceType === 'mod' ? '私人提示词' : '私人作品'" required>
               <AppSelect v-model="form.sourceId" :disabled="loading">
@@ -159,7 +164,7 @@ onMounted(load)
             <h2 class="text-base font-semibold text-ink-primary">发布内容预览</h2>
             <span class="rounded bg-surface-sunken px-2 py-1 text-xs text-ink-secondary">{{ modPositionLabels[selectedMod.position] }}</span>
           </div>
-          <pre class="max-h-80 overflow-auto whitespace-pre-wrap break-words rounded-lg border border-border bg-surface-sunken p-4 font-sans text-sm leading-7 text-ink-secondary">{{ selectedMod.content }}</pre>
+          <pre class="max-h-80 overflow-auto whitespace-pre-wrap break-words rounded-lg border border-border bg-surface-sunken p-4 font-mono text-xs leading-relaxed text-ink-secondary">{{ selectedMod.content }}</pre>
         </AppCard>
 
         <AppCard padding="lg">
@@ -173,8 +178,8 @@ onMounted(load)
         </AppCard>
 
         <div class="flex items-center justify-end gap-3">
-          <AppButton variant="secondary" @click="router.back()">取消</AppButton>
-          <AppButton type="submit" :disabled="publishing || loading">{{ publishing ? '发布中…' : '发布不可变版本' }}</AppButton>
+          <AppButton variant="ghost" @click="router.back()">取消</AppButton>
+          <AppButton type="submit" :loading="publishing || loading" :disabled="publishing || loading">发布不可变版本</AppButton>
         </div>
       </form>
     </main>

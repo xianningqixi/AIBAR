@@ -442,8 +442,8 @@ const memoryStatusLabel = computed(() => {
 })
 const memoryStatusClass = computed(() => {
   if (chat.memoryUpdating) return 'bg-brand-500/15 text-brand-300'
-  if (chat.memorySummary) return 'bg-emerald-500/15 text-emerald-600'
-  return chat.messages.length > 1 ? 'bg-amber-500/15 text-amber-600' : 'bg-ink-primary/5 text-ink-muted'
+  if (chat.memorySummary) return 'bg-success/15 text-success-strong'
+  return chat.messages.length > 1 ? 'bg-warning/15 text-warning' : 'bg-ink-primary/5 text-ink-muted'
 })
 const memoryEmptyText = computed(() =>
   chat.messages.length > 1 ? '下次发送时整理历史' : '暂无记忆',
@@ -524,12 +524,12 @@ function profileStatusLabel(profile: ModelProfile): string {
 
 function profileStatusClass(profile: ModelProfile): string {
   const label = profileStatusLabel(profile)
-  if (label === '可用') return 'bg-emerald-500/15 text-emerald-600'
-  if (label === '通畅') return 'bg-emerald-500/10 text-emerald-700'
+  if (label === '可用') return 'bg-success/15 text-success-strong'
+  if (label === '通畅') return 'bg-success/10 text-success'
   if (label === '测试中') return 'bg-brand-500/15 text-brand-300'
-  if (label === '异常') return 'bg-red-500/15 text-red-600'
-  if (label === '可测') return 'bg-emerald-500/15 text-emerald-600'
-  return 'bg-amber-500/15 text-amber-600'
+  if (label === '异常') return 'bg-danger/15 text-danger'
+  if (label === '可测') return 'bg-success/15 text-success-strong'
+  return 'bg-warning/15 text-warning'
 }
 
 async function selectModelProfile(profile: ModelProfile) {
@@ -601,7 +601,7 @@ watch(() => route.fullPath, initChat)
       <div class="mx-auto flex max-w-4xl items-center justify-between gap-3">
         <AppButton variant="ghost" size="sm" @click="router.push('/browse')">返回</AppButton>
         <span class="truncate text-sm font-semibold text-ink-primary">{{ character.name }}</span>
-        <span class="rounded bg-amber-500/15 px-2 py-1 text-[11px] font-medium text-amber-700 ring-1 ring-amber-500/25">ST 兼容卡</span>
+        <span class="rounded bg-warning/15 px-2 py-1 text-[11px] font-medium text-warning-strong ring-1 ring-warning/25">ST 兼容卡</span>
       </div>
     </header>
     <main class="mx-auto grid max-w-4xl gap-6 px-5 py-10 md:grid-cols-[12rem_minmax(0,1fr)] md:px-8">
@@ -611,7 +611,7 @@ watch(() => route.fullPath, initChat)
         class="aspect-[3/4] w-full max-w-48 rounded-md object-cover ring-1 ring-border"
       />
       <section class="min-w-0">
-        <p class="text-xs font-semibold text-amber-700">需要完整 SillyTavern 运行时</p>
+        <p class="text-xs font-semibold text-warning-strong">需要完整 SillyTavern 运行时</p>
         <h1 class="mt-2 text-2xl font-semibold text-ink-primary">这张卡不会在简版聊天中打开</h1>
         <p class="mt-3 max-w-2xl text-sm leading-7 text-ink-secondary">
           已在读取聊天存档前停止。进入兼容模式后，世界书、正则、TavernHelper、MVU、iframe 和消息事件会由 ST 原生内核处理。
@@ -656,10 +656,10 @@ watch(() => route.fullPath, initChat)
         <div v-if="session.isAdmin" class="rounded-lg bg-surface-sunken/55 px-3 py-2.5 ring-1 ring-border-subtle">
           <div class="flex flex-wrap items-center gap-3 text-xs">
             <span class="font-medium text-ink-secondary">模型状态</span>
-            <span class="rounded-full bg-emerald-500/10 px-2.5 py-1 text-emerald-700">通畅</span>
-            <span class="inline-flex items-center gap-1 text-ink-muted"><span class="h-1.5 w-1.5 rounded-full bg-emerald-400" />可测</span>
-            <span class="inline-flex items-center gap-1 text-ink-muted"><span class="h-1.5 w-1.5 rounded-full bg-amber-400" />待配置</span>
-            <span class="inline-flex items-center gap-1 text-ink-muted"><span class="h-1.5 w-1.5 rounded-full bg-red-400" />异常</span>
+            <span class="rounded-full bg-success/10 px-2.5 py-1 text-success-strong">通畅</span>
+            <span class="inline-flex items-center gap-1 text-ink-muted"><span class="h-1.5 w-1.5 rounded-full bg-success" />可测</span>
+            <span class="inline-flex items-center gap-1 text-ink-muted"><span class="h-1.5 w-1.5 rounded-full bg-warning" />待配置</span>
+            <span class="inline-flex items-center gap-1 text-ink-muted"><span class="h-1.5 w-1.5 rounded-full bg-danger" />异常</span>
           </div>
         </div>
 
@@ -680,13 +680,13 @@ watch(() => route.fullPath, initChat)
                   <span v-if="chat.selectedProfileId === profile.id" class="rounded bg-brand-500/15 px-1.5 py-0.5 text-[11px] text-brand-300">当前模型</span>
                   <span
                     v-if="models.activeProfileId === profile.id"
-                    class="rounded bg-emerald-500/15 px-1.5 py-0.5 text-[11px] text-emerald-600"
+                    class="rounded bg-success/15 px-1.5 py-0.5 text-[11px] text-success-strong"
                   >
                     默认
                   </span>
                 </div>
                 <p class="mt-2 text-sm text-ink-secondary">
-                  <span class="inline-flex h-2 w-2 rounded-full bg-lime-500" />
+                  <span class="inline-flex h-2 w-2 rounded-full bg-success" />
                   <span class="ml-2 font-medium">{{ profile.model || '未填写模型名' }}</span>
                   <span class="ml-2 text-xs text-ink-muted">{{ getProviderLabel(profile.source) }}</span>
                 </p>
@@ -698,7 +698,7 @@ watch(() => route.fullPath, initChat)
                 </div>
                 <p
                   v-if="modelTestResults[profile.id] && !modelTestResults[profile.id].ok"
-                  class="mt-2 text-xs text-red-600"
+                  class="mt-2 text-xs text-danger"
                 >
                   {{ modelTestResults[profile.id].message }}
                 </p>
@@ -738,6 +738,8 @@ watch(() => route.fullPath, initChat)
       :streaming="throttledStreamingContent"
       :is-streaming="chat.isStreaming"
       :character-avatar="chat.character?.avatar"
+      :character-name="chat.character?.name"
+      :character-greeting="chat.character?.data?.first_mes"
       :media-actions="session.isAdmin"
       @edit="handleEdit"
       @delete="handleDelete"
@@ -753,7 +755,7 @@ watch(() => route.fullPath, initChat)
       class="mx-auto w-full max-w-4xl px-4"
     >
       <div
-        class="mb-3 flex flex-wrap items-center justify-between gap-3 rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700"
+        class="mb-3 flex flex-wrap items-center justify-between gap-3 rounded-md border border-danger/30 bg-danger-soft px-4 py-3 text-sm text-danger-strong"
         role="alert"
       >
         <span>{{ chat.error }}。为保护原聊天，本页已禁止保存和生成。</span>
@@ -770,6 +772,7 @@ watch(() => route.fullPath, initChat)
       :draft-options="chat.replyDraftOptions"
       :draft-error="chat.replyDraftError"
       :draft-disabled="chat.loading || !chat.ready || chat.isStreaming || noModelAvailable"
+      :character-name="chat.character?.name"
       @send="handleSend"
       @stop="handleStop"
       @request-drafts="handleDraftReplies"
@@ -830,7 +833,7 @@ watch(() => route.fullPath, initChat)
                 <div class="mt-2.5 flex flex-wrap gap-3 text-xs">
                   <button class="text-ink-secondary hover:text-ink-primary transition-colors" @click="makeDefault(entry)">设默认</button>
                   <button class="text-ink-secondary hover:text-ink-primary transition-colors" @click="renameEntry(entry)">重命名</button>
-                  <button class="text-red-500 hover:text-red-600 transition-colors" @click="deleteEntry(entry)">删除</button>
+                  <button class="text-danger transition-colors hover:text-danger-strong" @click="deleteEntry(entry)">删除</button>
                 </div>
               </div>
             </AppCard>
@@ -1064,7 +1067,7 @@ watch(() => route.fullPath, initChat)
             <span
               :class="[
                 'text-xs',
-                !chatTtsProviderEnabled ? 'text-amber-600' : 'text-ink-muted',
+                !chatTtsProviderEnabled ? 'text-warning' : 'text-ink-muted',
               ]"
             >
               <template v-if="!chatTtsProviderEnabled">当前渠道未启用</template>

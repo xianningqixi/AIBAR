@@ -22,10 +22,21 @@ const checking = ref(false)
 const error = ref('')
 const request = ref<RegistrationRequest | null>(null)
 
-const statusLabel = computed(() => {
-  if (request.value?.status === 'approved') return '注册成功'
-  if (request.value?.status === 'rejected') return '申请未通过'
-  return '等待管理员审核'
+const statusMeta = computed(() => {
+  if (request.value?.status === 'approved') return { label: '注册成功', color: 'success' as const }
+  if (request.value?.status === 'rejected') return { label: '申请未通过', color: 'danger' as const }
+  return { label: '等待管理员审核', color: 'warning' as const }
+})
+
+const statusLabel = computed(() => statusMeta.value.label)
+
+const statusCardClass = computed(() => {
+  const map = {
+    success: 'border-success bg-success-soft text-success-strong',
+    danger: 'border-danger bg-danger-soft text-danger-strong',
+    warning: 'border-warning bg-warning-soft text-warning-strong',
+  }
+  return map[statusMeta.value.color]
 })
 
 async function submit() {
@@ -87,7 +98,16 @@ void refreshStatus()
       <section class="rounded-xl border border-border bg-surface p-6 shadow-sm sm:p-8">
         <template v-if="request">
           <p class="text-xs font-semibold text-brand-300">注册申请</p>
-          <h1 class="mt-2 text-2xl font-semibold text-ink-primary">{{ statusLabel }}</h1>
+          <div class="rounded-xl border-l-4 p-4" :class="statusCardClass">
+            <div class="flex items-center gap-2">
+              <svg class="h-5 w-5 shrink-0" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+                <path v-if="request.status === 'approved'" fill-rule="evenodd" d="M10 18a8 8 0 1 0 0-16 8 8 0 0 0 0 16Zm3.857-9.809a.75.75 0 0 0-1.214-.882l-3.483 4.79-1.88-1.88a.75.75 0 1 0-1.06 1.061l2.5 2.5a.75.75 0 0 0 1.137-.089l4-5.5Z" clip-rule="evenodd" />
+                <path v-else-if="request.status === 'rejected'" fill-rule="evenodd" d="M10 18a8 8 0 1 0 0-16 8 8 0 0 0 0 16ZM8.28 7.22a.75.75 0 0 0-1.06 1.06L8.94 10l-1.72 1.72a.75.75 0 1 0 1.06 1.06L10 11.06l1.72 1.72a.75.75 0 1 0 1.06-1.06L11.06 10l1.72-1.72a.75.75 0 0 0-1.06-1.06L10 8.94 8.28 7.22Z" clip-rule="evenodd" />
+                <path v-else fill-rule="evenodd" d="M10 18a8 8 0 1 0 0-16 8 8 0 0 0 0 16Zm1-12a1 1 0 1 0-2 0v4a1 1 0 0 0 .293.707l2.828 2.829a1 1 0 1 0 1.415-1.415L11 9.586V6Z" clip-rule="evenodd" />
+              </svg>
+              <span class="font-semibold">{{ statusLabel }}</span>
+            </div>
+          </div>
           <dl class="mt-6 divide-y divide-border-subtle rounded-lg border border-border-subtle">
             <div class="flex justify-between gap-4 px-4 py-3 text-sm">
               <dt class="text-ink-muted">账号</dt><dd class="font-medium text-ink-primary">{{ request.handle }}</dd>
@@ -99,8 +119,8 @@ void refreshStatus()
           <p v-if="request.reviewNote" class="mt-4 rounded-lg bg-surface-sunken px-3 py-2 text-sm text-ink-secondary">{{ request.reviewNote }}</p>
           <div class="mt-6 flex gap-3">
             <AppButton v-if="request.status === 'approved'" class="flex-1" @click="router.push('/login')">去登录</AppButton>
-            <AppButton v-else variant="secondary" class="flex-1" :disabled="checking" @click="refreshStatus">
-              {{ checking ? '查询中…' : '刷新状态' }}
+            <AppButton v-else variant="secondary" class="flex-1" :loading="checking" @click="refreshStatus">
+              刷新状态
             </AppButton>
             <AppButton variant="ghost" @click="resetRequest">重新申请</AppButton>
           </div>
@@ -127,9 +147,14 @@ void refreshStatus()
             <AppFormField label="确认密码" required>
               <AppInput v-model="confirmPassword" type="password" autocomplete="new-password" placeholder="再次输入密码" />
             </AppFormField>
-            <p v-if="error" class="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{{ error }}</p>
-            <AppButton class="w-full" type="submit" size="lg" :disabled="loading">
-              {{ loading ? '提交中…' : inviteCode.trim() ? '使用邀请码注册' : '提交审核' }}
+            <p v-if="error" class="flex items-start gap-2 rounded-lg border border-danger/20 bg-danger-soft px-3 py-2 text-sm text-danger-strong">
+              <svg class="mt-0.5 h-4 w-4 shrink-0" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+                <path fill-rule="evenodd" d="M18 10a8 8 0 1 1-16 0 8 8 0 0 1 16 0Zm-7 4a1 1 0 1 1-2 0 1 1 0 0 1 2 0Zm-1-9a1 1 0 0 0-1 1v4a1 1 0 1 0 2 0V6a1 1 0 0 0-1-1Z" clip-rule="evenodd" />
+              </svg>
+              {{ error }}
+            </p>
+            <AppButton class="w-full" type="submit" size="lg" :loading="loading">
+              {{ inviteCode.trim() ? '使用邀请码注册' : '提交审核' }}
             </AppButton>
           </form>
         </template>

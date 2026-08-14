@@ -5,8 +5,7 @@ const props = withDefaults(defineProps<{
   padding?: 'none' | 'sm' | 'md' | 'lg'
   hover?: boolean
   as?: 'div' | 'section' | 'article'
-  tone?: 'default' | 'sunken' | 'glow'
-  // 折叠卡片：用 details/summary 渲染，外观与普通卡片完全一致
+  tone?: 'default' | 'sunken' | 'glow' | 'warning'
   collapsible?: boolean
   title?: string
   defaultOpen?: boolean
@@ -14,10 +13,10 @@ const props = withDefaults(defineProps<{
   defaultOpen: true,
 })
 
-// 卡片统一表面：rounded-xl + border border-border
 const surfaceClass = computed(() => {
   if (props.tone === 'sunken') return 'bg-surface-sunken border-border-subtle'
   if (props.tone === 'glow') return 'bg-surface border-brand-500/30 shadow-glow'
+  if (props.tone === 'warning') return 'bg-warning-soft border-warning/20'
   return 'bg-surface border-border'
 })
 
@@ -39,7 +38,7 @@ const hoverClass = computed(() =>
     :open="defaultOpen"
     :class="['overflow-hidden rounded-xl border', surfaceClass, hoverClass]"
   >
-    <summary class="cursor-pointer list-none px-4 py-3 transition-colors hover:bg-surface-elevated">
+    <summary class="app-summary cursor-pointer list-none px-4 py-3 transition-colors hover:bg-surface-elevated">
       <div class="flex flex-wrap items-center justify-between gap-2">
         <h3 class="flex items-center gap-2 text-sm font-semibold text-ink-primary">
           <span class="h-4 w-1 shrink-0 rounded-full bg-brand-gradient" />
@@ -62,3 +61,12 @@ const hoverClass = computed(() =>
     <slot />
   </component>
 </template>
+
+<style scoped>
+.app-summary::-webkit-details-marker {
+  display: none;
+}
+.app-summary::marker {
+  content: none;
+}
+</style>

@@ -6,26 +6,26 @@ const ui = useUiStore()
 function typeClasses(type: string) {
   switch (type) {
     case 'success':
-      return 'border-l-emerald-500'
+      return 'border-l-success'
     case 'error':
-      return 'border-l-red-500'
+      return 'border-l-danger'
     case 'warning':
-      return 'border-l-amber-500'
+      return 'border-l-warning'
     default:
-      return 'border-l-brand-500'
+      return 'border-l-info'
   }
 }
 
 function typeIcon(type: string) {
   switch (type) {
     case 'success':
-      return 'text-emerald-600'
+      return 'text-success'
     case 'error':
-      return 'text-red-500'
+      return 'text-danger'
     case 'warning':
-      return 'text-amber-600'
+      return 'text-warning'
     default:
-      return 'text-brand-400'
+      return 'text-info'
   }
 }
 </script>
@@ -33,7 +33,7 @@ function typeIcon(type: string) {
 <template>
   <!-- toast 是全应用唯一的操作反馈通道，必须对屏幕阅读器可见 -->
   <div
-    class="pointer-events-none fixed bottom-[calc(4.5rem+env(safe-area-inset-bottom))] right-4 z-40 flex max-w-[calc(100vw-2rem)] flex-col gap-2 md:bottom-4 md:z-50"
+    class="pointer-events-none fixed bottom-[calc(5rem+env(safe-area-inset-bottom))] right-4 z-40 flex max-w-[calc(100vw-2rem)] flex-col gap-2 md:bottom-6 md:z-50"
     aria-live="polite"
     aria-atomic="false"
   >

@@ -1,14 +1,17 @@
+
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useRoute, useRouter, type RouteLocationRaw } from 'vue-router'
 import { useSessionStore } from '@/stores/session'
 import { useBillingStore } from '@/stores/billing'
+import { useUiStore } from '@/stores/ui'
 import { formatPoints } from '@/lib/points'
 
 const route = useRoute()
 const router = useRouter()
 const session = useSessionStore()
 const billing = useBillingStore()
+const ui = useUiStore()
 
 const mainNav: Array<{ key: string; label: string; to: string; names: string[]; icon: string }> = [
   {
@@ -56,12 +59,18 @@ const libraryNav: Array<{ label: string; to: RouteLocationRaw; isActive: () => b
 ]
 
 const activeMain = computed(() => mainNav.find((item) => item.names.includes(String(route.name)))?.key)
+const activeLibrary = computed(() => libraryNav.find((item) => item.isActive())?.label)
 const settingsActive = computed(() => route.name === 'settings')
+const accountActive = computed(() => route.name === 'account' || route.name === 'admin')
+
+function toggleTheme() {
+  ui.setTheme(ui.theme === 'dark' ? 'light' : 'dark')
+}
 </script>
 
 <template>
-  <aside class="hidden md:flex h-[100dvh] w-64 shrink-0 flex-col overflow-y-auto border-r border-border-subtle bg-surface/70 px-5 py-6 sticky top-0">
-    <button class="flex items-center gap-3 text-left" @click="router.push('/browse')">
+  <aside class="hidden md:flex h-[100dvh] w-72 shrink-0 flex-col overflow-y-auto border-r border-border-subtle bg-surface/70 px-5 py-6 sticky top-0">
+    <button class="flex items-center gap-3 text-left" aria-label="返回探索" @click="router.push('/browse')">
       <div class="flex h-11 w-11 items-center justify-center rounded-xl bg-brand-gradient text-lg font-bold text-white shadow-glow">
         A
       </div>
@@ -71,15 +80,16 @@ const settingsActive = computed(() => route.name === 'settings')
       </div>
     </button>
 
-    <nav class="mt-10 space-y-1">
+    <nav class="mt-10 space-y-1" aria-label="主导航">
       <button
         v-for="item in mainNav"
         :key="item.key"
+        :aria-label="item.label"
         :class="[
           'w-full flex items-center gap-3 rounded-lg px-3 py-2.5 text-left text-sm font-semibold transition-all',
           activeMain === item.key
             ? 'bg-brand-500/15 text-brand-200 ring-1 ring-brand-500/35'
-            : 'text-ink-secondary hover:bg-ink-primary/5 hover:text-ink-primary',
+            : 'text-ink-secondary hover:bg-ink-primary/[0.06] hover:text-ink-primary',
         ]"
         @click="router.push(item.to)"
       >
@@ -90,51 +100,58 @@ const settingsActive = computed(() => route.name === 'settings')
       </button>
     </nav>
 
-    <div class="mt-auto space-y-4 border-t border-border-subtle pt-4">
-      <div>
-        <p class="px-3 text-[11px] font-semibold text-ink-muted">资料库</p>
-        <div class="mt-1.5 space-y-0.5">
-          <button
-            v-for="item in libraryNav"
-            :key="item.label"
-            :class="[
-              'flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left text-sm transition-colors',
-              item.isActive()
-                ? 'bg-brand-500/10 text-brand-200'
-                : 'text-ink-secondary hover:bg-ink-primary/5 hover:text-ink-primary',
-            ]"
-            @click="router.push(item.to)"
-          >
-            <svg class="h-5 w-5 shrink-0 opacity-70" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" :d="item.icon" />
-            </svg>
-            {{ item.label }}
-          </button>
-        </div>
+    <nav class="mt-6 space-y-1" aria-label="资料库">
+      <p class="px-3 text-[11px] font-semibold uppercase tracking-wider text-ink-muted">资料库</p>
+      <div class="mt-1.5 space-y-0.5 pl-1">
+        <button
+          v-for="item in libraryNav"
+          :key="item.label"
+          :aria-label="item.label"
+          :class="[
+            'flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left text-sm transition-colors',
+            activeLibrary === item.label
+              ? 'bg-brand-500/15 text-brand-200 ring-1 ring-brand-500/35'
+              : 'text-ink-secondary hover:bg-ink-primary/[0.06] hover:text-ink-primary',
+          ]"
+          @click="router.push(item.to)"
+        >
+          <svg class="h-4 w-4 shrink-0 opacity-70" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" :d="item.icon" />
+          </svg>
+          {{ item.label }}
+        </button>
       </div>
+    </nav>
 
+    <div class="mt-auto space-y-4 border-t border-border-subtle pt-4">
       <button
-        class="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left transition-colors hover:bg-ink-primary/5"
-        :class="route.name === 'account' || route.name === 'admin' ? 'bg-brand-500/10 text-brand-300' : 'text-ink-secondary'"
+        :class="[
+          'flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left text-sm font-semibold transition-colors',
+          accountActive
+            ? 'bg-brand-500/15 text-brand-200 ring-1 ring-brand-500/35'
+            : 'text-ink-secondary hover:bg-ink-primary/[0.06] hover:text-ink-primary',
+        ]"
+        aria-label="我的账号"
         @click="router.push('/account')"
       >
-        <span class="flex h-5 w-5 shrink-0 items-center justify-center rounded bg-brand-gradient text-[10px] font-semibold text-white">
+        <span class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-brand-gradient text-xs font-semibold text-white">
           {{ session.user?.name?.slice(0, 1) || 'A' }}
         </span>
         <span class="min-w-0 flex-1">
-          <span class="block truncate text-sm font-semibold">{{ session.user?.name || '我的账号' }}</span>
+          <span class="block truncate" :class="accountActive ? 'text-brand-100' : 'text-ink-primary'">{{ session.user?.name || '我的账号' }}</span>
           <span class="block truncate text-[11px] text-ink-muted">@{{ session.user?.handle }} · {{ formatPoints(billing.available) }} 积分</span>
         </span>
-        <span v-if="session.isAdmin" class="rounded bg-brand-500/10 px-1.5 py-0.5 text-xs font-semibold text-brand-300">管理</span>
+        <span v-if="session.isAdmin" class="rounded bg-brand-500/10 px-1.5 py-0.5 text-[11px] font-semibold text-brand-300">管理</span>
       </button>
 
       <button
         :class="[
           'flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left text-sm font-semibold transition-colors',
           settingsActive
-            ? 'bg-brand-500/10 text-brand-200 ring-1 ring-brand-500/35'
-            : 'text-ink-secondary ring-1 ring-border-subtle hover:bg-ink-primary/5 hover:text-ink-primary',
+            ? 'bg-brand-500/15 text-brand-200 ring-1 ring-brand-500/35'
+            : 'text-ink-secondary hover:bg-ink-primary/[0.06] hover:text-ink-primary',
         ]"
+        aria-label="设置"
         @click="router.push('/settings')"
       >
         <svg class="h-5 w-5 shrink-0 opacity-70" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -144,12 +161,24 @@ const settingsActive = computed(() => route.name === 'settings')
         <span class="flex-1">
           设置
           <span class="mt-0.5 block text-[11px] font-normal text-ink-muted">
-            {{ session.isAdmin ? '模型 · 提示词 · 图像 · 语音 · 身份' : '提示词 · 身份' }}
+            {{ session.isAdmin ? '模型 · 提示词 · 图像 · 语音' : '提示词 · 身份' }}
           </span>
         </span>
-        <svg class="h-4 w-4 shrink-0 opacity-50" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" />
+      </button>
+
+      <button
+        type="button"
+        class="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left text-sm text-ink-secondary transition-colors hover:bg-ink-primary/[0.06] hover:text-ink-primary"
+        :aria-label="ui.theme === 'dark' ? '切换到浅色模式' : '切换到深色模式'"
+        @click="toggleTheme"
+      >
+        <svg v-if="ui.theme === 'dark'" class="h-5 w-5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364-.707-.707M6.343 6.343l-.707-.707m12.728 0-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z" />
         </svg>
+        <svg v-else class="h-5 w-5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z" />
+        </svg>
+        <span>{{ ui.theme === 'dark' ? '浅色模式' : '深色模式' }}</span>
       </button>
     </div>
   </aside>

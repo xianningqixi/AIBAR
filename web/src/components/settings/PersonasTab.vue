@@ -49,23 +49,27 @@ onMounted(async () => {
             'relative w-full text-left px-3 py-2.5 rounded-lg transition-colors',
             selectedPersonaId === p.id
               ? 'bg-brand-500/15 text-brand-300 ring-1 ring-brand-500/30'
-              : 'text-ink-secondary hover:bg-ink-primary/5 hover:text-ink-primary',
+              : 'text-ink-secondary hover:bg-ink-primary/[0.06] hover:text-ink-primary',
           ]"
           @click="selectedPersonaId = p.id"
         >
           <span
             v-if="selectedPersonaId === p.id"
-            class="absolute left-0 top-2 bottom-2 w-0.5 rounded-full bg-brand-gradient"
+            class="absolute left-0 top-2 bottom-2 w-0.5 rounded-full bg-brand-gradient transition-all duration-200"
           />
           <div class="flex items-center justify-between gap-2">
             <span class="text-sm font-medium truncate">{{ p.name }}</span>
-            <span v-if="personas.activePersonaId === p.id" class="text-[11px] text-emerald-600 shrink-0">当前</span>
+            <span v-if="personas.activePersonaId === p.id" class="text-[11px] text-success shrink-0">当前</span>
           </div>
           <div class="mt-1 text-[11px] text-ink-muted line-clamp-1">
             {{ p.description || '无描述' }}
           </div>
         </button>
-        <AppEmpty v-if="!personas.personas.length" icon="chat" title="暂无 Persona" description="点击上方新建。" />
+        <AppEmpty v-if="!personas.personas.length" icon="chat" title="暂无 Persona" description="点击上方新建，或创建后在这里选择。">
+          <template #actions>
+            <AppButton size="sm" @click="addPersona">新建身份</AppButton>
+          </template>
+        </AppEmpty>
       </div>
     </AppCard>
 
@@ -87,7 +91,7 @@ onMounted(async () => {
           </label>
           <button
             v-if="personas.personas.length > 1"
-            class="text-xs text-red-500 hover:text-red-600 transition-colors"
+            class="text-xs text-danger hover:text-danger-strong transition-colors"
             @click="deleteSelectedPersona(selectedPersona)"
           >
             删除
@@ -105,9 +109,9 @@ onMounted(async () => {
       <AppFormField label="描述" hint="给模型看的你的身份描述。">
         <AppTextarea
           :model-value="selectedPersona.description"
-          :rows="6"
+          :rows="4"
           auto-grow
-          placeholder="例如：我是一名来自北方王国的旅行者，性格好奇且喜欢冒险。"
+          placeholder="例如：一名来自北方王国的旅行者。"
           @update:model-value="(v) => personas.updatePersona(selectedPersona!.id, { description: v as string })"
         />
       </AppFormField>

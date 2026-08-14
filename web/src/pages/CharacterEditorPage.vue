@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { onBeforeRouteLeave, useRoute, useRouter } from 'vue-router'
 import { createCharacter, editCharacter, editCharacterAvatar, fetchCharacter } from '@/api/characters'
 import { useCharactersStore } from '@/stores/characters'
@@ -53,7 +53,25 @@ const original = ref<Character | null>(null)
 const worldInfoStore = useWorldInfoStore()
 const worlds = computed(() => worldInfoStore.worlds)
 const generatedAvatar = ref<ImageAsset | null>(null)
+const uploadedAvatarFile = ref<File | null>(null)
 const applyingAvatar = ref(false)
+const avatarInput = ref<HTMLInputElement | null>(null)
+
+const uploadedAvatarUrl = computed(() => uploadedAvatarFile.value ? URL.createObjectURL(uploadedAvatarFile.value) : '')
+
+const editorSections = [
+  { id: 'draft-card', label: 'AI 起草' },
+  { id: 'basic-card', label: '人物设定' },
+  { id: 'image-card', label: '角色图片' },
+  { id: 'chat-card', label: '对话样本' },
+  { id: 'advanced-card', label: '高级字段' },
+  { id: 'test-card', label: '试聊检查' },
+]
+const activeSection = ref('basic-card')
+function scrollToSection(id: string) {
+  document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+}
+let sectionObserver: IntersectionObserver | null = null
 
 const form = reactive({
   ch_name: '',
@@ -180,6 +198,8 @@ async function save() {
       if (typeof result === 'string') {
         if (generatedAvatar.value) {
           await editCharacterAvatar(result, await blobFromAsset(generatedAvatar.value), generatedAvatar.value.fileName)
+        } else if (uploadedAvatarFile.value) {
+          await editCharacterAvatar(result, uploadedAvatarFile.value, uploadedAvatarFile.value.name)
         }
         router.push(`/character/${encodeURIComponent(result)}/edit`)
       }
@@ -227,6 +247,7 @@ const draftCharacter = computed<Character>(() => ({
 const characterImagePrompt = computed(() => buildCharacterImagePrompt(draftCharacter.value))
 const characterImageContextId = computed(() => avatar.value || form.ch_name.trim() || 'new-character')
 const avatarPreview = computed(() => {
+  if (uploadedAvatarUrl.value) return uploadedAvatarUrl.value
   if (generatedAvatar.value?.url) return generatedAvatar.value.url
   if (original.value?.avatar && original.value.avatar !== 'none') {
     return `/characters/${encodeURIComponent(original.value.avatar)}`
@@ -241,6 +262,7 @@ function blobFromAsset(asset: ImageAsset): Promise<Blob> {
 
 async function applyGeneratedAvatar(asset: ImageAsset) {
   generatedAvatar.value = asset
+  uploadedAvatarFile.value = null
   if (!isEdit.value) {
     ui.addToast('头像已暂存，保存角色后会写入角色卡', 'success')
     return
@@ -248,6 +270,47 @@ async function applyGeneratedAvatar(asset: ImageAsset) {
   applyingAvatar.value = true
   try {
     await editCharacterAvatar(avatar.value, await blobFromAsset(asset), asset.fileName)
+    ui.addToast('头像已写入角色卡', 'success')
+    await chars.load()
+  } catch (e: unknown) {
+    ui.addToast(`头像写入失败：${getApiErrorMessage(e)}`, 'error')
+  } finally {
+    applyingAvatar.value = false
+  }
+}
+
+function openAvatarFilePicker() {
+  avatarInput.value?.click()
+}
+
+function onAvatarFileSelected(event: Event) {
+  const target = event.target as HTMLInputElement
+  const file = target.files?.[0]
+  if (!file) return
+  if (!file.type.startsWith('image/')) {
+    ui.addToast('请选择图片文件', 'warning')
+    target.value = ''
+    return
+  }
+  if (file.size > 10 * 1024 * 1024) {
+    ui.addToast('图片大小不能超过 10MB', 'warning')
+    target.value = ''
+    return
+  }
+  uploadedAvatarFile.value = file
+  generatedAvatar.value = null
+  if (isEdit.value) {
+    void applyUploadedAvatar(file)
+  } else {
+    ui.addToast('头像已暂存，保存角色后会写入角色卡', 'success')
+  }
+  target.value = ''
+}
+
+async function applyUploadedAvatar(file: File) {
+  applyingAvatar.value = true
+  try {
+    await editCharacterAvatar(avatar.value, file, file.name)
     ui.addToast('头像已写入角色卡', 'success')
     await chars.load()
   } catch (e: unknown) {
@@ -311,6 +374,20 @@ onMounted(async () => {
       loading.value = false
     }
   }
+  sectionObserver = new IntersectionObserver((entries) => {
+    for (const entry of entries) {
+      if (entry.isIntersecting) activeSection.value = entry.target.id
+    }
+  }, { rootMargin: '-20% 0px -60% 0px', threshold: 0 })
+  editorSections.forEach((s) => {
+    const el = document.getElementById(s.id)
+    if (el) sectionObserver?.observe(el)
+  })
+})
+
+onBeforeUnmount(() => {
+  sectionObserver?.disconnect()
+  sectionObserver = null
 })
 </script>
 
@@ -322,43 +399,64 @@ onMounted(async () => {
       width="4xl"
     >
       <template #actions>
-        <AppButton variant="gradient" :disabled="loading" @click="save">
-          {{ loading ? '保存中…' : '保存' }}
+        <AppButton variant="gradient" :loading="loading" @click="save">
+          保存
         </AppButton>
       </template>
     </AppPageHeader>
 
-    <main class="mx-auto max-w-4xl space-y-6 px-5 py-6 animate-fade-in-up md:px-8 lg:px-10">
-      <AppCard v-if="!isEdit" padding="md" tone="glow" class="space-y-4">
-        <div class="flex flex-wrap items-start justify-between gap-3">
-          <div>
-            <h3 class="flex items-center gap-2 text-sm font-semibold text-ink-primary">
-              <span class="w-1 h-4 rounded-full bg-brand-gradient" />
-              AI 快速起草
-            </h3>
-            <p class="mt-1 text-xs text-ink-muted">一句话描述想法，模型会把名称、设定、开场白和示例对话填成初稿。</p>
-          </div>
+    <main class="mx-auto max-w-4xl space-y-6 px-5 py-6 animate-fade-in-up md:px-8 lg:px-10 lg:grid lg:grid-cols-[220px_1fr] lg:gap-8">
+      <!-- 桌面端章节导航 -->
+      <nav class="hidden lg:block">
+        <div class="sticky top-24 space-y-1">
+          <button
+            v-for="section in editorSections"
+            :key="section.id"
+            type="button"
+            class="w-full rounded-lg px-3 py-2 text-left text-sm transition-colors"
+            :class="activeSection === section.id ? 'bg-brand-500/15 text-brand-300' : 'text-ink-secondary hover:bg-ink-primary/5 hover:text-ink-primary'"
+            @click="scrollToSection(section.id)"
+          >
+            {{ section.label }}
+          </button>
+        </div>
+      </nav>
+
+      <div class="space-y-4">
+        <AppCard
+          v-if="!isEdit"
+          id="draft-card"
+          padding="md"
+          tone="glow"
+          collapsible
+          title="AI 快速起草"
+          :default-open="true"
+        >
+          <template #summary>一句话描述想法，模型会把名称、设定、开场白和示例对话填成初稿</template>
+          <div class="flex flex-wrap items-start justify-between gap-3">
           <div class="flex flex-wrap gap-2">
             <AppButton
               size="sm"
               variant="secondary"
+              :loading="draft.asking"
               :disabled="draft.asking || draft.loading"
               @click="askDraftQuestions"
             >
-              {{ draft.asking ? '追问中…' : '让 AI 追问' }}
+              让 AI 追问
             </AppButton>
             <AppButton
               size="sm"
               variant="gradient"
+              :loading="draft.loading"
               :disabled="draft.asking || draft.loading"
               @click="draftWithAi"
             >
-              {{ draft.loading ? '起草中…' : '生成并填入' }}
+              生成并填入
             </AppButton>
           </div>
         </div>
 
-        <div class="grid md:grid-cols-[1fr_260px] gap-3">
+        <div class="grid gap-3 md:grid-cols-[1fr_260px]">
           <AppFormField label="角色想法">
             <AppTextarea
               v-model="draft.idea"
@@ -383,9 +481,9 @@ onMounted(async () => {
             :key="question.id"
             class="space-y-2"
           >
-            <div>
+            <div class="border-l-2 border-brand-500/40 bg-surface pl-3 pr-2 py-2 rounded-r-lg">
               <p class="text-sm font-medium text-ink-secondary">
-                {{ index + 1 }}. {{ question.question }}
+                <span class="text-brand-300">Q{{ index + 1 }}.</span> {{ question.question }}
               </p>
               <p v-if="question.hint" class="mt-1 text-xs text-ink-muted">
                 {{ question.hint }}
@@ -424,84 +522,104 @@ onMounted(async () => {
           </div>
         </div>
 
-        <div v-if="draft.error" class="text-xs whitespace-pre-wrap bg-red-500/10 text-red-600 ring-1 ring-red-500/20 p-3 rounded-md">
-          {{ draft.error }}
+        <div v-if="draft.error" class="flex items-start gap-2 rounded-md border border-danger/20 bg-danger-soft p-3 text-xs text-danger-strong">
+          <svg class="mt-0.5 h-4 w-4 shrink-0" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+            <path fill-rule="evenodd" d="M18 10a8 8 0 1 1-16 0 8 8 0 0 1 16 0Zm-7 4a1 1 0 1 1-2 0 1 1 0 0 1 2 0Zm-1-9a1 1 0 0 0-1 1v4a1 1 0 1 0 2 0V6a1 1 0 0 0-1-1Z" clip-rule="evenodd" />
+          </svg>
+          <span class="whitespace-pre-wrap">{{ draft.error }}</span>
         </div>
       </AppCard>
 
       <!-- 单列表单：正文以长文本域为主，两列会把每个输入压得过窄 -->
       <div class="space-y-4">
-        <AppCard padding="md" class="space-y-4">
-          <h3 class="flex items-center gap-2 text-sm font-semibold text-ink-primary">
-            <span class="w-1 h-4 rounded-full bg-brand-gradient" />
-            人物设定
-          </h3>
-          <AppFormField label="名称" required>
-            <AppInput v-model="form.ch_name" placeholder="角色名" />
-          </AppFormField>
-          <AppFormField label="描述" hint="完整介绍这个角色,语气、外貌、背景、设定。">
-            <AppTextarea v-model="form.description" :rows="7" auto-grow />
-          </AppFormField>
-          <AppFormField label="性格">
-            <AppTextarea v-model="form.personality" :rows="4" auto-grow />
-          </AppFormField>
-          <AppFormField label="场景" hint="当前所处的情境。">
-            <AppTextarea v-model="form.scenario" :rows="4" auto-grow />
-          </AppFormField>
+        <AppCard id="basic-card" collapsible title="人物设定" :default-open="true">
+          <template #summary>名称、描述、性格、场景</template>
+          <div class="space-y-4">
+            <AppFormField label="名称" required>
+              <AppInput v-model="form.ch_name" placeholder="角色名" />
+            </AppFormField>
+            <AppFormField label="描述" hint="完整介绍这个角色,语气、外貌、背景、设定。">
+              <AppTextarea v-model="form.description" :rows="7" auto-grow />
+            </AppFormField>
+            <AppFormField label="性格">
+              <AppTextarea v-model="form.personality" :rows="4" auto-grow />
+            </AppFormField>
+            <AppFormField label="场景" hint="当前所处的情境。">
+              <AppTextarea v-model="form.scenario" :rows="4" auto-grow />
+            </AppFormField>
+          </div>
         </AppCard>
 
-        <!-- 配图 prompt 取自上面的人物设定，因此排在人物设定之后 -->
-        <AppCard padding="md" class="space-y-4">
-          <div class="flex flex-wrap items-center justify-between gap-3">
-            <h3 class="flex items-center gap-2 text-sm font-semibold text-ink-primary">
-              <span class="w-1 h-4 rounded-full bg-brand-gradient" />
-              角色图片
-            </h3>
-            <span v-if="applyingAvatar" class="text-xs text-ink-muted">写入头像中…</span>
-          </div>
-          <div class="grid gap-3 md:grid-cols-[180px_minmax(0,1fr)]">
-            <div class="aspect-[3/4] overflow-hidden rounded-xl bg-surface-sunken ring-1 ring-border-subtle">
-              <img
-                v-if="avatarPreview"
-                :src="avatarPreview"
-                class="h-full w-full object-cover"
-                alt=""
-              />
-              <div v-else class="flex h-full items-center justify-center px-4 text-center text-xs text-ink-muted">
-                角色头像
+        <AppCard id="image-card" collapsible title="角色图片" :default-open="true">
+          <template #summary>头像预览、AI 生成或本地上传</template>
+          <div class="space-y-4">
+            <div class="flex flex-wrap items-center justify-between gap-3">
+              <p class="text-xs text-ink-muted">支持 PNG、JPG，最大 10MB。</p>
+              <span v-if="applyingAvatar" class="text-xs text-ink-muted">写入头像中…</span>
+            </div>
+            <div class="grid gap-3 md:grid-cols-[180px_minmax(0,1fr)]">
+              <div class="aspect-[3/4] overflow-hidden rounded-xl bg-surface-sunken ring-1 ring-border-subtle">
+                <img
+                  v-if="avatarPreview"
+                  :src="avatarPreview"
+                  class="h-full w-full object-cover"
+                  alt=""
+                />
+                <div v-else class="flex h-full items-center justify-center px-4 text-center text-xs text-ink-muted">
+                  角色头像
+                </div>
+              </div>
+              <div class="space-y-3">
+                <ImageGenerateBox
+                  v-if="session.isAdmin"
+                  title="生成人物图"
+                  description="根据当前表单里的外貌、性格、场景生成角色图。新角色会在保存时写入头像；编辑已有角色会生成后立即写入。"
+                  :prompt="characterImagePrompt"
+                  context-type="character"
+                  :context-id="characterImageContextId"
+                  action-label="生成并作为头像"
+                  :draft-profile="getDraftProfile()"
+                  @generated="applyGeneratedAvatar"
+                />
+                <div class="rounded-xl border border-border-subtle bg-surface/45 p-4">
+                  <div class="flex flex-wrap items-center justify-between gap-3">
+                    <div class="min-w-0">
+                      <h4 class="text-sm font-semibold text-ink-primary">本地上传头像</h4>
+                      <p class="mt-1 text-xs text-ink-muted">选择一张本地图片作为角色头像。</p>
+                    </div>
+                    <AppButton size="sm" variant="secondary" @click="openAvatarFilePicker">
+                      选择图片
+                    </AppButton>
+                    <input
+                      ref="avatarInput"
+                      type="file"
+                      accept="image/*"
+                      class="hidden"
+                      @change="onAvatarFileSelected"
+                    />
+                  </div>
+                </div>
               </div>
             </div>
-            <ImageGenerateBox
-              v-if="session.isAdmin"
-              title="生成人物图"
-              description="根据当前表单里的外貌、性格、场景生成角色图。新角色会在保存时写入头像；编辑已有角色会生成后立即写入。"
-              :prompt="characterImagePrompt"
-              context-type="character"
-              :context-id="characterImageContextId"
-              action-label="生成并作为头像"
-              :draft-profile="getDraftProfile()"
-              @generated="applyGeneratedAvatar"
-            />
           </div>
         </AppCard>
 
-        <AppCard padding="md" class="space-y-4">
-          <h3 class="flex items-center gap-2 text-sm font-semibold text-ink-primary">
-            <span class="w-1 h-4 rounded-full bg-brand-gradient" />
-            对话样本
-          </h3>
-          <AppFormField label="开场白" hint="角色发出的第一条消息。">
-            <AppTextarea v-model="form.first_mes" :rows="5" auto-grow />
-          </AppFormField>
-          <AppFormField label="示例对话" hint="给模型示范这个角色的说话方式。">
-            <AppTextarea v-model="form.mes_example" :rows="5" auto-grow />
-          </AppFormField>
-          <AppFormField label="备用开场白" hint="一行一个,可在聊天中切换。">
-            <AppTextarea v-model="form.alternate_greetings" :rows="4" auto-grow />
-          </AppFormField>
+        <AppCard id="chat-card" collapsible title="对话样本" :default-open="true">
+          <template #summary>开场白、示例对话、备用开场白</template>
+          <div class="space-y-4">
+            <AppFormField label="开场白" hint="角色发出的第一条消息。">
+              <AppTextarea v-model="form.first_mes" :rows="5" auto-grow />
+            </AppFormField>
+            <AppFormField label="示例对话" hint="给模型示范这个角色的说话方式。">
+              <AppTextarea v-model="form.mes_example" :rows="5" auto-grow />
+            </AppFormField>
+            <AppFormField label="备用开场白" hint="一行一个,可在聊天中切换。">
+              <AppTextarea v-model="form.alternate_greetings" :rows="4" auto-grow />
+            </AppFormField>
+          </div>
         </AppCard>
 
-        <AppCard collapsible title="高级字段" :default-open="isEdit || isAdvancedCreate">
+        <AppCard id="advanced-card" collapsible title="高级字段" :default-open="isEdit || isAdvancedCreate">
           <template #summary>标签、世界书(长期设定资料库)、系统提示、作者信息</template>
           <div class="grid gap-4 md:grid-cols-2">
             <AppFormField label="标签" hint="逗号分隔。">
@@ -521,28 +639,31 @@ onMounted(async () => {
             <AppFormField label="版本">
               <AppInput v-model="form.character_version" />
             </AppFormField>
-            <AppFormField label="系统提示" class="md:col-span-2">
+            <AppFormField label="系统提示" hint="追加在对话最前面的全局规则，优先级高于角色描述。" class="md:col-span-2">
               <AppTextarea v-model="form.system_prompt" :rows="3" auto-grow />
             </AppFormField>
-            <AppFormField label="后历史指令" class="md:col-span-2">
+            <AppFormField label="后历史指令" hint="每次生成前追加在历史记录之后的额外指令。" class="md:col-span-2">
               <AppTextarea v-model="form.post_history_instructions" :rows="3" auto-grow />
             </AppFormField>
-            <AppFormField label="创作者备注" class="md:col-span-2">
+            <AppFormField label="创作者备注" hint="仅创作者可见的备注，不会进入模型上下文。" class="md:col-span-2">
               <AppTextarea v-model="form.creator_notes" :rows="4" auto-grow />
             </AppFormField>
           </div>
         </AppCard>
 
-        <AppCard collapsible title="试聊检查" :default-open="false">
+        <AppCard id="test-card" collapsible title="试聊检查" :default-open="false">
           <template #summary>保存前可选，不会写入聊天记录</template>
           <div class="space-y-4">
-            <div class="flex items-center justify-between">
-              <p class="text-xs text-ink-muted">用当前表单 + 选定 Profile 做一次单轮试跑。</p>
-              <AppButton size="sm" variant="gradient" :disabled="test.loading" @click="runTest">
-                {{ test.loading ? '生成中…' : '运行测试' }}
+            <div class="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <p class="text-sm font-medium text-ink-secondary">用当前表单 + 选定 Profile 做一次单轮试跑。</p>
+                <p class="text-xs text-ink-muted">试聊结果仅用于预览，不会保存到任何聊天记录。</p>
+              </div>
+              <AppButton size="sm" variant="gradient" :loading="test.loading" @click="runTest">
+                运行测试
               </AppButton>
             </div>
-            <div class="grid md:grid-cols-2 gap-3">
+            <div class="grid gap-3 md:grid-cols-2">
               <AppFormField label="使用 Profile">
                 <AppSelect v-model="test.profileId">
                   <option v-for="p in models.profiles" :key="p.id" :value="p.id">
@@ -566,13 +687,16 @@ onMounted(async () => {
               <h4 class="text-xs font-semibold text-ink-muted">输出</h4>
               <div
                 v-if="test.error"
-                class="text-xs whitespace-pre-wrap bg-red-500/10 text-red-600 ring-1 ring-red-500/20 p-3 rounded-md"
+                class="flex items-start gap-2 rounded-md border border-danger/20 bg-danger-soft p-3 text-xs text-danger-strong"
               >
-                {{ test.error }}
+                <svg class="mt-0.5 h-4 w-4 shrink-0" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+                  <path fill-rule="evenodd" d="M18 10a8 8 0 1 1-16 0 8 8 0 0 1 16 0Zm-7 4a1 1 0 1 1-2 0 1 1 0 0 1 2 0Zm-1-9a1 1 0 0 0-1 1v4a1 1 0 1 0 2 0V6a1 1 0 0 0-1-1Z" clip-rule="evenodd" />
+                </svg>
+                <span class="whitespace-pre-wrap">{{ test.error }}</span>
               </div>
               <div
                 v-else
-                class="text-sm whitespace-pre-wrap text-ink-primary bg-surface-sunken ring-1 ring-border-subtle p-3 rounded-md leading-relaxed max-h-72 overflow-y-auto"
+                class="max-h-72 overflow-y-auto rounded-md bg-surface-sunken p-3 text-sm leading-relaxed whitespace-pre-wrap text-ink-primary ring-1 ring-border-subtle"
               >
                 {{ test.result }}
               </div>
@@ -583,10 +707,11 @@ onMounted(async () => {
 
       <!-- 长表单末尾再放一次保存，滚到底不用回到顶栏 -->
       <div class="flex items-center justify-end gap-3">
-        <AppButton variant="secondary" @click="router.push(backTo)">取消</AppButton>
-        <AppButton variant="gradient" :disabled="loading" @click="save">
-          {{ loading ? '保存中…' : '保存' }}
+        <AppButton variant="ghost" @click="router.push(backTo)">取消</AppButton>
+        <AppButton variant="gradient" :loading="loading" @click="save">
+          保存
         </AppButton>
+      </div>
       </div>
     </main>
   </div>

@@ -15,19 +15,16 @@ import {
 } from '@/api/community'
 import WorkCard from '@/components/community/WorkCard.vue'
 import AppButton from '@/components/ui/AppButton.vue'
+import AppDrawer from '@/components/ui/AppDrawer.vue'
 import AppEmpty from '@/components/ui/AppEmpty.vue'
 import AppPageHeader from '@/components/ui/AppPageHeader.vue'
-import AppSpinner from '@/components/ui/AppSpinner.vue'
+import AppSegmentedControl from '@/components/ui/AppSegmentedControl.vue'
+import AppCheckbox from '@/components/ui/AppCheckbox.vue'
 import AppCard from '@/components/ui/AppCard.vue'
 import AppInput from '@/components/ui/AppInput.vue'
 import AppTextarea from '@/components/ui/AppTextarea.vue'
 import SearchInput from '@/components/ui/SearchInput.vue'
 import { getApiErrorMessage } from '@/api/client'
-
-// 筛选栏统一控件尺寸：分段控件与开关胶囊同高
-const segmentedClass = 'inline-flex h-9 shrink-0 items-center rounded-lg border border-border bg-surface p-1'
-const segmentedItemClass = 'inline-flex h-7 items-center rounded-md px-3 text-xs font-medium transition-colors'
-const chipClass = 'inline-flex h-9 shrink-0 items-center rounded-lg border px-3 text-xs font-medium transition-colors'
 
 const route = useRoute()
 const router = useRouter()
@@ -46,6 +43,7 @@ const ranking = ref<'recommended' | 'recent' | 'daily' | 'weekly' | 'monthly' | 
 const noImage = ref(false)
 const favoritesOnly = ref(false)
 const mineOnly = ref(false)
+const moreFiltersOpen = ref(false)
 const page = ref(1)
 const hasMore = ref(false)
 let searchTimer: ReturnType<typeof setTimeout> | null = null
@@ -95,13 +93,18 @@ const discordSource = computed<DiscordCommunitySource | null>(() => {
   return { guildId, channelId, threadId, cardId, sourceUrl, title, authorName, tags }
 })
 
+const sourceOptions = [
+  { value: 'community' as const, label: 'AIBAR 社区' },
+  { value: 'discord' as const, label: 'Discord 公共发布' },
+]
+
 const rankings = [
-  { value: 'recommended', label: '推荐' },
-  { value: 'recent', label: '最新' },
-  { value: 'daily', label: '日榜' },
-  { value: 'weekly', label: '周榜' },
-  { value: 'monthly', label: '月榜' },
-  { value: 'all', label: '总榜' },
+  { value: 'recommended', label: '推荐', icon: '✨' },
+  { value: 'recent', label: '最新', icon: '🔥' },
+  { value: 'daily', label: '日榜', icon: '📅' },
+  { value: 'weekly', label: '周榜', icon: '📊' },
+  { value: 'monthly', label: '月榜', icon: '🏆' },
+  { value: 'all', label: '总榜', icon: '🌟' },
 ] as const
 
 const typeFilters: { value: '' | CommunityWorkType; label: string }[] = [
@@ -375,8 +378,8 @@ onBeforeUnmount(() => {
 <template>
   <div class="min-h-[100dvh] bg-bg">
     <AppPageHeader
-      :title="source === 'discord' ? 'Discord 公共发布' : '社区作品'"
-      :subtitle="source === 'discord' ? '发布 Discord 角色卡到公共区' : '角色卡、故事与提示词'"
+      title="社区"
+      subtitle="角色卡、故事与提示词"
       :show-back="false"
     >
       <template #actions>
@@ -385,65 +388,63 @@ onBeforeUnmount(() => {
     </AppPageHeader>
 
     <main class="mx-auto max-w-6xl px-5 py-6 md:px-8 lg:px-10">
-      <div class="mb-6 inline-flex w-full rounded-lg border border-border bg-surface p-1 md:w-auto" aria-label="资源来源">
-        <button
-          class="min-w-0 flex-1 rounded-md px-2 py-2 text-xs font-medium leading-tight md:flex-none md:px-4 md:text-sm"
-          :class="source === 'community' ? 'bg-brand-500/10 text-brand-300' : 'text-ink-secondary hover:bg-surface-sunken'"
-          :aria-pressed="source === 'community'"
-          @click="selectSource('community')"
-        ><span class="md:hidden">AIBAR</span><span class="hidden md:inline">AIBAR 社区</span></button>
-        <button
-          class="min-w-0 flex-1 rounded-md px-2 py-2 text-xs font-medium leading-tight md:flex-none md:px-4 md:text-sm"
-          :class="source === 'discord' ? 'bg-brand-500/10 text-brand-300' : 'text-ink-secondary hover:bg-surface-sunken'"
-          :aria-pressed="source === 'discord'"
-          @click="selectSource('discord')"
-        ><span class="md:hidden">Discord 发布</span><span class="hidden md:inline">Discord 公共发布</span></button>
-      </div>
+      <AppSegmentedControl
+        v-model="source"
+        class="mb-6"
+        :options="sourceOptions"
+        @update:model-value="selectSource"
+      />
 
       <template v-if="source === 'community'">
         <div class="space-y-6">
-          <!-- 筛选栏：搜索 + 分段控件（类型/榜单）+ 开关胶囊，控件统一 h-9 -->
+          <!-- 筛选栏：搜索 + 类型/榜单分段控件 + 更多筛选抽屉 -->
           <div class="flex flex-col gap-3 border-b border-border pb-5">
             <div class="flex flex-col gap-3 lg:flex-row lg:items-center">
               <SearchInput v-model="search" class="min-w-0 flex-1" placeholder="搜索标题、作者或简介" />
               <div class="flex flex-wrap items-center gap-2">
-                <div :class="segmentedClass" role="group" aria-label="作品类型">
-                  <button v-for="item in typeFilters" :key="item.value" :class="[segmentedItemClass, type === item.value ? 'bg-brand-500/10 text-brand-300' : 'text-ink-secondary hover:bg-surface-sunken']" :aria-pressed="type === item.value" @click="type = item.value">{{ item.label }}</button>
-                </div>
-                <button :class="[chipClass, favoritesOnly ? 'border-brand-500 bg-brand-500/10 text-brand-300' : 'border-border bg-surface text-ink-secondary hover:bg-surface-sunken']" :aria-pressed="favoritesOnly" @click="favoritesOnly = !favoritesOnly">收藏</button>
-                <button :class="[chipClass, mineOnly ? 'border-brand-500 bg-brand-500/10 text-brand-300' : 'border-border bg-surface text-ink-secondary hover:bg-surface-sunken']" :aria-pressed="mineOnly" @click="mineOnly = !mineOnly">我发布的</button>
-                <button :class="[chipClass, noImage ? 'border-brand-500 bg-brand-500/10 text-brand-300' : 'border-border bg-surface text-ink-secondary hover:bg-surface-sunken']" :aria-pressed="noImage" @click="noImage = !noImage">无图模式</button>
+                <AppSegmentedControl v-model="type" size="sm" :options="typeFilters" />
+                <button
+                  class="inline-flex h-9 shrink-0 items-center rounded-lg border px-3 text-xs font-medium transition-colors"
+                  :class="moreFiltersOpen || favoritesOnly || mineOnly || noImage || activeTag
+                    ? 'border-brand-500 bg-brand-500/10 text-brand-300'
+                    : 'border-border bg-surface text-ink-secondary hover:bg-surface-sunken'"
+                  @click="moreFiltersOpen = true"
+                >
+                  更多筛选
+                  <span v-if="[favoritesOnly, mineOnly, noImage, Boolean(activeTag)].filter(Boolean).length" class="ml-1.5 rounded-full bg-brand-500 px-1.5 text-[10px] text-white">
+                    {{ [favoritesOnly, mineOnly, noImage, Boolean(activeTag)].filter(Boolean).length }}
+                  </span>
+                </button>
               </div>
             </div>
             <div class="overflow-x-auto">
-              <div :class="segmentedClass" role="group" aria-label="排序榜单">
-                <button v-for="item in rankings" :key="item.value" :class="[segmentedItemClass, ranking === item.value ? 'bg-brand-500/10 text-brand-300' : 'text-ink-secondary hover:bg-surface-sunken']" :aria-pressed="ranking === item.value" @click="ranking = item.value">{{ item.label }}</button>
-              </div>
-            </div>
-            <div v-if="availableTags.length" class="-mx-1 flex gap-2 overflow-x-auto px-1 pb-1" role="group" aria-label="标签筛选">
-              <button
-                :class="[chipClass, !activeTag ? 'border-brand-500 bg-brand-500/10 text-brand-300' : 'border-border bg-surface text-ink-secondary hover:bg-surface-sunken']"
-                :aria-pressed="!activeTag"
-                @click="activeTag = ''"
-              >全部标签</button>
-              <button
-                v-for="item in availableTags"
-                :key="item.tag"
-                :class="[chipClass, activeTag === item.tag ? 'border-brand-500 bg-brand-500/10 text-brand-300' : 'border-border bg-surface text-ink-secondary hover:bg-surface-sunken']"
-                :aria-pressed="activeTag === item.tag"
-                @click="activeTag = activeTag === item.tag ? '' : item.tag"
-              >#{{ item.tag }} <span class="ml-0.5 opacity-70">{{ item.count }}</span></button>
+              <AppSegmentedControl v-model="ranking" size="sm" :options="rankings.map(r => ({ value: r.value, label: r.label, icon: r.icon }))" />
             </div>
           </div>
 
-          <div v-if="loading" class="py-20"><AppSpinner size="lg" /></div>
+          <!-- 骨架屏：复用 BrowsePage 的网格比例 -->
+          <div v-if="loading" class="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
+            <div v-for="n in 10" :key="n" class="overflow-hidden rounded-2xl bg-surface ring-1 ring-border-subtle">
+              <div class="skeleton aspect-[3/4] w-full" />
+              <div class="space-y-2 p-3">
+                <div class="skeleton h-3 w-3/4" />
+                <div class="skeleton h-3 w-1/2" />
+              </div>
+            </div>
+          </div>
           <AppEmpty v-else-if="!works.length" class="!py-8 md:!py-16" icon="search" title="没有匹配的作品" description="调整筛选条件，或发布第一份公共作品。">
             <template #actions><AppButton @click="router.push('/publish')">发布作品</AppButton></template>
           </AppEmpty>
           <section v-else :class="noImage ? 'grid gap-4 sm:grid-cols-2 lg:grid-cols-3' : 'grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5'">
-            <button v-for="(work, index) in works" :key="work.id" class="h-full min-w-0 text-left" @click="router.push(`/work/${encodeURIComponent(work.id)}`)">
-              <WorkCard :work="work" :no-image="noImage" :eager="index < 5" />
-            </button>
+            <WorkCard
+              v-for="(work, index) in works"
+              :key="work.id"
+              class="h-full min-w-0"
+              :work="work"
+              :no-image="noImage"
+              :eager="index < 5"
+              @click="router.push(`/work/${encodeURIComponent(work.id)}`)"
+            />
           </section>
           <div v-if="hasMore" class="flex justify-center">
             <AppButton variant="secondary" :disabled="loadingMore" @click="loadMoreWorks">{{ loadingMore ? '加载中…' : '加载更多' }}</AppButton>
@@ -452,7 +453,7 @@ onBeforeUnmount(() => {
       </template>
 
       <template v-else>
-        <div class="max-w-3xl">
+        <div class="mx-auto max-w-3xl">
           <AppCard padding="lg">
             <div class="space-y-4">
               <div>
@@ -463,7 +464,7 @@ onBeforeUnmount(() => {
                 <p class="text-sm font-medium text-ink-primary">{{ discordSource.title }}</p>
                 <p class="mt-1 text-xs text-ink-muted">{{ discordSource.authorName || 'Discord 作者' }}</p>
               </div>
-              <p v-else class="text-sm text-amber-700" data-testid="discord-publish-context-error">缺少 Discord 帖子来源，请从本地同步控制台选择角色卡并发起发布。</p>
+              <p v-else class="text-sm text-warning-strong" data-testid="discord-publish-context-error">缺少 Discord 帖子来源，请从本地同步控制台选择角色卡并发起发布。</p>
               <div class="flex flex-col gap-3 md:flex-row">
                 <AppInput
                   v-model="importUrl"
@@ -475,7 +476,8 @@ onBeforeUnmount(() => {
                 />
                 <AppButton
                   data-testid="discord-png-import-submit"
-                  :disabled="importing || !importUrl.trim() || !discordSource"
+                  :loading="importing"
+                  :disabled="!importUrl.trim() || !discordSource"
                   @click="importFromDiscord"
                 >{{ importing ? '发布中…' : '发布到公共区' }}</AppButton>
               </div>
@@ -484,11 +486,11 @@ onBeforeUnmount(() => {
                   data-testid="discord-png-import-result"
                   :data-publish-status="publishedStatus"
                   :data-work-id="publishedWorkId"
-                  class="text-sm text-emerald-700"
+                  class="text-sm text-success-strong"
                 >{{ importResult }}</p>
                 <AppButton size="sm" variant="secondary" @click="router.push(`/work/${encodeURIComponent(publishedWorkId)}`)">查看公共作品</AppButton>
               </div>
-              <p v-if="importError" data-testid="discord-png-import-error" class="text-sm text-red-700">{{ importError }}</p>
+              <p v-if="importError" data-testid="discord-png-import-error" class="text-sm text-danger-strong">{{ importError }}</p>
             </div>
           </AppCard>
 
@@ -512,7 +514,8 @@ onBeforeUnmount(() => {
               <div class="flex flex-wrap items-center gap-3">
                 <AppButton
                   data-testid="discord-batch-submit"
-                  :disabled="batchRunning || !batchInput.trim()"
+                  :loading="batchRunning"
+                  :disabled="!batchInput.trim()"
                   @click="runBatchPublish"
                 >{{ batchRunning ? '批量发布中…' : '批量发布' }}</AppButton>
                 <p
@@ -524,7 +527,7 @@ onBeforeUnmount(() => {
                   <template v-else-if="batchDone">已完成 {{ batchRows.length }} 项</template>
                   <template v-else>等待批量输入</template>
                 </p>
-                <p v-if="batchError" data-testid="discord-batch-error" class="text-sm text-red-700">{{ batchError }}</p>
+                <p v-if="batchError" data-testid="discord-batch-error" class="text-sm text-danger-strong">{{ batchError }}</p>
               </div>
               <ul v-if="batchRows.length" class="divide-y divide-border-subtle rounded-lg border border-border">
                 <li
@@ -538,7 +541,7 @@ onBeforeUnmount(() => {
                 >
                   <span class="min-w-0 flex-1 truncate text-ink-primary">{{ row.title }}</span>
                   <span
-                    :class="row.status === 'failed' ? 'text-red-600' : row.status === 'pending' ? 'text-ink-muted' : 'text-emerald-700'"
+                    :class="row.status === 'failed' ? 'text-danger' : row.status === 'pending' ? 'text-ink-muted' : 'text-success-strong'"
                   >{{ row.status === 'pending' ? '等待' : row.status === 'published' ? '已发布' : row.status === 'duplicate' ? '重复关联' : `失败：${row.error}` }}</span>
                   <AppButton
                     v-if="row.workId"
@@ -553,5 +556,50 @@ onBeforeUnmount(() => {
         </div>
       </template>
     </main>
+
+    <!-- 更多筛选抽屉 -->
+    <AppDrawer v-model="moreFiltersOpen" title="更多筛选" padded>
+      <div class="space-y-5">
+        <div class="space-y-3">
+          <h4 class="text-xs font-semibold uppercase tracking-wide text-ink-muted">筛选条件</h4>
+          <div class="space-y-2">
+            <AppCheckbox v-model="favoritesOnly">仅看收藏</AppCheckbox>
+            <AppCheckbox v-model="mineOnly">仅看我发布的</AppCheckbox>
+            <AppCheckbox v-model="noImage">无图模式</AppCheckbox>
+          </div>
+        </div>
+
+        <div v-if="availableTags.length" class="space-y-3">
+          <h4 class="text-xs font-semibold uppercase tracking-wide text-ink-muted">标签</h4>
+          <div class="flex flex-wrap gap-2">
+            <button
+              :class="[
+                'inline-flex items-center rounded-lg border px-2.5 py-1.5 text-xs font-medium transition-colors',
+                !activeTag
+                  ? 'border-brand-500 bg-brand-500/10 text-brand-300'
+                  : 'border-border bg-surface text-ink-secondary hover:bg-surface-sunken',
+              ]"
+              @click="activeTag = ''"
+            >全部标签</button>
+            <button
+              v-for="item in availableTags"
+              :key="item.tag"
+              :class="[
+                'inline-flex items-center rounded-lg border px-2.5 py-1.5 text-xs font-medium transition-colors',
+                activeTag === item.tag
+                  ? 'border-brand-500 bg-brand-500/10 text-brand-300'
+                  : 'border-border bg-surface text-ink-secondary hover:bg-surface-sunken',
+              ]"
+              @click="activeTag = activeTag === item.tag ? '' : item.tag"
+            >#{{ item.tag }} <span class="ml-0.5 opacity-70">{{ item.count }}</span></button>
+          </div>
+        </div>
+
+        <div class="flex gap-2 pt-2">
+          <AppButton variant="secondary" class="flex-1" @click="favoritesOnly = false; mineOnly = false; noImage = false; activeTag = ''">重置</AppButton>
+          <AppButton class="flex-1" @click="moreFiltersOpen = false">完成</AppButton>
+        </div>
+      </div>
+    </AppDrawer>
   </div>
 </template>

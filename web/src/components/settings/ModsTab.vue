@@ -11,6 +11,7 @@ import AppTextarea from '@/components/ui/AppTextarea.vue'
 import AppCard from '@/components/ui/AppCard.vue'
 import AppFormField from '@/components/ui/AppFormField.vue'
 import AppEmpty from '@/components/ui/AppEmpty.vue'
+import AppCheckbox from '@/components/ui/AppCheckbox.vue'
 
 const ui = useUiStore()
 const mods = useModsStore()
@@ -104,7 +105,7 @@ watch(
           v-for="mod in mods.mods"
           :key="mod.id"
           :class="[
-            'relative w-full text-left px-3 py-2.5 rounded-lg transition-colors',
+            'relative w-full text-left px-3 py-2.5 rounded-lg transition-all duration-200',
             selectedModId === mod.id
               ? 'bg-brand-500/15 text-brand-300 ring-1 ring-brand-500/30'
               : 'text-ink-secondary hover:bg-ink-primary/5 hover:text-ink-primary',
@@ -117,13 +118,18 @@ watch(
           />
           <div class="flex items-center justify-between gap-2">
             <span class="text-sm font-medium truncate">{{ mod.name }}</span>
-            <span v-if="mod.enabled" class="text-[11px] text-emerald-600 shrink-0">全局</span>
+            <span v-if="mod.enabled" class="text-[11px] text-success shrink-0">全局</span>
           </div>
           <div class="mt-1 text-[11px] text-ink-muted truncate">
             {{ mod.builtin ? '公用Mod' : '我的Mod' }} · {{ positionLabels[mod.position] }} · {{ mod.content.length }} 字
           </div>
         </button>
-        <AppEmpty v-if="!mods.mods.length" icon="box" title="暂无 MOD" description="点击上方新建或写入示例。" />
+        <AppEmpty v-if="!mods.mods.length" icon="box" title="暂无 MOD" description="点击上方新建或写入示例。">
+          <template #actions>
+            <AppButton size="sm" @click="addMod">新建 MOD</AppButton>
+            <AppButton size="sm" variant="secondary" @click="writeSampleMods">写入示例</AppButton>
+          </template>
+        </AppEmpty>
       </div>
     </AppCard>
 
@@ -133,25 +139,33 @@ watch(
           <h2 class="text-sm font-semibold text-ink-primary">MOD 详情</h2>
           <p class="text-xs text-ink-muted mt-1">左侧浏览已有 MOD,右侧编辑当前选中项。</p>
         </div>
-        <div class="flex items-center gap-2">
+        <div class="flex flex-wrap items-center gap-2">
           <span v-if="selectedMod.builtin" class="text-[11px] text-ink-muted bg-surface-sunken px-1.5 py-0.5 rounded">内置</span>
-          <AppButton v-if="!selectedMod.builtin" size="sm" variant="secondary" @click="publishSelectedMod(selectedMod)">发布到社区</AppButton>
-          <label class="flex items-center gap-1.5 text-xs text-ink-secondary cursor-pointer">
-            <input
-              type="checkbox"
-              :checked="selectedMod.enabled"
-              class="accent-brand-500"
-              @change="(e) => mods.updateMod(selectedMod!.id, { enabled: (e.target as HTMLInputElement).checked })"
-            />
-            全局启用
-          </label>
-          <button
-            v-if="!selectedMod.builtin"
-            class="text-xs text-red-500 hover:text-red-600 transition-colors"
-            @click="deleteSelectedMod(selectedMod)"
-          >
-            删除
-          </button>
+          <AppCheckbox
+            :model-value="selectedMod.enabled"
+            @update:model-value="mods.updateMod(selectedMod!.id, { enabled: $event })"
+          >全局启用</AppCheckbox>
+          <details class="relative">
+            <summary class="list-none">
+              <AppButton size="sm" variant="ghost" type="button">更多</AppButton>
+            </summary>
+            <div class="absolute right-0 mt-1 w-36 rounded-xl border border-border-subtle bg-surface-elevated p-1 shadow-elevated z-10">
+              <button
+                v-if="!selectedMod.builtin"
+                class="w-full rounded-lg px-3 py-2 text-left text-sm text-ink-secondary transition-colors hover:bg-surface-sunken hover:text-ink-primary"
+                @click="publishSelectedMod(selectedMod)"
+              >
+                发布到社区
+              </button>
+              <button
+                v-if="!selectedMod.builtin"
+                class="w-full rounded-lg px-3 py-2 text-left text-sm text-danger hover:text-danger-strong transition-colors hover:bg-danger/10"
+                @click="deleteSelectedMod(selectedMod)"
+              >
+                删除
+              </button>
+            </div>
+          </details>
         </div>
       </div>
 

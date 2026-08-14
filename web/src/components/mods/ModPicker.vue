@@ -2,6 +2,7 @@
 import { computed, ref } from 'vue'
 import type { ModItem } from '@/stores/mods'
 import SearchInput from '@/components/ui/SearchInput.vue'
+import AppCheckbox from '@/components/ui/AppCheckbox.vue'
 
 const props = withDefaults(defineProps<{
   modelValue: string[]
@@ -113,18 +114,17 @@ function toggleMod(id: string) {
         ]"
       >
         <div class="flex items-start gap-2.5">
-          <input
-            type="checkbox"
-            class="mt-1 accent-brand-500"
-            :checked="selectedSet.has(mod.id)"
+          <AppCheckbox
+            class="mt-1"
+            :model-value="selectedSet.has(mod.id)"
             :disabled="lockedSet.has(mod.id)"
-            @change="toggleMod(mod.id)"
+            @update:model-value="() => toggleMod(mod.id)"
           />
           <div class="min-w-0 flex-1">
             <div class="flex flex-wrap items-center gap-1.5">
               <span class="truncate text-sm font-medium text-ink-primary">{{ mod.name }}</span>
               <span class="rounded bg-ink-primary/5 px-1.5 py-0.5 text-[11px] text-ink-muted">{{ mod.builtin ? '公用' : '我的' }}</span>
-              <span v-if="mod.enabled" class="rounded bg-emerald-500/10 px-1.5 py-0.5 text-[11px] text-emerald-600">全局</span>
+              <span v-if="mod.enabled" class="rounded bg-success/10 px-1.5 py-0.5 text-[11px] text-success">全局</span>
               <span class="rounded bg-ink-primary/5 px-1.5 py-0.5 text-[11px] text-ink-muted">{{ positionLabel(mod.position) }}</span>
             </div>
             <p v-if="mod.description" class="mt-1 line-clamp-2 text-xs leading-relaxed text-ink-secondary">

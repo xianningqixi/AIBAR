@@ -29,6 +29,14 @@ describe('AppButton', () => {
     const wrapper = mount(AppButton, { props: { variant: 'danger', type: 'submit' } })
     const button = wrapper.get('button')
     expect(button.attributes('type')).toBe('submit')
-    expect(button.classes().join(' ')).toContain('text-red-600')
+    expect(button.classes().join(' ')).toContain('text-danger')
+  })
+
+  it('disables itself and shows a spinner while loading', () => {
+    const wrapper = mount(AppButton, { props: { loading: true }, slots: { default: '保存' } })
+    const button = wrapper.get('button')
+    expect(button.attributes('disabled')).toBeDefined()
+    expect(button.attributes('aria-busy')).toBe('true')
+    expect(wrapper.find('svg.animate-spin').exists()).toBe(true)
   })
 })

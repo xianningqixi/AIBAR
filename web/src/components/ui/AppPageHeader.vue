@@ -10,12 +10,15 @@ const props = withDefaults(defineProps<{
   // 顶层页面桌面端有常驻侧栏，返回按钮只在移动端显示
   mobileOnlyBack?: boolean
   sticky?: boolean
+  // 标题字号：默认 text-base，详情页传入 text-lg 更突出内容名
+  titleClass?: string
   // 与页面正文的 mx-auto max-w-* 容器保持一致，避免标题与内容错位
-  width?: '6xl' | '4xl'
+  width?: '4xl' | '5xl' | '6xl'
 }>(), {
   showBack: true,
   mobileOnlyBack: false,
   sticky: true,
+  titleClass: 'text-base md:text-lg',
   width: '6xl',
 })
 
@@ -25,7 +28,14 @@ const emit = defineEmits<{
 
 const router = useRouter()
 
-const maxWidthClass = computed(() => (props.width === '4xl' ? 'max-w-4xl' : 'max-w-6xl'))
+const maxWidthClass = computed(() => {
+  const map: Record<string, string> = {
+    '4xl': 'max-w-4xl',
+    '5xl': 'max-w-5xl',
+    '6xl': 'max-w-6xl',
+  }
+  return map[props.width]
+})
 
 function goBack() {
   emit('back')
@@ -42,13 +52,14 @@ function goBack() {
 <template>
   <header
     :class="[
-      'border-b border-border-subtle bg-bg/85 backdrop-blur z-20',
+      'border-b border-border-subtle bg-surface/80 backdrop-blur-md shadow-sm z-20',
       sticky ? 'sticky top-0' : '',
     ]"
   >
     <div class="px-5 md:px-8 lg:px-10">
       <!-- 固定 h-16：所有页面标题栏等高，且与正文容器同宽同边距 -->
       <div :class="['mx-auto flex h-16 items-center gap-3', maxWidthClass]">
+        <slot name="breadcrumb" />
         <button
           v-if="showBack"
           :class="[
@@ -64,9 +75,10 @@ function goBack() {
           <span class="text-sm">返回</span>
         </button>
         <div class="flex-1 min-w-0">
-          <h1 class="text-base font-semibold text-ink-primary truncate leading-tight">{{ title }}</h1>
+          <!-- 超长时显示完整名称 tooltip -->
+          <h1 :title="title" :class="['font-semibold text-ink-primary truncate leading-tight', titleClass]">{{ title }}</h1>
           <!-- 副标题只占一行，标题栏高度恒定 -->
-          <p v-if="subtitle" class="text-xs text-ink-muted truncate leading-tight">{{ subtitle }}</p>
+          <p v-if="subtitle" :title="subtitle" class="text-xs text-ink-muted truncate leading-tight">{{ subtitle }}</p>
         </div>
         <div v-if="$slots.actions" class="flex shrink-0 items-center gap-2">
           <slot name="actions" />

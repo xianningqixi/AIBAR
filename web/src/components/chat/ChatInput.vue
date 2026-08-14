@@ -11,6 +11,7 @@ const props = defineProps<{
   draftDisabled?: boolean
   draftOptions?: ReplyDraftOption[]
   draftError?: string
+  characterName?: string
 }>()
 
 const emit = defineEmits<{
@@ -24,8 +25,12 @@ const emit = defineEmits<{
 
 const text = ref(props.modelValue || '')
 const textarea = ref<HTMLTextAreaElement>()
+const focused = ref(false)
 const draftPanelOpen = computed(() =>
   props.draftLoading || !!props.draftError || !!props.draftOptions?.length,
+)
+const placeholder = computed(() =>
+  props.characterName ? `给 ${props.characterName} 发条消息…` : '给角色发条消息…',
 )
 
 watch(() => props.modelValue, (value) => {
@@ -85,16 +90,18 @@ function selectDraft(option: ReplyDraftOption) {
   emit('selectDraft', option)
   emit('clearDrafts')
 }
+
+const showHint = computed(() => focused.value || text.value.trim().length > 0 || props.isStreaming || props.busyLabel)
 </script>
 
 <template>
-  <!-- px-4 与消息列 (mx-auto max-w-4xl px-4) 对齐，输入框与气泡共用同一条左右边界 -->
-  <div class="border-t border-border-subtle bg-bg/85 px-4 pb-[calc(.75rem+env(safe-area-inset-bottom))] pt-2.5 backdrop-blur md:pb-3">
+  <!-- 输入区停靠栏：加深背景、上边框，与页面内容形成明确分界 -->
+  <div class="border-t border-border-subtle bg-bg/95 px-4 pb-[calc(.875rem+env(safe-area-inset-bottom))] pt-3 shadow-[0_-4px_24px_-8px_rgb(var(--c-shadow)/0.12)] backdrop-blur md:px-6 md:pb-[calc(1rem+env(safe-area-inset-bottom))] md:pt-4">
     <div class="relative mx-auto max-w-4xl">
       <!-- AI 拟回复面板锚定在输入区上方，输入框长高时不会被遮住 -->
       <div
         v-if="draftPanelOpen"
-        class="absolute inset-x-0 bottom-full z-30 mb-2 max-h-[48dvh] overflow-hidden rounded-xl border border-brand-500/30 bg-surface-elevated shadow-2xl ring-1 ring-brand-500/15"
+        class="absolute inset-x-0 bottom-full z-30 mb-3 max-h-[40dvh] overflow-hidden rounded-xl border border-brand-500/30 bg-surface-elevated shadow-2xl ring-1 ring-brand-500/15 md:max-h-[48dvh]"
       >
         <div class="flex flex-wrap items-center justify-between gap-2 border-b border-border-subtle px-3 py-2.5">
           <div class="min-w-0">
@@ -105,15 +112,19 @@ function selectDraft(option: ReplyDraftOption) {
             <button
               class="rounded-lg px-2.5 py-1.5 text-xs text-brand-300 ring-1 ring-brand-500/25 transition-colors hover:bg-brand-500/10 disabled:opacity-40"
               :disabled="draftDisabled || draftLoading"
+              aria-label="换一批拟回复"
               @click="requestDrafts"
             >
               {{ draftLoading ? '生成中…' : '换一批' }}
             </button>
             <button
-              class="rounded-lg px-2.5 py-1.5 text-xs text-ink-muted transition-colors hover:bg-ink-primary/5 hover:text-ink-primary"
+              class="rounded-lg p-1.5 text-ink-muted transition-colors hover:bg-ink-primary/5 hover:text-ink-primary"
+              aria-label="收起拟回复"
               @click="$emit('clearDrafts')"
             >
-              收起
+              <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+              </svg>
             </button>
           </div>
         </div>
@@ -122,11 +133,11 @@ function selectDraft(option: ReplyDraftOption) {
           正在拆出 5 个剧情方向…
         </div>
 
-        <div v-else-if="draftError" class="m-3 rounded-lg bg-red-500/10 px-3 py-2 text-xs text-red-600 ring-1 ring-red-500/20">
+        <div v-else-if="draftError" class="m-3 rounded-lg bg-danger/10 px-3 py-2 text-xs text-danger ring-1 ring-danger/20">
           {{ draftError }}
         </div>
 
-        <div v-else class="grid max-h-[34vh] gap-2 overflow-y-auto p-2">
+        <div v-else class="grid max-h-[34vh] gap-2 overflow-y-auto p-2 md:max-h-[28vh]">
           <button
             v-for="option in draftOptions"
             :key="option.id"
@@ -145,23 +156,26 @@ function selectDraft(option: ReplyDraftOption) {
       </div>
 
       <div
-        class="flex items-end gap-2 rounded-2xl border border-border bg-surface-elevated/80 p-1.5 shadow-sm transition-all focus-within:border-brand-500/60 focus-within:shadow-glow"
+        class="flex items-end gap-1.5 rounded-2xl border border-border bg-surface-elevated/80 p-2 shadow-sm transition-all focus-within:border-brand-500/60 focus-within:shadow-glow"
       >
         <textarea
           ref="textarea"
           v-model="text"
           :disabled="disabled"
           rows="1"
-          class="min-h-[2.75rem] flex-1 resize-none overflow-y-auto bg-transparent px-3 py-2.5 text-sm leading-snug text-ink-primary placeholder-ink-muted focus:outline-none"
-          placeholder="给角色发条消息…"
+          class="min-h-[2.75rem] flex-1 resize-none overflow-y-auto bg-transparent px-4 py-3 text-sm leading-snug text-ink-primary placeholder-ink-muted/80 focus:outline-none"
+          :placeholder="placeholder"
+          @focus="focused = true"
+          @blur="focused = false"
           @keydown="onKeydown"
           @input="handleInput"
         />
         <button
           v-if="!isStreaming"
           :disabled="draftDisabled || draftLoading"
-          class="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-brand-500/25 bg-brand-500/10 text-brand-300 transition-colors hover:bg-brand-500/20 disabled:cursor-not-allowed disabled:opacity-30"
+          class="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl text-ink-secondary transition-colors hover:bg-brand-500/10 hover:text-brand-300 disabled:cursor-not-allowed disabled:opacity-30"
           :title="draftLoading ? 'AI 正在拟回复' : 'AI 拟回复'"
+          :aria-label="draftLoading ? 'AI 正在拟回复' : 'AI 拟回复'"
           @click="requestDrafts"
         >
           <svg v-if="draftLoading" class="h-4 w-4 animate-spin" fill="none" viewBox="0 0 24 24">
@@ -169,15 +183,15 @@ function selectDraft(option: ReplyDraftOption) {
             <path class="opacity-90" fill="currentColor" d="M21 12a9 9 0 0 0-9-9v3a6 6 0 0 1 6 6h3Z" />
           </svg>
           <svg v-else class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.75 3.75 8.5 7.5 4.75 8.75 8.5 10l1.25 3.75L11 10l3.75-1.25L11 7.5 9.75 3.75Z" />
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 12.5 16.1 15 13.5 16l2.6.9L17 19.5l.9-2.6 2.6-.9-2.6-1L17 12.5Z" />
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z" />
           </svg>
         </button>
         <button
           v-if="isStreaming"
-          class="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-red-500/30 bg-red-500/15 text-red-600 transition-colors hover:bg-red-500/25"
-          @click="handleSend"
+          class="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-danger/30 bg-danger/10 text-danger transition-colors hover:bg-danger/20 hover:text-danger-strong"
           title="停止生成 (Esc)"
+          aria-label="停止生成"
+          @click="handleSend"
         >
           <svg class="h-4 w-4" fill="currentColor" viewBox="0 0 24 24">
             <rect x="6" y="6" width="12" height="12" rx="1.5" />
@@ -186,16 +200,20 @@ function selectDraft(option: ReplyDraftOption) {
         <button
           v-else
           :disabled="!text.trim() || disabled"
-          class="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-brand-gradient text-white shadow-glow transition-all hover:brightness-110 active:scale-95 disabled:opacity-30 disabled:shadow-none disabled:cursor-not-allowed"
-          @click="handleSend"
+          class="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-brand-gradient text-white shadow-glow transition-all hover:brightness-110 active:scale-95 disabled:cursor-not-allowed disabled:opacity-30 disabled:shadow-none"
           title="发送 (Enter)"
+          aria-label="发送"
+          @click="handleSend"
         >
           <svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 19V5m0 0l-6 6m6-6l6 6" />
           </svg>
         </button>
       </div>
-      <p class="mt-1.5 px-1 text-center text-[11px] text-ink-muted/60">
+      <p
+        v-if="showHint"
+        class="mt-1.5 px-1 text-left text-xs text-ink-muted/80 transition-opacity duration-150"
+      >
         <template v-if="busyLabel">{{ busyLabel }}</template>
         <template v-else-if="isStreaming">生成中 · 按 Esc 或点按钮停止</template>
         <template v-else>Enter 发送 · Shift+Enter 换行</template>

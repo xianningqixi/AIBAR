@@ -3,7 +3,7 @@
 withDefaults(defineProps<{
   modelValue: string
   placeholder?: string
-  size?: 'md'
+  size?: 'md' | 'lg'
   clearable?: boolean
   disabled?: boolean
   ariaLabel?: string
@@ -26,7 +26,7 @@ function onInput(event: Event) {
 <template>
   <div class="relative flex w-full items-center">
     <span class="pointer-events-none absolute left-3 flex items-center text-ink-muted">
-      <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <svg :class="size === 'lg' ? 'h-5 w-5' : 'h-4 w-4'" fill="none" stroke="currentColor" viewBox="0 0 24 24">
         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-4.35-4.35M17 11a6 6 0 11-12 0 6 6 0 0112 0z" />
       </svg>
     </span>
@@ -37,9 +37,10 @@ function onInput(event: Event) {
       :disabled="disabled"
       :aria-label="ariaLabel || placeholder"
       :class="[
-        'w-full rounded-lg border border-border bg-surface py-2 pl-9 text-sm text-ink-primary placeholder-ink-muted transition-all duration-150 hover:border-border-strong',
+        'w-full rounded-lg border border-border bg-surface text-ink-primary placeholder-ink-muted transition-all duration-150 hover:border-border-strong',
         'focus:outline-none focus:border-brand-500/70 focus:ring-2 focus:ring-brand-500/30 focus:shadow-glow',
         'disabled:cursor-not-allowed disabled:opacity-50',
+        size === 'lg' ? 'py-3 pl-10 text-base' : 'py-2 pl-9 text-sm',
         clearable && modelValue ? 'pr-9' : 'pr-3',
       ]"
       @input="onInput"

@@ -248,11 +248,13 @@ onBeforeUnmount(() => {
               <div class="flex items-center gap-2 flex-wrap">
                 <h2 class="text-sm font-semibold text-ink-primary truncate">{{ character.name }}</h2>
                 <button
-                  class="text-xs shrink-0"
-                  :class="character.fav === 'true' ? 'text-rose-400' : 'text-ink-muted hover:text-ink-secondary'"
+                  class="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-lg transition-colors"
+                  :class="character.fav === 'true' ? 'text-accent-400 hover:text-accent-300' : 'text-ink-muted hover:text-ink-secondary hover:bg-ink-primary/5'"
                   :title="character.fav === 'true' ? '取消收藏' : '加入收藏'"
                   @click="toggleFav(character)"
-                >{{ character.fav === 'true' ? '★' : '☆' }}</button>
+                >
+                  <span class="text-base">{{ character.fav === 'true' ? '★' : '☆' }}</span>
+                </button>
                 <span class="text-[11px] text-ink-muted shrink-0">{{ character.chat_size || 0 }} 条聊天</span>
               </div>
               <p class="mt-0.5 text-xs text-ink-muted line-clamp-2 leading-relaxed">
@@ -299,7 +301,7 @@ onBeforeUnmount(() => {
               <div class="fixed inset-0 z-30" @click="openMenu = ''" />
               <div
                 role="menu"
-                class="absolute right-0 top-full z-40 mt-1 w-36 overflow-hidden rounded-lg border border-border bg-surface-elevated py-1 shadow-elevated"
+                class="absolute right-0 top-full z-40 mt-1 w-36 max-h-64 overflow-y-auto overflow-x-hidden rounded-lg border border-border bg-surface-elevated py-1 shadow-elevated"
               >
                 <button role="menuitem" class="row-menu-item" @click="runMenuAction(() => setAsCurrent(character))">设为当前</button>
                 <button role="menuitem" class="row-menu-item" @click="runMenuAction(() => duplicate(character))">复制副本</button>
@@ -308,7 +310,7 @@ onBeforeUnmount(() => {
                 <div class="my-1 h-px bg-border-subtle" />
                 <button
                   role="menuitem"
-                  class="row-menu-item text-red-500 hover:text-red-600"
+                  class="row-menu-item text-danger hover:text-danger-strong"
                   @click="runMenuAction(() => removeCharacter(character.avatar, character.name))"
                 >
                   删除角色

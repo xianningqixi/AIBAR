@@ -8,6 +8,7 @@ import AppTextarea from '@/components/ui/AppTextarea.vue'
 import AppCard from '@/components/ui/AppCard.vue'
 import AppEmpty from '@/components/ui/AppEmpty.vue'
 import AppDialog from '@/components/ui/AppDialog.vue'
+import AppSegmentedControl from '@/components/ui/AppSegmentedControl.vue'
 import type { WorldInfoEntry, WorldInfoFile } from '@/api/types'
 import {
   deleteWorldInfo,
@@ -30,6 +31,7 @@ const worldLoading = ref(false)
 const worldMode = ref<'entry' | 'json'>('entry')
 const worldJson = ref('')
 const deleteDialogOpen = ref(false)
+const helpDialogOpen = ref(false)
 
 const worldJsonValid = computed(() => {
   if (!worldJson.value.trim()) return true
@@ -258,20 +260,13 @@ onMounted(async () => {
 
 <template>
   <div class="space-y-4">
-    <AppCard padding="md" tone="glow" class="space-y-4">
-      <div class="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <p class="text-xs text-brand-300 font-semibold">世界书使用向导</p>
-          <h2 class="mt-2 text-xl font-semibold text-ink-primary">把长期设定做成会自动命中的资料库。</h2>
-          <p class="mt-1 text-sm text-ink-secondary max-w-2xl leading-relaxed">
-            世界书适合放地点、组织、术语、规则、历史和暗线。绑定到角色、故事或当前聊天后，每次生成会扫描最近对话和角色设定，命中关键词才把对应条目注入提示词。
-          </p>
-        </div>
-        <div class="flex flex-wrap gap-2">
-          <AppButton size="sm" variant="secondary" @click="writeSampleWorld">写入示例</AppButton>
-          <AppButton size="sm" @click="createWorld">新建世界书</AppButton>
-        </div>
-      </div>
+    <AppCard padding="md" tone="glow" collapsible title="世界书使用向导" :default-open="true" class="space-y-4">
+      <template #summary>
+        <span class="inline-flex items-center gap-2">
+          把长期设定做成会自动命中的资料库
+          <AppButton size="sm" variant="ghost" @click.stop="helpDialogOpen = true">帮助</AppButton>
+        </span>
+      </template>
 
       <div class="grid md:grid-cols-3 gap-3">
         <div class="rounded-xl bg-surface-elevated p-4 ring-1 ring-border-subtle">
@@ -309,12 +304,19 @@ onMounted(async () => {
 
     <div class="grid gap-4 lg:grid-cols-[300px_1fr]">
     <AppCard padding="md">
-      <div class="flex flex-wrap gap-2 mb-3">
+      <div class="flex flex-wrap items-center gap-2 mb-3">
         <AppButton size="sm" @click="createWorld">+ 新建</AppButton>
-        <AppButton size="sm" @click="importWorldClick">导入</AppButton>
-        <AppButton size="sm" variant="secondary" @click="router.push('/hub')">社区导入</AppButton>
-        <AppButton size="sm" variant="secondary" @click="loadWorlds">刷新</AppButton>
-        <AppButton size="sm" variant="secondary" @click="writeSampleWorld">写入示例</AppButton>
+        <AppButton size="sm" variant="secondary" @click="importWorldClick">导入</AppButton>
+        <details class="relative">
+          <summary class="list-none">
+            <AppButton size="sm" variant="ghost" type="button">更多</AppButton>
+          </summary>
+          <div class="absolute left-0 mt-1 w-28 rounded-xl border border-border-subtle bg-surface-elevated p-1 shadow-elevated z-10">
+            <button class="w-full rounded-lg px-3 py-2 text-left text-sm text-ink-secondary transition-colors hover:bg-surface-sunken hover:text-ink-primary" @click="() => loadWorlds(true)">刷新</button>
+            <button class="w-full rounded-lg px-3 py-2 text-left text-sm text-ink-secondary transition-colors hover:bg-surface-sunken hover:text-ink-primary" @click="router.push('/hub')">社区导入</button>
+            <button class="w-full rounded-lg px-3 py-2 text-left text-sm text-ink-secondary transition-colors hover:bg-surface-sunken hover:text-ink-primary" @click="writeSampleWorld">写入示例</button>
+          </div>
+        </details>
       </div>
       <div v-if="worldLoading" class="text-xs text-ink-muted">加载中…</div>
       <div v-else class="space-y-1">
@@ -350,20 +352,26 @@ onMounted(async () => {
           <h2 class="text-sm font-semibold text-ink-primary">{{ selectedWorld || '选择世界书' }}</h2>
           <p class="text-xs text-ink-muted mt-0.5">条目编辑器 / 原始 JSON 双视图,保存后写回原文件。</p>
         </div>
-        <div class="flex gap-2">
-          <div class="inline-flex rounded-lg border border-border-subtle overflow-hidden text-xs">
-            <button
-              :class="['px-2.5 py-1', worldMode === 'entry' ? 'bg-brand-500/20 text-brand-300' : 'text-ink-secondary hover:bg-ink-primary/5']"
-              @click="switchWorldMode('entry')"
-            >条目</button>
-            <button
-              :class="['px-2.5 py-1 border-l border-border-subtle', worldMode === 'json' ? 'bg-brand-500/20 text-brand-300' : 'text-ink-secondary hover:bg-ink-primary/5']"
-              @click="switchWorldMode('json')"
-            >JSON</button>
-          </div>
-          <AppButton size="sm" variant="secondary" @click="exportWorld">导出</AppButton>
-          <AppButton size="sm" variant="danger" @click="requestDeleteWorld">删除</AppButton>
+        <div class="flex flex-wrap items-center gap-2">
+          <AppSegmentedControl
+            :model-value="worldMode"
+            :options="[
+              { value: 'entry', label: '条目' },
+              { value: 'json', label: 'JSON' },
+            ]"
+            size="sm"
+            @update:model-value="switchWorldMode($event as 'entry' | 'json')"
+          />
           <AppButton size="sm" @click="() => saveCurrentWorld()">保存</AppButton>
+          <details class="relative">
+            <summary class="list-none">
+              <AppButton size="sm" variant="ghost" type="button">更多</AppButton>
+            </summary>
+            <div class="absolute right-0 mt-1 w-24 rounded-xl border border-border-subtle bg-surface-elevated p-1 shadow-elevated z-10">
+              <button class="w-full rounded-lg px-3 py-2 text-left text-sm text-ink-secondary transition-colors hover:bg-surface-sunken hover:text-ink-primary" @click="exportWorld">导出</button>
+              <button class="w-full rounded-lg px-3 py-2 text-left text-sm text-danger hover:text-danger-strong transition-colors hover:bg-danger/10" @click="requestDeleteWorld">删除</button>
+            </div>
+          </details>
         </div>
       </div>
       <div v-if="!selectedWorld" class="flex-1 flex items-center justify-center text-xs text-ink-muted">
@@ -383,19 +391,37 @@ onMounted(async () => {
           :rows="22"
           placeholder="选择左侧世界书后,JSON 会显示在此处。"
         />
-        <p v-if="worldMode === 'json' && worldJson && !worldJsonValid" class="mt-2 text-xs text-red-500">JSON 格式无效</p>
+        <p v-if="worldMode === 'json' && worldJson && !worldJsonValid" class="mt-2 text-xs text-danger">JSON 格式无效</p>
       </template>
     </AppCard>
     </div>
 
     <AppDialog v-model="deleteDialogOpen" title="删除世界书" size="sm">
-      <p class="text-sm leading-relaxed text-ink-secondary">
-        确认删除世界书「{{ selectedWorld }}」？此操作不可撤销。
-      </p>
+      <div class="flex gap-4 rounded-xl bg-danger/10 p-4 ring-1 ring-danger/25">
+        <svg class="h-6 w-6 shrink-0 text-danger" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.054 0 1.918-.816 1.995-1.85L21 12V6a2 2 0 00-2-2H5a2 2 0 00-2 2v6l.107 3.15c.077 1.034.941 1.85 1.995 1.85z" />
+        </svg>
+        <div class="space-y-1">
+          <p class="text-sm font-semibold text-danger-strong">确认删除世界书「{{ selectedWorld }}」？</p>
+          <p class="text-sm leading-relaxed text-ink-secondary">此操作不可撤销，条目、关键词和绑定关系都会从服务端移除。</p>
+        </div>
+      </div>
       <template #footer>
         <AppButton size="sm" variant="secondary" @click="deleteDialogOpen = false">取消</AppButton>
         <AppButton size="sm" variant="danger" @click="deleteWorld">确认删除</AppButton>
       </template>
+    </AppDialog>
+
+    <AppDialog v-model="helpDialogOpen" title="世界书使用帮助" size="md">
+      <div class="space-y-3 text-sm text-ink-secondary">
+        <p>世界书适合存放长期设定：地点、组织、术语、规则、历史和暗线。</p>
+        <ul class="list-disc space-y-1 pl-5">
+          <li><strong class="text-ink-primary">条目：</strong>每条只写一个知识点，保持原子化。</li>
+          <li><strong class="text-ink-primary">关键词：</strong>玩家或角色提到时才会注入提示词。</li>
+          <li><strong class="text-ink-primary">常驻：</strong>不依赖关键词，每次生成都会注入，适合全局基调。</li>
+          <li><strong class="text-ink-primary">绑定：</strong>可在角色、故事或聊天中绑定，随时切换。</li>
+        </ul>
+      </div>
     </AppDialog>
   </div>
 </template>

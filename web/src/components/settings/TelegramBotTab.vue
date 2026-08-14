@@ -17,6 +17,7 @@ import {
 } from '@/api/telegramBot'
 import AppButton from '@/components/ui/AppButton.vue'
 import AppCard from '@/components/ui/AppCard.vue'
+import AppCheckbox from '@/components/ui/AppCheckbox.vue'
 import AppFormField from '@/components/ui/AppFormField.vue'
 import AppInput from '@/components/ui/AppInput.vue'
 import AppSelect from '@/components/ui/AppSelect.vue'
@@ -87,8 +88,8 @@ const pollingLabel = computed(() => {
 
 const pollingToneClass = computed(() => {
   if (!status.value) return 'bg-ink-primary/5 text-ink-muted ring-border-subtle'
-  if (status.value.polling.running) return 'bg-emerald-500/10 text-emerald-700 ring-emerald-500/25'
-  if (status.value.config.tokenConfigured) return 'bg-amber-500/10 text-amber-700 ring-amber-500/25'
+  if (status.value.polling.running) return 'bg-success/10 text-success-strong ring-success/25'
+  if (status.value.config.tokenConfigured) return 'bg-warning/10 text-warning-strong ring-warning/25'
   return 'bg-ink-primary/5 text-ink-muted ring-border-subtle'
 })
 
@@ -346,10 +347,11 @@ watch(
             />
           </AppFormField>
         </div>
-        <label v-if="status?.config.stPasswordConfigured" class="flex min-h-10 items-center gap-2 text-sm text-ink-secondary">
-          <input v-model="clearStUserPassword" type="checkbox" class="h-4 w-4 accent-brand-500" />
-          保存时清除已配置的 ST 登录密码
-        </label>
+        <AppCheckbox
+          v-if="status?.config.stPasswordConfigured"
+          v-model="clearStUserPassword"
+          label="保存时清除已配置的 ST 登录密码"
+        />
 
         <div class="grid gap-3 md:grid-cols-2">
           <AppFormField label="共享模型">
@@ -405,11 +407,11 @@ watch(
           <div class="rounded-lg bg-surface-sunken px-3 py-2 ring-1 ring-border-subtle">
             <div class="flex items-center justify-between gap-3">
               <span class="text-ink-muted">最近错误</span>
-              <span :class="status?.polling.lastError ? 'text-red-600' : 'text-emerald-700'">
+              <span :class="status?.polling.lastError ? 'text-danger' : 'text-success-strong'">
                 {{ status?.polling.lastError ? '有' : '无' }}
               </span>
             </div>
-            <p v-if="status?.polling.lastError" class="mt-2 break-words text-xs leading-relaxed text-red-200/90">
+            <p v-if="status?.polling.lastError" class="mt-2 break-words text-xs leading-relaxed text-danger">
               {{ status.polling.lastError }}
             </p>
           </div>
@@ -443,13 +445,13 @@ watch(
         :class="[
           'rounded-lg p-3 ring-1',
           isDebugOk(debugResult.data)
-            ? 'bg-emerald-500/10 ring-emerald-500/25'
-            : 'bg-red-500/10 ring-red-500/25',
+            ? 'bg-success/10 ring-success/25'
+            : 'bg-danger/10 ring-danger/25',
         ]"
       >
         <div class="flex items-center justify-between gap-3">
           <p class="text-sm font-semibold text-ink-primary">{{ debugResult.title }}</p>
-          <span :class="isDebugOk(debugResult.data) ? 'text-emerald-700' : 'text-red-600'" class="text-xs font-medium">
+          <span :class="isDebugOk(debugResult.data) ? 'text-success-strong' : 'text-danger'" class="text-xs font-medium">
             {{ isDebugOk(debugResult.data) ? '通过' : '失败' }}
           </span>
         </div>

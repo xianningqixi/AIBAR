@@ -13,6 +13,7 @@ import AppTextarea from '@/components/ui/AppTextarea.vue'
 import AppCard from '@/components/ui/AppCard.vue'
 import AppFormField from '@/components/ui/AppFormField.vue'
 import AppEmpty from '@/components/ui/AppEmpty.vue'
+import AppCheckbox from '@/components/ui/AppCheckbox.vue'
 import { generateReply } from '@/api/generate'
 import { getApiErrorMessage } from '@/api/client'
 import { buildImageGenDraftPayload, parseImageGenDraft } from '@/lib/imageGenDraft'
@@ -33,6 +34,15 @@ const imageTestDraftSettings = ref<Partial<ImageGenSettings> | null>(null)
 const selectedImageProviderMeta = computed(() => (
   IMAGE_PROVIDERS.find((provider) => provider.id === imageGen.settings.provider) || IMAGE_PROVIDERS[0]
 ))
+const testImageAspect = computed(() => {
+  if (imageGen.settings.provider === 'openai') {
+    const [w, h] = String(imageGen.settings.openaiSize || '1024x1024').split('x').map(Number)
+    return h && w ? w / h : 1
+  }
+  const w = imageGen.settings.width || 768
+  const h = imageGen.settings.height || 1024
+  return w / h
+})
 const imageTestDraftParameterText = computed(() => {
   const settings = imageTestDraftSettings.value
   if (!settings) return ''
@@ -347,15 +357,10 @@ onMounted(async () => {
             @update:model-value="(v) => imageGen.updateSettings({ negativePrompt: v })"
           />
         </AppFormField>
-        <label class="flex items-center gap-2 text-xs text-ink-secondary cursor-pointer">
-          <input
-            type="checkbox"
-            :checked="imageGen.settings.enhance"
-            class="accent-brand-500"
-            @change="(e) => imageGen.updateSettings({ enhance: (e.target as HTMLInputElement).checked })"
-          />
-          Pollinations 增强 Prompt
-        </label>
+        <AppCheckbox
+          :model-value="imageGen.settings.enhance"
+          @update:model-value="imageGen.updateSettings({ enhance: $event })"
+        >Pollinations 增强 Prompt</AppCheckbox>
       </AppCard>
 
       <AppCard padding="md" class="space-y-3">
@@ -370,7 +375,7 @@ onMounted(async () => {
             {{ imageOptimizing ? '优化中…' : '优化提示词' }}
           </AppButton>
         </div>
-        <p v-if="imageTestDraftParameterText" class="text-[11px] text-brand-start">
+        <p v-if="imageTestDraftParameterText" class="text-[11px] text-brand-300">
           建议参数 · {{ imageTestDraftParameterText }}
         </p>
         <p v-if="imageTestDraftReason" class="rounded-lg bg-surface-sunken px-3 py-2 text-[11px] leading-relaxed text-ink-muted ring-1 ring-border-subtle">
@@ -379,7 +384,7 @@ onMounted(async () => {
         <AppButton class="w-full" variant="gradient" :disabled="imageOptimizing || imageTesting || imageGen.generating" @click="runImageTest">
           {{ imageTesting || imageGen.generating ? '生成中…' : '生成测试图' }}
         </AppButton>
-        <div class="aspect-square overflow-hidden rounded-xl bg-surface-sunken ring-1 ring-border-subtle">
+        <div class="overflow-hidden rounded-xl bg-surface-sunken ring-1 ring-border-subtle" :style="{ aspectRatio: String(testImageAspect) }">
           <img v-if="imageTestAsset" :src="imageTestAsset.url" class="h-full w-full object-cover" alt="" />
           <div v-else class="flex h-full items-center justify-center px-4 text-center text-xs text-ink-muted">测试图会显示在这里</div>
         </div>
