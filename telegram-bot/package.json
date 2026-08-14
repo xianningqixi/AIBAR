@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "start": "node src/index.js",
-    "check": "node --check src/index.js && node --check src/runtimeConfig.js && node --check src/runtimeLifecycle.js && node --check src/runtimeState.js && node --check src/updatePipeline.js && node --test",
+    "check": "node --check src/index.js && node --check src/runtimeConfig.js && node --check src/runtimeLifecycle.js && node --check src/runtimeState.js && node --check src/stClient.js && node --check src/updatePipeline.js && node --test",
     "test": "node --test"
   },
   "engines": {

@@ -36,7 +36,7 @@ Local Discord import service (`cd discord-import-service`, Node >= 20):
 
 ## How the frontend reaches the backend
 
-- **Dev**: `web/vite.config.ts` proxies `/api`, `/csrf-token`, `/thumbnail`, `/characters`, and `/User Avatars` to `VITE_ST_BACKEND` (`web/.env.development`, default `http://localhost:8001`). Note: `SillyTavern/config.yaml` defaults to port **8000** — either start ST on 8001 or change `.env.development`.
+- **Dev**: `web/vite.config.ts` proxies `/api`, `/csrf-token`, and a full set of ST static-asset paths (`/thumbnail`, `/characters`, `/User Avatars`, `/st-compat`, `/scripts`, `/lib`, etc. — see `web/vite.config.ts` for the complete list) to `VITE_ST_BACKEND` (`web/.env.development`, default `http://localhost:8001`). Note: `SillyTavern/config.yaml` defaults to port **8000** — either start ST on 8001 or change `.env.development`.
 - **Prod**: built assets are copied to `SillyTavern/public/aibar/` and served same-origin at `/aibar/`. `vite.config.ts` sets `base: '/aibar/'` only in production.
 - The router uses **hash history** (`createWebHashHistory`) specifically so the app works under the `/aibar/` subpath without server-side history fallback.
 - **CSRF/session**: `src/api/client.ts` `bootCsrf()` fetches `/csrf-token` once at startup (router `beforeEach`), then every request sends `X-CSRF-Token`. `stores/session.ts` pings `/api/ping?extend=true` every 5 min to keep the session alive.

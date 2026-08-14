@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { StClient } from '../src/index.js';
+import { StClient } from '../src/stClient.js';
 
 function jsonResponse(body, init = {}) {
   return new Response(JSON.stringify(body), {

@@ -54,6 +54,14 @@ const resource = computed(() => card.value?.resource || null)
 const runtime = computed(() => resource.value?.runtime || 'standalone')
 const permissions = computed<DiscordWebAppPermission[]>(() => resource.value?.permissions || [])
 const launchUrl = computed(() => resource.value?.launchUrl || '')
+// 桥接两端的 origin 都从启动 URL 统一派生，避免 postMessage 用 '*' 泛投递
+const launchOrigin = computed(() => {
+  try {
+    return new URL(launchUrl.value).origin
+  } catch {
+    return ''
+  }
+})
 const launchHost = computed(() => {
   try {
     return new URL(launchUrl.value).hostname
@@ -65,6 +73,12 @@ const storageKey = computed(() => getWebAppStorageKey(accountHandle.value, card.
 const sandbox = computed(() => runtime.value === 'standalone'
   ? 'allow-scripts allow-same-origin allow-forms allow-modals allow-pointer-lock allow-presentation'
   : 'allow-scripts allow-forms allow-modals allow-pointer-lock allow-presentation')
+// aibar-bridge 的 sandbox 不含 allow-same-origin，iframe 是 opaque origin：
+// 事件里表现为字符串 'null'，且 postMessage 无法指定 opaque origin（只能用 '*'，
+// 隔离由 sandbox 与 event.source 校验保证）；standalone 保留同源能力，可精确投递到启动 URL 的 origin。
+const frameHasRealOrigin = computed(() => sandbox.value.includes('allow-same-origin'))
+const expectedFrameOrigin = computed(() => (frameHasRealOrigin.value ? launchOrigin.value : 'null'))
+const postTargetOrigin = computed(() => (frameHasRealOrigin.value ? launchOrigin.value : '*'))
 const statusLabel = computed(() => {
   if (!started.value) return '等待授权'
   if (loading.value) return '正在启动'
@@ -77,7 +91,10 @@ function permissionLabel(permission: DiscordWebAppPermission): string {
 }
 
 function postToApp(message: Record<string, unknown>) {
-  iframe.value?.contentWindow?.postMessage(message, '*')
+  // 启动 URL 解析失败时拿不到可信 targetOrigin，宁可不发也不退回 '*'
+  const target = postTargetOrigin.value
+  if (!target) return
+  iframe.value?.contentWindow?.postMessage(message, target)
 }
 
 function respond(requestId: string, ok: boolean, result?: unknown, error?: string) {
@@ -238,6 +255,8 @@ async function handleBridgeRequest(request: WebAppBridgeRequest) {
 
 function onMessage(event: MessageEvent) {
   if (!started.value || event.source !== iframe.value?.contentWindow) return
+  // 除 source 外再校验 origin：iframe 内部跳转到其他站点后发来的消息直接丢弃
+  if (!expectedFrameOrigin.value || event.origin !== expectedFrameOrigin.value) return
   let requestId = ''
   try {
     const request = parseWebAppBridgeRequest(event.data)

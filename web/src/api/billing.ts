@@ -1,4 +1,5 @@
 import { apiPost } from './client'
+import { parseWith, sharedModelListSchema } from './schemas'
 import type { ModelProfile } from './types'
 
 export interface PointLedgerEntry {
@@ -47,9 +48,14 @@ export interface AdminPointOverview {
   cards: CreditCodeRecord[]
 }
 
-export async function listSharedModels(): Promise<ModelProfile[]> {
-  const result = await apiPost<{ models?: ModelProfile[] }>('/api/aibar/models/list')
-  return Array.isArray(result.models) ? result.models : []
+export interface SharedModelList {
+  models: ModelProfile[]
+  supportedSources: string[]
+}
+
+export async function listSharedModels(): Promise<SharedModelList> {
+  const result = await apiPost<unknown>('/api/aibar/models/list')
+  return parseWith(sharedModelListSchema, result, '模型列表')
 }
 
 export function saveSharedModel(profile: ModelProfile): Promise<ModelProfile> {

@@ -50,8 +50,11 @@ Review 时先看子模块 PR，再看主仓库 PR；合并顺序同上，避免�
 | [`README.md`](./README.md) | 架构、快速开始、持久化模型、路由 |
 | [`docs/README.md`](./docs/README.md) | docs 目录索引 |
 | [`docs/server-deployment-plan.md`](./docs/server-deployment-plan.md) | 生产部署方案（目录、systemd、HTTPS、备份回滚） |
+| [`docs/github-actions-deployment.md`](./docs/github-actions-deployment.md) | GitHub Actions 自动发布（受限 SSH、Secrets、健康检查与回滚） |
 | [`docs/discord-hot-import-runbook.md`](./docs/discord-hot-import-runbook.md) | Discord 热门资源同步/导入操作手册 |
 | [`docs/discord-browser-import.md`](./docs/discord-browser-import.md) | Discord 浏览器协作导入的 manifest 与安全契约 |
+| [`docs/local-discord-import-service.md`](./docs/local-discord-import-service.md) | 本地 Discord 手动同步/发布服务的契约与所有权边界 |
 | [`docs/aibar-web-app-bridge.md`](./docs/aibar-web-app-bridge.md) | 第三方网页应用桥接协议 |
 | [`docs/PLAN.md`](./docs/PLAN.md) | 原始实施/对照计划（历史背景） |
 | [`telegram-bot/README.md`](./telegram-bot/README.md) | Telegram companion 部署与账号要求 |
+| [`discord-import-service/README.md`](./discord-import-service/README.md) | 本地 Discord 导入服务的使用与命令说明 |

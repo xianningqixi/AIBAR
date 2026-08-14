@@ -12,7 +12,6 @@ import { usePersonasStore } from '@/stores/personas'
 import { useTtsStore } from '@/stores/tts'
 import { useImageGenStore } from '@/stores/imageGen'
 import { useSessionStore } from '@/stores/session'
-import { useStoriesStore } from '@/stores/stories'
 import { useWorldInfoStore } from '@/stores/worldInfo'
 import ChatTopBar from '@/components/chat/ChatTopBar.vue'
 import MessageList from '@/components/chat/MessageList.vue'
@@ -35,9 +34,8 @@ import { getApiErrorMessage } from '@/api/client'
 import { confirmDialog, promptDialog } from '@/composables/useDialog'
 import { testConnection } from '@/api/generate'
 import { PROVIDER_VOICES, TTS_PROVIDERS } from '@/api/tts'
-import { deleteChat, exportChat, importChat, renameChat } from '@/api/chats'
-import { fetchCharacter, fetchCharacterChats, setCharacterChat } from '@/api/characters'
-import { saveStory } from '@/api/stories'
+import { fetchCharacter } from '@/api/characters'
+import { useChatFilesStore } from '@/stores/chatFiles'
 import { getChatDraftKey } from '@/lib/accountStorage'
 import { getProviderLabel } from '@/lib/providers'
 import { buildChatMessageImagePrompt } from '@/lib/imagePrompts'
@@ -62,12 +60,12 @@ const imageGen = useImageGenStore()
 const session = useSessionStore()
 
 const character = ref<Character | null>(null)
-const chatList = ref<ChatEntry[]>([])
-const loadingChats = ref(false)
-const importing = ref(false)
+const chatFiles = useChatFilesStore()
+const chatList = computed(() => chatFiles.entries)
+const loadingChats = computed(() => chatFiles.loading)
+const importing = computed(() => chatFiles.importing)
 const importInput = ref<HTMLInputElement>()
 const worldInfoStore = useWorldInfoStore()
-const storiesStore = useStoriesStore()
 const worlds = computed(() => worldInfoStore.worlds)
 const modelPickerOpen = ref(false)
 const modelSearch = ref('')
@@ -177,14 +175,7 @@ async function confirmCompatibilityLaunch() {
 
 async function loadChatList() {
   if (!character.value) return
-  loadingChats.value = true
-  try {
-    chatList.value = await fetchCharacterChats(character.value.avatar)
-  } catch (e: unknown) {
-    ui.addToast(`聊天列表加载失败：${getApiErrorMessage(e)}`, 'error')
-  } finally {
-    loadingChats.value = false
-  }
+  await chatFiles.loadList(character.value)
 }
 
 function openChat(fileName: string) {
@@ -272,67 +263,32 @@ async function unfreezeChatPersona() {
 }
 
 async function makeDefault(entry: ChatEntry) {
-  if (!character.value || !entry.file_name) return
-  try {
-    await setCharacterChat(character.value.avatar, entry.file_name)
-    ui.addToast('已设为默认聊天', 'success')
-    await chars.load()
-  } catch (e: unknown) {
-    ui.addToast(`设置失败：${getApiErrorMessage(e)}`, 'error')
-  }
+  if (!character.value) return
+  await chatFiles.makeDefault(character.value, entry)
 }
 
 async function renameEntry(entry: ChatEntry) {
   if (!character.value || !entry.file_name) return
   const next = await promptDialog({ title: '新的聊天名称', defaultValue: entry.file_id || entry.file_name.replace(/\.jsonl$/i, '') })
   if (!next?.trim()) return
-  try {
-    await renameChat(character.value.name, entry.file_name, next.trim(), character.value.avatar)
-    ui.addToast('聊天已重命名', 'success')
-    await loadChatList()
-    if (chat.currentChatFile === entry.file_name.replace(/\.jsonl$/i, '')) {
-      openChat(next.trim())
-    }
-  } catch (e: unknown) {
-    ui.addToast(`重命名失败：${getApiErrorMessage(e)}`, 'error')
+  const renamed = await chatFiles.rename(character.value, entry, next)
+  if (renamed && chat.currentChatFile === entry.file_name.replace(/\.jsonl$/i, '')) {
+    openChat(next.trim())
   }
 }
 
 async function deleteEntry(entry: ChatEntry) {
   if (!character.value || !entry.file_name) return
   if (!await confirmDialog({ title: '删除聊天', message: `删除聊天「${entry.file_id || entry.file_name}」？`, danger: true, confirmText: '删除' })) return
-  try {
-    await deleteChat(character.value.name, entry.file_name, character.value.avatar)
-    ui.addToast('聊天已删除', 'success')
-    await loadChatList()
-    if (chat.currentChatFile === entry.file_name.replace(/\.jsonl$/i, '')) {
-      router.push(`/chat/${encodeURIComponent(character.value.avatar)}`)
-    }
-  } catch (e: unknown) {
-    ui.addToast(`删除失败：${getApiErrorMessage(e)}`, 'error')
+  const removed = await chatFiles.remove(character.value, entry)
+  if (removed && chat.currentChatFile === entry.file_name.replace(/\.jsonl$/i, '')) {
+    router.push(`/chat/${encodeURIComponent(character.value.avatar)}`)
   }
 }
 
 async function exportCurrent() {
-  if (!character.value || !chat.currentChatFile) {
-    ui.addToast('没有当前聊天可导出', 'warning')
-    return
-  }
-  try {
-    const { filename, content } = await exportChat(character.value.avatar, chat.currentChatFile)
-    const blob = new Blob([content], { type: 'application/jsonl' })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = filename
-    document.body.appendChild(a)
-    a.click()
-    document.body.removeChild(a)
-    URL.revokeObjectURL(url)
-    ui.addToast('已导出当前聊天', 'success')
-  } catch (e: unknown) {
-    ui.addToast(`导出失败：${getApiErrorMessage(e)}`, 'error')
-  }
+  if (!character.value) return
+  await chatFiles.exportChatFile(character.value, chat.currentChatFile)
 }
 
 function triggerImport() {
@@ -344,16 +300,7 @@ async function onImportFile(e: Event) {
   const file = target.files?.[0]
   target.value = ''
   if (!file || !character.value) return
-  importing.value = true
-  try {
-    await importChat(character.value.avatar, character.value.name, file)
-    ui.addToast(`已导入 ${file.name}`, 'success')
-    await loadChatList()
-  } catch (e: unknown) {
-    ui.addToast(`导入失败：${getApiErrorMessage(e)}`, 'error')
-  } finally {
-    importing.value = false
-  }
+  await chatFiles.importFile(character.value, file)
 }
 
 async function clearCurrent() {
@@ -373,43 +320,14 @@ async function saveChatAsStory() {
     ui.addToast('没有当前角色', 'warning')
     return
   }
-  const msgs = chat.messages
-  if (!msgs.length) {
+  if (!chat.messages.length) {
     ui.addToast('当前聊天没有任何消息，无法保存为故事', 'warning')
     return
   }
   const title = await promptDialog({ title: '故事标题', defaultValue: `${character.value.name} - 故事` })
   if (!title?.trim()) return
-  try {
-    const aibar = chat.metadata?.aibar && typeof chat.metadata.aibar === 'object'
-      ? (chat.metadata.aibar as Record<string, unknown>)
-      : {}
-    const summary = typeof aibar.storySummary === 'string' ? aibar.storySummary : ''
-    const scenario = typeof aibar.storyScenario === 'string' ? aibar.storyScenario : ''
-    const systemAppend = typeof aibar.storySystemAppend === 'string' ? aibar.storySystemAppend : ''
-    const world = typeof aibar.world === 'string' ? aibar.world : ''
-
-    const userMsg = msgs.find((m) => m.role === 'user')
-    const firstAssistantMsg = msgs.find((m) => m.role === 'assistant')
-
-    const story = await saveStory({
-      title: title.trim(),
-      summary: summary || (msgs.length > 0 ? `从聊天「${chat.currentChatFile}」反向保存` : ''),
-      characterAvatar: character.value.avatar,
-      world,
-      scenario,
-      openingUserMessage: userMsg?.content || '',
-      openingAssistantMessage: firstAssistantMsg?.content || '',
-      systemAppend,
-      modelProfileId: chat.selectedProfileId,
-      modIds: chat.selectedModIds,
-    })
-    storiesStore.invalidate()
-    ui.addToast('已保存为故事模板', 'success')
-    router.push(`/story/${encodeURIComponent(story.id)}`)
-  } catch (e: unknown) {
-    ui.addToast(`保存失败：${getApiErrorMessage(e)}`, 'error')
-  }
+  const story = await chatFiles.saveCurrentChatAsStory(title)
+  if (story) router.push(`/story/${encodeURIComponent(story.id)}`)
 }
 
 function handleSend(text: string) {

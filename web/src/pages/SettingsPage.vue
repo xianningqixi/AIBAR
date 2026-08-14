@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch, type Component } from 'vue'
+import { computed, defineAsyncComponent, onMounted, ref, watch, type Component } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useModelProfilesStore } from '@/stores/modelProfiles'
 import { usePresetsStore } from '@/stores/presets'
@@ -10,14 +10,14 @@ import { useSessionStore } from '@/stores/session'
 import AppPageHeader from '@/components/ui/AppPageHeader.vue'
 import AppTabs from '@/components/ui/AppTabs.vue'
 import AppCard from '@/components/ui/AppCard.vue'
-import ModelTab from '@/components/settings/ModelTab.vue'
-import PresetsTab from '@/components/settings/PresetsTab.vue'
-import PersonasTab from '@/components/settings/PersonasTab.vue'
-import ImageTab from '@/components/settings/ImageTab.vue'
-import TtsTab from '@/components/settings/TtsTab.vue'
-import TelegramBotTab from '@/components/settings/TelegramBotTab.vue'
-import AboutTab from '@/components/settings/AboutTab.vue'
+import AppSpinner from '@/components/ui/AppSpinner.vue'
 import { imageHistory, loadImageHistory } from '@/components/settings/shared'
+
+// 设置页 7 个 Tab 全量静态导入会把 admin-only 的大块代码打进首屏 chunk，
+// 改为按需懒加载；200ms 内加载完成不闪 loading 占位
+function lazyTab(loader: () => Promise<{ default: Component }>): Component {
+  return defineAsyncComponent({ loader, loadingComponent: AppSpinner, delay: 200 })
+}
 
 const models = useModelProfilesStore()
 const presets = usePresetsStore()
@@ -65,13 +65,13 @@ function goTab(key: string) {
 }
 
 const tabComponents: Record<string, Component> = {
-  model: ModelTab,
-  presets: PresetsTab,
-  personas: PersonasTab,
-  image: ImageTab,
-  tts: TtsTab,
-  telegram: TelegramBotTab,
-  about: AboutTab,
+  model: lazyTab(() => import('@/components/settings/ModelTab.vue')),
+  presets: lazyTab(() => import('@/components/settings/PresetsTab.vue')),
+  personas: lazyTab(() => import('@/components/settings/PersonasTab.vue')),
+  image: lazyTab(() => import('@/components/settings/ImageTab.vue')),
+  tts: lazyTab(() => import('@/components/settings/TtsTab.vue')),
+  telegram: lazyTab(() => import('@/components/settings/TelegramBotTab.vue')),
+  about: lazyTab(() => import('@/components/settings/AboutTab.vue')),
 }
 
 onMounted(async () => {

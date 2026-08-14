@@ -32,6 +32,7 @@ import {
   type StoryDraft,
 } from '@/lib/aiDraft'
 import { useAiDraft } from '@/composables/useAiDraft'
+import { useAsyncAction } from '@/composables/useAsyncAction'
 
 const route = useRoute()
 const router = useRouter()
@@ -65,7 +66,6 @@ const modIds = ref<string[]>([])
 const worldInfoStore = useWorldInfoStore()
 const storiesStore = useStoriesStore()
 const worlds = computed(() => worldInfoStore.worlds)
-const submitting = ref(false)
 
 const selectedCharacter = computed<Character | null>(() => {
   return chars.findCharacter(characterAvatar.value) || null
@@ -203,7 +203,8 @@ onBeforeRouteLeave(async () => {
   return confirmDialog({ title: '离开页面？', message: '有未保存的修改，确定离开吗？AI 生成的草稿也会一并丢失。' })
 })
 
-async function saveHandler() {
+// loading/try/catch/toast 骨架统一交给 useAsyncAction，页面只保留业务分支
+const { loading: submitting, run: saveHandler } = useAsyncAction(async () => {
   if (!selectedCharacter.value) {
     ui.addToast('请先选择角色', 'warning')
     return
@@ -214,37 +215,30 @@ async function saveHandler() {
     return
   }
 
-  submitting.value = true
-  try {
-    const payload: Partial<StoryCard> = {
-      title: storyTitle,
-      summary: summary.value.trim(),
-      characterAvatar: selectedCharacter.value.avatar,
-      tags: parseTags(tags.value),
-      world: world.value,
-      scenario: scenario.value.trim(),
-      openingUserMessage: openingUserMessage.value.trim(),
-      openingAssistantMessage: assistantOpening.value,
-      systemAppend: systemAppend.value.trim(),
-      coverImage: coverImage.value,
-      coverAssetId: coverAssetId.value,
-      modelProfileId: modelProfileId.value,
-      modIds: modIds.value,
-    }
-    if (isEdit.value) {
-      payload.id = editId.value
-    }
-    const story = await saveStory(payload)
-    storiesStore.invalidate()
-    markStorySaved()
-    ui.addToast(isEdit.value ? '故事卡已更新' : '故事卡已保存', 'success')
-    router.push(`/story/${encodeURIComponent(story.id)}`)
-  } catch (e: unknown) {
-    ui.addToast(`保存失败：${getApiErrorMessage(e)}`, 'error')
-  } finally {
-    submitting.value = false
+  const payload: Partial<StoryCard> = {
+    title: storyTitle,
+    summary: summary.value.trim(),
+    characterAvatar: selectedCharacter.value.avatar,
+    tags: parseTags(tags.value),
+    world: world.value,
+    scenario: scenario.value.trim(),
+    openingUserMessage: openingUserMessage.value.trim(),
+    openingAssistantMessage: assistantOpening.value,
+    systemAppend: systemAppend.value.trim(),
+    coverImage: coverImage.value,
+    coverAssetId: coverAssetId.value,
+    modelProfileId: modelProfileId.value,
+    modIds: modIds.value,
   }
-}
+  if (isEdit.value) {
+    payload.id = editId.value
+  }
+  const story = await saveStory(payload)
+  storiesStore.invalidate()
+  markStorySaved()
+  ui.addToast(isEdit.value ? '故事卡已更新' : '故事卡已保存', 'success')
+  router.push(`/story/${encodeURIComponent(story.id)}`)
+}, { errorPrefix: '保存失败' })
 
 onMounted(async () => {
   await Promise.all([

@@ -4,7 +4,7 @@ import { useRouter } from 'vue-router'
 import { useSessionStore } from '@/stores/session'
 import { useUiStore } from '@/stores/ui'
 import { changePassword } from '@/api/auth'
-import { getApiErrorMessage } from '@/api/client'
+import { useAsyncAction } from '@/composables/useAsyncAction'
 import { useBillingStore } from '@/stores/billing'
 import { formatPoints } from '@/lib/points'
 import { formatDateTime } from '@/lib/format'
@@ -17,7 +17,6 @@ const router = useRouter()
 const session = useSessionStore()
 const ui = useUiStore()
 const billing = useBillingStore()
-const saving = ref(false)
 const redeemCode = ref('')
 const password = reactive({ current: '', next: '', confirm: '' })
 
@@ -26,7 +25,8 @@ async function logout() {
   router.replace('/login')
 }
 
-async function savePassword() {
+// loading/try/catch/toast 骨架统一交给 useAsyncAction，页面只保留业务分支
+const { loading: saving, run: savePassword } = useAsyncAction(async () => {
   if (!session.user) return
   if (password.next.length < 8) {
     ui.addToast('新密码至少需要 8 位', 'warning')
@@ -36,20 +36,13 @@ async function savePassword() {
     ui.addToast('两次输入的新密码不一致', 'warning')
     return
   }
-  saving.value = true
-  try {
-    await changePassword(session.user.handle, password.current, password.next)
-    password.current = ''
-    password.next = ''
-    password.confirm = ''
-    await session.refreshUser()
-    ui.addToast('密码已更新', 'success')
-  } catch (e: unknown) {
-    ui.addToast(`密码更新失败：${getApiErrorMessage(e)}`, 'error')
-  } finally {
-    saving.value = false
-  }
-}
+  await changePassword(session.user.handle, password.current, password.next)
+  password.current = ''
+  password.next = ''
+  password.confirm = ''
+  await session.refreshUser()
+  ui.addToast('密码已更新', 'success')
+}, { errorPrefix: '密码更新失败' })
 
 function ledgerLabel(kind: string): string {
   if (kind === 'signup_bonus') return '新用户赠送'
@@ -58,24 +51,19 @@ function ledgerLabel(kind: string): string {
   return kind
 }
 
-async function redeem() {
+const { run: redeem } = useAsyncAction(async () => {
   const code = redeemCode.value.trim()
   if (!code) {
     ui.addToast('请输入额度卡兑换码', 'warning')
     return
   }
-  try {
-    await billing.redeem(code)
-    redeemCode.value = ''
-    ui.addToast('积分已到账', 'success')
-  } catch (e: unknown) {
-    ui.addToast(`兑换失败：${getApiErrorMessage(e)}`, 'error')
-  }
-}
+  await billing.redeem(code)
+  redeemCode.value = ''
+  ui.addToast('积分已到账', 'success')
+}, { errorPrefix: '兑换失败' })
 
-onMounted(() => billing.load().catch((error: unknown) => {
-  ui.addToast(`积分加载失败：${getApiErrorMessage(error)}`, 'error')
-}))
+const { run: loadBilling } = useAsyncAction(() => billing.load(), { errorPrefix: '积分加载失败' })
+onMounted(loadBilling)
 </script>
 
 <template>

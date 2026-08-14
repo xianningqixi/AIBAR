@@ -10,10 +10,6 @@ on:
 permissions:
   contents: read
 
-env:
-  TAVERN_HELPER_COMMIT: 69ac6804cf0b2f060ca99c1db64aea6e00da39ee
-  PROMPT_TEMPLATE_COMMIT: c80a572839f99a2aaf3d91cf9b7ebfc202c4ef0b
-
 jobs:
   verify:
     runs-on: ubuntu-latest
@@ -21,6 +17,18 @@ jobs:
       - uses: actions/checkout@v5
         with:
           submodules: recursive
+
+      # 固定运行时 SHA 的唯一来源是 scripts/install-*.sh 里的 EXPECTED_COMMIT，
+      # CI 从脚本中提取，避免同一 SHA 在 workflow 和脚本里维护两份拷贝。
+      - name: Read pinned runtime SHAs from install scripts
+        run: |
+          set -Eeuo pipefail
+          tavern_helper="$(sed -n "s/^readonly EXPECTED_COMMIT='\([0-9a-f]\{40\}\)'$/\1/p" scripts/install-tavern-helper.sh)"
+          prompt_template="$(sed -n "s/^readonly EXPECTED_COMMIT='\([0-9a-f]\{40\}\)'$/\1/p" scripts/install-prompt-template.sh)"
+          test -n "$tavern_helper"
+          test -n "$prompt_template"
+          printf 'TAVERN_HELPER_COMMIT=%s\n' "$tavern_helper" >> "$GITHUB_ENV"
+          printf 'PROMPT_TEMPLATE_COMMIT=%s\n' "$prompt_template" >> "$GITHUB_ENV"
 
       - name: Checkout pinned TavernHelper runtime
         uses: actions/checkout@v5
@@ -43,6 +51,7 @@ jobs:
           cache-dependency-path: |
             web/package-lock.json
             telegram-bot/package-lock.json
+            discord-import-service/package-lock.json
             SillyTavern/package-lock.json
 
       - name: Verify TavernHelper release provisioning
@@ -68,6 +77,23 @@ jobs:
         run: |
           npm ci
           npm run check
+
+      - name: Verify local Discord import service
+        working-directory: discord-import-service
+        run: |
+          npm ci
+          npm run check
+
+      # deploy/ 与 scripts/ 下的 bash 脚本只做语法校验，避免坏脚本进入发布链路
+      - name: Syntax-check shell scripts
+        run: |
+          set -Eeuo pipefail
+          while IFS= read -r -d '' script; do
+            if [[ "$script" == *.sh ]] || head -n 1 "$script" | grep -q 'bash'; then
+              echo "bash -n $script"
+              bash -n "$script"
+            fi
+          done < <(find deploy scripts -type f -print0)
 
       - name: Verify SillyTavern extensions
         working-directory: SillyTavern
@@ -98,6 +124,17 @@ jobs:
         with:
           submodules: recursive
 
+      # 与 verify job 相同：SHA 唯一来源是 scripts/install-*.sh
+      - name: Read pinned runtime SHAs from install scripts
+        run: |
+          set -Eeuo pipefail
+          tavern_helper="$(sed -n "s/^readonly EXPECTED_COMMIT='\([0-9a-f]\{40\}\)'$/\1/p" scripts/install-tavern-helper.sh)"
+          prompt_template="$(sed -n "s/^readonly EXPECTED_COMMIT='\([0-9a-f]\{40\}\)'$/\1/p" scripts/install-prompt-template.sh)"
+          test -n "$tavern_helper"
+          test -n "$prompt_template"
+          printf 'TAVERN_HELPER_COMMIT=%s\n' "$tavern_helper" >> "$GITHUB_ENV"
+          printf 'PROMPT_TEMPLATE_COMMIT=%s\n' "$prompt_template" >> "$GITHUB_ENV"
+
       - name: Checkout pinned TavernHelper runtime
         uses: actions/checkout@v5
         with:
@@ -118,11 +155,13 @@ jobs:
           cache: npm
           cache-dependency-path: web/package-lock.json
 
+      # 只需要 web/dist（下面 Package release 会 cp 进 stage），
+      # build:install 往 SillyTavern/public/aibar 的拷贝不进 git archive 包，纯属弄脏子模块
       - name: Build production frontend
         working-directory: web
         run: |
           npm ci
-          npm run build:install
+          npm run build
 
       - name: Package release
         id: release

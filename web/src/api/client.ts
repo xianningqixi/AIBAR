@@ -146,6 +146,12 @@ export async function apiPostBlob(url: string, body: unknown = {}): Promise<Blob
   return (await postJson(url, body)).blob()
 }
 
+// GET 静态资源（如生成图片）也走 doFetch：复用 same-origin 凭据、403 时的 CSRF 重试与 ApiError 语义，
+// 避免页面里出现绕过封装的裸 fetch
+export async function apiGetBlob(url: string): Promise<Blob> {
+  return (await doFetch(url, { method: 'GET', headers: headers() })).blob()
+}
+
 export async function apiPostForm<T = unknown>(url: string, formData: FormData): Promise<T> {
   const r = await doFetch(url, {
     method: 'POST',
