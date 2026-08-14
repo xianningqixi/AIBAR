@@ -13,6 +13,7 @@ import AppTextarea from '@/components/ui/AppTextarea.vue'
 import AppCard from '@/components/ui/AppCard.vue'
 import AppFormField from '@/components/ui/AppFormField.vue'
 import SearchInput from '@/components/ui/SearchInput.vue'
+import AppCheckbox from '@/components/ui/AppCheckbox.vue'
 import { getApiErrorMessage } from '@/api/client'
 
 const ui = useUiStore()
@@ -304,7 +305,10 @@ onMounted(async () => {
             <div class="min-w-0">
               <div class="flex items-center gap-2">
                 <span class="text-sm font-medium text-ink-primary truncate">{{ provider.label }}</span>
-                <span class="text-[11px] text-ink-muted rounded bg-surface-sunken px-1.5 py-0.5 shrink-0">ST</span>
+                <span
+                  class="text-[11px] text-ink-muted rounded bg-surface-sunken px-1.5 py-0.5 shrink-0"
+                  title="SillyTavern 兼容 provider"
+                >ST 兼容</span>
               </div>
               <p class="text-[11px] text-ink-muted mt-1 truncate">{{ provider.description }}</p>
             </div>
@@ -312,7 +316,7 @@ onMounted(async () => {
               :class="[
                 'text-[11px] shrink-0 mt-0.5',
                 tts.settings.defaultProvider === provider.id
-                  ? 'text-emerald-600'
+                  ? 'text-success'
                   : tts.settings[provider.id].enabled
                     ? 'text-brand-300'
                     : 'text-ink-muted',
@@ -348,7 +352,7 @@ onMounted(async () => {
                 {{ provider.label }}
               </option>
             </AppSelect>
-            <span v-if="!enabledTtsProviders.length" class="text-[11px] text-amber-600">
+            <span v-if="!enabledTtsProviders.length" class="text-[11px] text-warning">
               先启用一个渠道
             </span>
           </div>
@@ -361,11 +365,11 @@ onMounted(async () => {
             :class="[
               'px-4 py-2 text-xs rounded-t-xl flex items-center gap-2',
               ttsTestResults[selectedTtsProviderMeta.id]?.ok
-                ? 'bg-emerald-500/10 text-emerald-600 border-b border-emerald-500/20'
-                : 'bg-red-500/10 text-red-600 border-b border-red-500/20',
+                ? 'bg-success/10 text-success border-b border-success/20'
+                : 'bg-danger/10 text-danger border-b border-danger/20',
             ]"
           >
-            <span class="w-1.5 h-1.5 rounded-full" :class="ttsTestResults[selectedTtsProviderMeta.id]?.ok ? 'bg-emerald-400' : 'bg-red-400'" />
+            <span class="w-1.5 h-1.5 rounded-full" :class="ttsTestResults[selectedTtsProviderMeta.id]?.ok ? 'bg-success' : 'bg-danger'" />
             <span class="flex-1 truncate">
               {{ ttsTestResults[selectedTtsProviderMeta.id]?.ok ? '播放成功' : `失败：${ttsTestResults[selectedTtsProviderMeta.id]?.message}` }}
             </span>
@@ -391,16 +395,11 @@ onMounted(async () => {
                 >
                   设为默认
                 </AppButton>
-                <span v-if="tts.settings.defaultProvider === selectedTtsProviderMeta.id" class="text-[11px] text-emerald-600">默认</span>
-                <label class="flex items-center gap-1 text-xs text-ink-secondary cursor-pointer">
-                  <input
-                    type="checkbox"
-                    :checked="tts.settings[selectedTtsProviderMeta.id].enabled"
-                    class="accent-brand-500"
-                    @change="(e) => tts.updateProvider(selectedTtsProviderMeta.id, { enabled: (e.target as HTMLInputElement).checked })"
-                  />
-                  启用
-                </label>
+                <span v-if="tts.settings.defaultProvider === selectedTtsProviderMeta.id" class="text-[11px] text-success">默认</span>
+                <AppCheckbox
+                  :model-value="tts.settings[selectedTtsProviderMeta.id].enabled"
+                  @update:model-value="tts.updateProvider(selectedTtsProviderMeta.id, { enabled: $event })"
+                >启用</AppCheckbox>
               </div>
             </div>
 
@@ -507,7 +506,7 @@ onMounted(async () => {
           </div>
         </div>
 
-        <div class="grid gap-4 lg:grid-cols-[minmax(0,1fr)_340px]">
+        <div class="grid gap-4 lg:grid-cols-[minmax(0,1fr)_300px]">
           <div class="space-y-3">
             <SearchInput v-model="ttsVoiceSearch" placeholder="搜索音色" />
             <div class="max-h-80 overflow-y-auto rounded-xl border border-border-subtle divide-y divide-border-subtle">
@@ -515,7 +514,7 @@ onMounted(async () => {
                 v-for="voice in selectedTtsVoices"
                 :key="voice.id"
                 :class="[
-                  'px-3 py-2 flex items-center gap-3',
+                  'px-3 py-3 flex items-center gap-3',
                   isCurrentTtsVoice(voice) ? 'bg-brand-500/10' : 'bg-surface/30',
                 ]"
               >
@@ -523,10 +522,10 @@ onMounted(async () => {
                   <div class="flex items-center gap-2">
                     <span class="text-sm text-ink-primary truncate">{{ voice.name }}</span>
                     <span class="text-[11px] text-ink-muted rounded bg-surface-sunken px-1.5 py-0.5 shrink-0">{{ voice.source }}</span>
-                    <span v-if="isCurrentTtsVoice(voice)" class="text-[11px] text-emerald-600 shrink-0">当前</span>
+                    <span v-if="isCurrentTtsVoice(voice)" class="text-[11px] text-success shrink-0">当前</span>
                   </div>
-                  <div class="text-[11px] text-ink-muted truncate">{{ voice.voice }}</div>
-                  <div v-if="voice.note" class="text-[11px] text-ink-muted truncate mt-0.5">{{ voice.note }}</div>
+                  <div class="text-[11px] leading-relaxed text-ink-muted truncate">{{ voice.voice }}</div>
+                  <div v-if="voice.note" class="text-[11px] leading-relaxed text-ink-muted truncate mt-0.5">{{ voice.note }}</div>
                 </div>
                 <div class="flex items-center gap-2 shrink-0">
                   <AppButton size="sm" variant="secondary" :disabled="ttsTesting[voice.provider]" @click="testTtsVoice(voice)">

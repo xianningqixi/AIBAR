@@ -38,8 +38,9 @@ async function submit() {
 <template>
   <main class="grid min-h-[100dvh] bg-bg lg:grid-cols-[minmax(0,1fr)_28rem]">
     <section class="relative hidden overflow-hidden border-r border-border bg-surface-sunken lg:block">
-      <div class="absolute inset-0 opacity-60 [background-image:linear-gradient(rgba(139,92,246,.07)_1px,transparent_1px),linear-gradient(90deg,rgba(139,92,246,.07)_1px,transparent_1px)] [background-size:40px_40px]" />
-      <div class="relative flex h-full flex-col justify-between p-12 text-ink-primary">
+      <div class="absolute inset-0 bg-hero-radial opacity-80" />
+      <div class="absolute inset-0 opacity-60 [background-image:linear-gradient(rgb(var(--c-brand-500)/0.07)_1px,transparent_1px),linear-gradient(90deg,rgb(var(--c-brand-500)/0.07)_1px,transparent_1px)] [background-size:40px_40px]" />
+      <div class="relative flex h-full flex-col justify-between p-10">
         <div class="flex items-center gap-3">
           <span class="flex h-10 w-10 items-center justify-center rounded-xl bg-brand-gradient text-lg font-bold text-white">A</span>
           <span class="text-xl font-semibold">AIBAR</span>
@@ -69,9 +70,14 @@ async function submit() {
           <AppFormField label="密码" required>
             <AppInput v-model="password" type="password" autocomplete="current-password" placeholder="输入密码" />
           </AppFormField>
-          <p v-if="error" class="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{{ error }}</p>
-          <AppButton class="w-full" type="submit" size="lg" :disabled="loading">
-            {{ loading ? '登录中…' : '登录' }}
+          <p v-if="error" class="flex items-start gap-2 rounded-lg border border-danger/20 bg-danger-soft px-3 py-2 text-sm text-danger-strong">
+            <svg class="mt-0.5 h-4 w-4 shrink-0" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+              <path fill-rule="evenodd" d="M18 10a8 8 0 1 1-16 0 8 8 0 0 1 16 0Zm-7 4a1 1 0 1 1-2 0 1 1 0 0 1 2 0Zm-1-9a1 1 0 0 0-1 1v4a1 1 0 1 0 2 0V6a1 1 0 0 0-1-1Z" clip-rule="evenodd" />
+            </svg>
+            {{ error }}
+          </p>
+          <AppButton class="w-full" type="submit" size="lg" :loading="loading" :disabled="loading">
+            登录
           </AppButton>
         </form>
 

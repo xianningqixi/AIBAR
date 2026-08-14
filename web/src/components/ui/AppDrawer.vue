@@ -121,7 +121,7 @@ onBeforeUnmount(() => {
           'fixed inset-y-0 z-50 flex flex-col overflow-hidden border-border bg-surface-elevated/95 shadow-elevated backdrop-blur-xl',
           (side || 'right') === 'left' ? 'left-0 border-r' : 'right-0 border-l',
         ]"
-        :style="{ width: width || '22rem', maxWidth: '92vw' }"
+        :style="{ width: width || '24rem', maxWidth: '92vw' }"
       >
         <header
           v-if="title || $slots.header"

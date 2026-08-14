@@ -3,8 +3,90 @@
 @tailwind utilities;
 
 @layer base {
-  html {
+  :root {
     color-scheme: light;
+
+    /* 主题变量（RGB 三元组，供 tailwind.config.ts 的 v() 引用） */
+    --c-bg: 243 245 250;
+    --c-surface: 255 255 255;
+    --c-surface-elevated: 255 255 255;
+    --c-surface-sunken: 237 240 247;
+    --c-border: 22 30 60;
+    --c-ink-primary: 29 36 56;
+    --c-ink-secondary: 74 84 112;
+    --c-ink-muted: 122 132 156;
+    --c-shadow: 23 30 60;
+
+    /* 品牌色：低号段为深紫，保证白底正文可读 */
+    --c-brand-100: 91 33 182;
+    --c-brand-200: 109 40 217;
+    --c-brand-300: 124 58 237;
+    --c-brand-400: 139 92 246;
+    --c-brand-500: 139 92 246;
+    --c-brand-600: 124 58 237;
+    --c-brand-700: 109 40 217;
+    --c-accent-200: 190 24 93;
+    --c-accent-300: 219 39 119;
+    --c-accent-400: 236 72 153;
+    --c-accent-500: 236 72 153;
+    --c-accent-600: 219 39 119;
+    --c-accent-700: 190 24 93;
+
+    /* 语义/反馈色 */
+    --c-danger: 220 38 38;
+    --c-danger-strong: 185 28 28;
+    --c-danger-soft: #fef2f2;
+    --c-success: 5 150 105;
+    --c-success-strong: 4 120 87;
+    --c-success-soft: #ecfdf5;
+    --c-warning: 217 119 6;
+    --c-warning-strong: 146 64 14;
+    --c-warning-soft: #fffbeb;
+    --c-info: 2 132 199;
+    --c-info-strong: 7 89 133;
+    --c-info-soft: #f0f9ff;
+  }
+
+  html.dark {
+    color-scheme: dark;
+
+    --c-bg: 11 14 26;
+    --c-surface: 21 26 46;
+    --c-surface-elevated: 29 35 60;
+    --c-surface-sunken: 15 19 34;
+    --c-border: 226 232 240;
+    --c-ink-primary: 230 233 244;
+    --c-ink-secondary: 167 176 200;
+    --c-ink-muted: 111 120 145;
+    --c-shadow: 0 0 0;
+
+    /* 暗色下低号段翻转为浅紫/浅粉，保证深底正文可读 */
+    --c-brand-100: 221 214 254;
+    --c-brand-200: 196 181 253;
+    --c-brand-300: 167 139 250;
+    --c-brand-400: 139 92 246;
+    --c-brand-500: 139 92 246;
+    --c-brand-600: 124 58 237;
+    --c-brand-700: 109 40 217;
+    --c-accent-200: 249 168 212;
+    --c-accent-300: 244 114 182;
+    --c-accent-400: 236 72 153;
+    --c-accent-500: 236 72 153;
+    --c-accent-600: 219 39 119;
+    --c-accent-700: 190 24 93;
+
+    --c-danger: 248 113 113;
+    --c-danger-strong: 252 165 165;
+    --c-danger-soft: rgba(248, 113, 113, 0.12);
+    --c-success: 52 211 153;
+    --c-success-strong: 110 231 183;
+    --c-success-soft: rgba(52, 211, 153, 0.12);
+    --c-warning: 251 191 36;
+    --c-warning-strong: 253 230 138;
+    --c-warning-soft: rgba(251, 191, 36, 0.12);
+    --c-info: 56 189 248;
+    --c-info-strong: 125 211 252;
+    --c-info-soft: rgba(56, 189, 248, 0.12);
   }
 
   body {
@@ -14,19 +96,19 @@
   }
 
   *::selection {
-    background-color: rgba(139, 92, 246, 0.25);
-    color: #2e1065;
+    background-color: rgb(var(--c-brand-500));
+    color: #ffffff;
   }
 
   *:focus-visible {
-    outline: 2px solid theme('colors.brand.500');
+    outline: 2px solid rgb(var(--c-brand-500));
     outline-offset: 2px;
     border-radius: 4px;
   }
 
   * {
     scrollbar-width: thin;
-    scrollbar-color: rgba(22, 30, 60, 0.18) transparent;
+    scrollbar-color: rgb(var(--c-border) / 0.28) transparent;
   }
   *::-webkit-scrollbar {
     width: 8px;
@@ -36,17 +118,22 @@
     background: transparent;
   }
   *::-webkit-scrollbar-thumb {
-    background: rgba(22, 30, 60, 0.15);
+    background: rgb(var(--c-border) / 0.25);
     border-radius: 4px;
   }
   *::-webkit-scrollbar-thumb:hover {
-    background: rgba(22, 30, 60, 0.25);
+    background: rgb(var(--c-border) / 0.4);
   }
 }
 
 @layer components {
   .card-hover {
-    @apply transition-all duration-200 hover:scale-[1.01] hover:shadow-elevated;
+    @apply transition-all duration-200;
+  }
+  @media (hover: hover) {
+    .card-hover:hover {
+      @apply scale-[1.01] shadow-elevated;
+    }
   }
 
   .skeleton {

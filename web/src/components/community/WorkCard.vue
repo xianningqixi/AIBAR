@@ -27,18 +27,27 @@ function typeLabel(type: CommunityWork['type']): string {
 </script>
 
 <template>
-  <article class="group flex h-full flex-col overflow-hidden rounded-xl border border-border bg-surface transition-colors hover:border-brand-500/45">
-    <div v-if="!noImage" class="relative aspect-[3/4] overflow-hidden bg-surface-sunken">
-      <div v-if="work.type === 'mod'" class="flex h-full flex-col items-center justify-center bg-surface-sunken text-ink-primary">
-        <span class="font-mono text-5xl font-semibold text-brand-300">{ }</span>
+  <!-- 根元素即按钮：避免外层再包 button 造成可交互元素嵌套 -->
+  <button
+    type="button"
+    class="group flex h-full w-full flex-col overflow-hidden rounded-xl bg-surface text-left ring-1 ring-border-subtle transition-all duration-200 hover:-translate-y-0.5 hover:shadow-glow hover:ring-brand-500/45 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500"
+  >
+    <div v-if="!noImage" class="relative aspect-[3/4] w-full overflow-hidden bg-surface-sunken">
+      <div v-if="work.type === 'mod'" class="flex h-full flex-col items-center justify-center bg-brand-soft text-ink-primary">
+        <svg class="h-12 w-12 text-brand-300" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true">
+          <path stroke-linecap="round" stroke-linejoin="round" d="m8 9-4 3 4 3m8-6 4 3-4 3M13 5l-2 14" />
+        </svg>
         <span class="mt-3 text-xs text-ink-muted">提示词 MOD</span>
       </div>
       <template v-else>
         <div
-          v-if="!imageLoaded"
-          class="absolute inset-0 flex items-center justify-center bg-surface-sunken text-3xl font-semibold text-ink-muted"
+          v-if="!imageLoaded || imageFailed"
+          class="absolute inset-0 flex flex-col items-center justify-center gap-1 bg-surface-sunken text-ink-muted"
           aria-hidden="true"
-        >{{ work.title.trim().slice(0, 1) || '?' }}</div>
+        >
+          <span class="text-3xl font-semibold">{{ work.title.trim().slice(0, 1) || '?' }}</span>
+          <span v-if="imageFailed" class="text-xs">封面加载失败</span>
+        </div>
         <img
           v-if="!imageFailed"
           :src="work.coverUrl"
@@ -52,14 +61,14 @@ function typeLabel(type: CommunityWork['type']): string {
           @error="imageFailed = true"
         />
       </template>
-      <div class="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/80 to-transparent px-3 pb-3 pt-10 text-white">
+      <div class="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/70 via-black/30 to-transparent px-3 pb-3 pt-10 text-white">
         <p class="truncate text-sm font-semibold">{{ work.title }}</p>
-        <p class="mt-0.5 truncate text-[11px] text-white/75">{{ work.authorName }}</p>
+        <p class="mt-0.5 truncate text-xs text-white/75">{{ work.authorName }}</p>
       </div>
-      <span class="absolute left-2 top-2 rounded bg-black/60 px-2 py-1 text-[11px] font-semibold text-white backdrop-blur">
+      <span class="absolute left-2 top-2 rounded-md bg-brand-500/85 px-2 py-0.5 text-xs font-semibold text-white backdrop-blur-sm">
         {{ typeLabel(work.type) }}
       </span>
-      <span v-if="work.status === 'hidden'" class="absolute right-2 top-2 rounded bg-amber-600 px-2 py-1 text-[11px] font-semibold text-white">
+      <span v-if="work.status === 'hidden'" class="absolute right-2 top-2 rounded-md bg-warning px-2 py-0.5 text-xs font-semibold text-white">
         已下架
       </span>
     </div>
@@ -70,8 +79,8 @@ function typeLabel(type: CommunityWork['type']): string {
           <p class="mt-0.5 truncate text-xs text-ink-muted">{{ work.authorName }}</p>
         </div>
         <div class="flex shrink-0 items-center gap-1">
-          <span v-if="work.status === 'hidden'" class="rounded bg-amber-100 px-1.5 py-0.5 text-[11px] font-semibold text-amber-800">已下架</span>
-          <span class="rounded bg-surface-sunken px-1.5 py-0.5 text-[11px] text-ink-secondary">{{ typeLabel(work.type) }}</span>
+          <span v-if="work.status === 'hidden'" class="rounded bg-warning-soft px-1.5 py-0.5 text-xs font-semibold text-warning-strong">已下架</span>
+          <span class="rounded bg-surface-sunken px-1.5 py-0.5 text-xs text-ink-secondary">{{ typeLabel(work.type) }}</span>
         </div>
       </div>
       <div class="mb-3">
@@ -80,11 +89,16 @@ function typeLabel(type: CommunityWork['type']): string {
           <span v-for="tag in work.tags.slice(0, 3)" :key="tag" class="shrink-0 rounded bg-brand-500/10 px-1.5 py-0.5 text-xs text-brand-300">{{ tag }}</span>
         </div>
       </div>
-      <div class="mt-auto flex items-center justify-between border-t border-border-subtle pt-2 text-[11px] text-ink-muted">
+      <div class="mt-auto flex items-center justify-between border-t border-border-subtle pt-2 text-xs text-ink-muted">
         <span>{{ work.type === 'mod' ? '导入' : '启动' }} {{ work.launchCount }}</span>
-        <span>★ {{ work.ratingAverage.toFixed(1) }} · 收藏 {{ work.favoriteCount }}</span>
+        <span class="inline-flex items-center gap-0.5">
+          <svg class="h-3 w-3 text-warning" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+            <path d="M10 1.5 12.6 7l6 .6-4.5 4 1.3 5.9L10 14.4 4.6 17.5 5.9 11.6l-4.5-4 6-.6L10 1.5z" />
+          </svg>
+          {{ work.ratingAverage.toFixed(1) }} · 收藏 {{ work.favoriteCount }}
+        </span>
         <span>v{{ work.versionNumber }}</span>
       </div>
     </div>
-  </article>
+  </button>
 </template>

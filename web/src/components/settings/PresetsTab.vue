@@ -49,23 +49,27 @@ onMounted(async () => {
             'relative w-full text-left px-3 py-2.5 rounded-lg transition-colors',
             selectedPresetId === p.id
               ? 'bg-brand-500/15 text-brand-300 ring-1 ring-brand-500/30'
-              : 'text-ink-secondary hover:bg-ink-primary/5 hover:text-ink-primary',
+              : 'text-ink-secondary hover:bg-ink-primary/[0.06] hover:text-ink-primary',
           ]"
           @click="selectedPresetId = p.id"
         >
           <span
             v-if="selectedPresetId === p.id"
-            class="absolute left-0 top-2 bottom-2 w-0.5 rounded-full bg-brand-gradient"
+            class="absolute left-0 top-2 bottom-2 w-0.5 rounded-full bg-brand-gradient transition-all duration-200"
           />
           <div class="flex items-center justify-between gap-2">
             <span class="text-sm font-medium truncate">{{ p.name }}</span>
-            <span v-if="presets.activePresetId === p.id" class="text-[11px] text-emerald-600 shrink-0">当前</span>
+            <span v-if="presets.activePresetId === p.id" class="text-[11px] text-success shrink-0">当前</span>
           </div>
           <div class="mt-1 text-[11px] text-ink-muted truncate">
             {{ p.systemPrompt ? `${p.systemPrompt.length} 字提示词` : '未填写额外提示词' }}
           </div>
         </button>
-        <AppEmpty v-if="!presets.presets.length" icon="book" title="暂无预设" description="点击上方新建。" />
+        <AppEmpty v-if="!presets.presets.length" icon="book" title="暂无预设" description="点击上方新建，或创建后在这里选择。">
+          <template #actions>
+            <AppButton size="sm" @click="addPreset">新建预设</AppButton>
+          </template>
+        </AppEmpty>
       </div>
     </AppCard>
 
@@ -87,7 +91,7 @@ onMounted(async () => {
           </label>
           <button
             v-if="presets.presets.length > 1"
-            class="text-xs text-red-500 hover:text-red-600 transition-colors"
+            class="text-xs text-danger hover:text-danger-strong transition-colors"
             @click="deleteSelectedPreset(selectedPreset)"
           >
             删除

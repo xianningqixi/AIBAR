@@ -3,7 +3,6 @@ import { computed, ref, watch, nextTick, onMounted } from 'vue'
 import type { ChatMessage } from '@/api/types'
 import MessageBubble from './MessageBubble.vue'
 import AppSpinner from '../ui/AppSpinner.vue'
-import AppEmpty from '../ui/AppEmpty.vue'
 import { useMarkdown } from '@/composables/useMarkdown'
 
 // streaming prop 由页面层节流后传入（150ms），这里不再看到逐 token 的更新
@@ -13,6 +12,8 @@ const props = defineProps<{
   streaming?: string
   isStreaming?: boolean
   characterAvatar?: string
+  characterName?: string
+  characterGreeting?: string
   mediaActions?: boolean
 }>()
 
@@ -103,7 +104,7 @@ onMounted(() => nextTick(() => scrollToBottom()))
 
 <template>
   <div class="relative flex-1 overflow-hidden">
-    <div ref="container" class="h-full overflow-y-auto py-3" @scroll="updateAtBottom">
+    <div ref="container" class="h-full overflow-y-auto px-4 py-4 md:py-6" @scroll="updateAtBottom">
       <template v-if="loading">
         <div class="flex justify-center py-10">
           <AppSpinner size="lg" />
@@ -111,40 +112,68 @@ onMounted(() => nextTick(() => scrollToBottom()))
       </template>
 
       <template v-else-if="messages.length === 0 && !isStreaming">
-        <!-- 空态垂直居中：与消息区共用同一列宽 -->
+        <!-- 空态：展示角色头像与开场白，降低冷漠感 -->
         <div class="flex h-full items-center justify-center">
-          <AppEmpty
-            icon="chat"
-            title="开始一段对话"
-            description="说点什么吧 — Shift+Enter 可以换行。"
-          />
+          <div class="flex max-w-md flex-col items-center px-4 text-center">
+            <img
+              v-if="characterAvatar && characterAvatar !== 'none'"
+              :src="`/thumbnail?type=avatar&file=${encodeURIComponent(characterAvatar)}`"
+              class="h-20 w-20 rounded-full object-cover ring-4 ring-surface shadow-elevated"
+              alt=""
+            />
+            <div
+              v-else
+              class="flex h-20 w-20 items-center justify-center rounded-full bg-brand-soft text-brand-300 ring-4 ring-surface shadow-elevated"
+            >
+              <svg class="h-8 w-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+              </svg>
+            </div>
+            <h3 class="mt-4 text-base font-semibold text-ink-primary">{{ characterName ? `和 ${characterName} 打个招呼` : '开始一段对话' }}</h3>
+            <p v-if="characterGreeting" class="mt-2 text-sm leading-relaxed text-ink-secondary">{{ characterGreeting }}</p>
+            <div class="mt-4 inline-flex items-center gap-1.5 rounded-full bg-surface px-3 py-1.5 text-xs text-ink-muted ring-1 ring-border-subtle">
+              <span class="text-brand-300">↵</span> Enter 发送
+              <span class="mx-1 text-border">·</span>
+              <span class="text-brand-300">⇧↵</span> Shift+Enter 换行
+            </div>
+          </div>
         </div>
       </template>
 
       <template v-else>
         <!-- 消息列的左右留白只在这里给一次，气泡自身不再带 px -->
-        <div class="mx-auto max-w-4xl px-4">
+        <div class="mx-auto max-w-4xl px-0 xl:max-w-5xl 2xl:max-w-6xl">
           <!-- 事件处理器不引用循环变量（气泡自带 index），编译器才能缓存它们，
                避免流式期间每个 tick 强制 patch 所有气泡 -->
-          <MessageBubble
+          <div
             v-for="(msg, idx) in messages"
             :key="messageKeys[idx]"
-            :message="msg"
-            :index="idx"
-            :show-actions="true"
-            :is-last-assistant="idx === lastAssistantIndex"
-            :character-avatar="characterAvatar"
-            :media-actions="mediaActions"
-            :actions-locked="isStreaming"
-            @edit="(msgIdx: number, content: string) => $emit('edit', msgIdx, content)"
-            @delete="(msgIdx: number) => $emit('delete', msgIdx)"
-            @regenerate="$emit('regenerate')"
-            @continue="$emit('continue')"
-            @swipe="(msgIdx: number, dir: -1 | 1) => $emit('swipe', msgIdx, dir)"
-            @generate-image="(msgIdx: number) => $emit('generateImage', msgIdx)"
-          />
+            class="first:pt-2 last:pb-2"
+          >
+            <MessageBubble
+              :message="msg"
+              :index="idx"
+              :is-continuation="idx > 0 && messages[idx - 1].role === msg.role"
+              :show-actions="true"
+              :is-last-assistant="idx === lastAssistantIndex"
+              :character-avatar="characterAvatar"
+              :character-name="characterName"
+              :media-actions="mediaActions"
+              :actions-locked="isStreaming"
+              :animate="idx === messages.length - 1"
+              @edit="(msgIdx: number, content: string) => $emit('edit', msgIdx, content)"
+              @delete="(msgIdx: number) => $emit('delete', msgIdx)"
+              @regenerate="$emit('regenerate')"
+              @continue="$emit('continue')"
+              @swipe="(msgIdx: number, dir: -1 | 1) => $emit('swipe', msgIdx, dir)"
+              @generate-image="(msgIdx: number) => $emit('generateImage', msgIdx)"
+            />
+          </div>
 
-          <div v-if="isStreaming" class="flex gap-2.5 py-2 animate-fade-in">
+          <div
+            v-if="isStreaming"
+            class="animate-fade-in flex gap-2.5 py-2"
+          >
             <div class="mt-0.5 shrink-0">
               <img
                 v-if="streamingAvatarUrl"
@@ -159,16 +188,19 @@ onMounted(() => nextTick(() => scrollToBottom()))
                 <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" /></svg>
               </div>
             </div>
-            <div class="max-w-[min(88%,48rem)] rounded-2xl rounded-bl-md border border-border-subtle bg-surface-elevated/90 px-4 py-2.5 text-sm leading-relaxed text-ink-primary shadow-sm backdrop-blur-sm">
+            <div
+              class="relative max-w-[min(82%,44rem)] rounded-2xl rounded-bl-md border border-brand-500/30 bg-surface-elevated/90 px-4 py-2.5 text-sm leading-relaxed text-ink-primary shadow-sm backdrop-blur-sm"
+            >
+              <div class="absolute -left-px top-3 h-6 w-1 rounded-full bg-brand-gradient" />
               <div
                 v-if="streamingHtml"
                 class="prose max-w-none break-words"
                 v-html="streamingHtml"
               />
-              <span v-else class="inline-flex items-center gap-1 py-1">
-                <span class="h-1.5 w-1.5 animate-bounce rounded-full bg-brand-400" />
-                <span class="h-1.5 w-1.5 animate-bounce rounded-full bg-brand-400" style="animation-delay: 0.15s" />
-                <span class="h-1.5 w-1.5 animate-bounce rounded-full bg-brand-400" style="animation-delay: 0.3s" />
+              <span v-else class="inline-flex items-center gap-1.5 py-1">
+                <span class="h-1.5 w-1.5 animate-pulse rounded-full bg-brand-400" />
+                <span class="h-1.5 w-1.5 animate-pulse rounded-full bg-brand-400" style="animation-delay: 0.2s" />
+                <span class="h-1.5 w-1.5 animate-pulse rounded-full bg-brand-400" style="animation-delay: 0.4s" />
               </span>
               <span v-if="throttledStreaming" class="ml-0.5 inline-block h-3.5 w-1 animate-pulse bg-brand-400 align-middle" />
             </div>
@@ -177,12 +209,13 @@ onMounted(() => nextTick(() => scrollToBottom()))
       </template>
     </div>
 
-    <!-- 回到底部 -->
+    <!-- 回到底部：右下角，避开输入框 -->
     <Transition name="fab">
       <button
         v-if="!atBottom"
-        class="absolute bottom-4 left-1/2 z-10 flex h-9 w-9 -translate-x-1/2 items-center justify-center rounded-full bg-surface-elevated/90 text-ink-secondary shadow-elevated ring-1 ring-border backdrop-blur transition-colors hover:text-ink-primary hover:ring-brand-500/50"
+        class="absolute bottom-[calc(5.5rem+env(safe-area-inset-bottom))] right-4 z-10 flex h-9 w-9 items-center justify-center rounded-full bg-surface-elevated/90 text-ink-secondary shadow-elevated ring-1 ring-border backdrop-blur transition-colors hover:text-ink-primary hover:ring-brand-500/50"
         title="回到底部"
+        aria-label="回到底部"
         @click="scrollToBottom(true)"
       >
         <svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 14l-7 7m0 0l-7-7m7 7V3" /></svg>
@@ -199,6 +232,6 @@ onMounted(() => nextTick(() => scrollToBottom()))
 .fab-enter-from,
 .fab-leave-to {
   opacity: 0;
-  transform: translate(-50%, 8px);
+  transform: translateY(8px);
 }
 </style>

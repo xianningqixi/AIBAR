@@ -48,6 +48,7 @@ const comment = ref('')
 const commenting = ref(false)
 const managing = ref(false)
 const startDialogOpen = ref(false)
+const selectedVersionId = ref('')
 const pendingCharacterLaunch = ref<{
   accountHandle: string
   character: Character
@@ -64,6 +65,7 @@ const pendingCompatLaunch = ref<{
 const workId = computed(() => decodeURIComponent(String(route.params.id || '')))
 const isOwner = computed(() => work.value?.authorHandle === session.user?.handle)
 const isMod = computed(() => work.value?.type === 'mod')
+const currentVersionId = computed(() => work.value?.versions.find(v => v.versionNumber === work.value?.versionNumber)?.id || '')
 
 const positionLabels = {
   system_prepend: '系统前缀',
@@ -81,6 +83,7 @@ async function load() {
   loading.value = true
   try {
     work.value = await getCommunityWork(workId.value)
+    selectedVersionId.value = ''
   } catch (e: unknown) {
     ui.addToast(`加载作品失败：${getApiErrorMessage(e)}`, 'error')
     router.replace('/hub')
@@ -243,6 +246,19 @@ async function useWork(versionId?: string) {
   }
 }
 
+function selectVersion(id: string) {
+  selectedVersionId.value = selectedVersionId.value === id ? '' : id
+}
+
+async function confirmUseVersion(versionId: string) {
+  if (!await confirmDialog({
+    title: isMod.value ? '导入提示词' : '开始使用',
+    message: isMod.value ? '将该版本提示词导入私人资料库？' : '复制该版本到私人资料库并开始聊天？',
+    confirmText: isMod.value ? '导入' : '开始',
+  })) return
+  await useWork(versionId)
+}
+
 async function confirmCompatibilityLaunch() {
   const pending = pendingCompatLaunch.value
   if (!pending || starting.value) return
@@ -315,7 +331,11 @@ onMounted(load)
 
 <template>
   <div class="min-h-[100dvh] bg-bg">
-    <AppPageHeader title="社区作品" back-to="/hub">
+    <AppPageHeader
+      :title="work?.title || '社区作品'"
+      :subtitle="work ? `作者 ${work.authorName}` : ''"
+      back-to="/hub"
+    >
       <template #actions>
         <template v-if="work && (isOwner || session.isAdmin)">
           <AppButton size="sm" variant="secondary" :disabled="managing" @click="toggleVisibility">
@@ -329,37 +349,59 @@ onMounted(load)
 
     <div v-if="loading" class="py-20"><AppSpinner size="lg" /></div>
     <main v-else-if="work" class="mx-auto max-w-6xl px-5 py-6 md:px-8 lg:px-10 space-y-6">
-      <div v-if="work.status === 'hidden'" class="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800" role="status">
+      <div v-if="work.status === 'hidden'" class="rounded-xl border border-warning/35 bg-warning/10 px-4 py-3 text-sm text-warning-strong" role="status">
         该作品已下架，仅作者和管理员可见。
       </div>
-      <section class="grid gap-6 border-b border-border pb-8 lg:grid-cols-[17rem_minmax(0,1fr)]">
-        <div v-if="isMod" class="flex aspect-[3/4] w-full max-w-[17rem] flex-col items-center justify-center rounded-md bg-surface-sunken text-ink-primary ring-1 ring-border">
-          <span class="font-mono text-6xl font-semibold text-brand-300">{ }</span>
-          <span class="mt-4 text-sm text-ink-muted">提示词 MOD</span>
-        </div>
-        <img v-else :src="work.coverUrl" :alt="work.title" class="aspect-[3/4] w-full max-w-[17rem] rounded-md object-cover ring-1 ring-border" />
-        <div class="min-w-0">
-          <div class="flex flex-wrap items-center gap-2 text-xs text-ink-muted">
-            <span class="rounded bg-brand-500/10 px-2 py-1 font-medium text-brand-300">{{ typeLabel(work.type) }}</span>
-            <span>v{{ work.versionNumber }}</span>
-            <span>{{ formatDate(work.publishedAt) }}</span>
+
+      <!-- hero：背景卡包裹 -->
+      <section class="rounded-2xl bg-surface ring-1 ring-border-subtle shadow-sm">
+        <div class="grid gap-6 p-5 md:p-7 lg:grid-cols-[17rem_minmax(0,1fr)]">
+          <!-- 封面 -->
+          <div v-if="isMod" class="flex aspect-[3/4] w-full max-w-[17rem] flex-col items-center justify-center rounded-2xl bg-surface-sunken text-ink-primary ring-1 ring-border">
+            <svg class="h-16 w-16 text-brand-300" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true">
+              <path stroke-linecap="round" stroke-linejoin="round" d="m8 9-4 3 4 3m8-6 4 3-4 3M13 5l-2 14" />
+            </svg>
+            <span class="mt-3 rounded-md bg-brand-500/10 px-2 py-1 text-xs font-medium text-brand-300">提示词 MOD</span>
           </div>
-          <h1 class="mt-4 text-3xl font-semibold text-ink-primary">{{ work.title }}</h1>
-          <p class="mt-2 text-sm text-ink-muted">作者 {{ work.authorName }} · @{{ work.authorHandle }}</p>
-          <p class="mt-5 max-w-3xl whitespace-pre-wrap text-sm leading-7 text-ink-secondary">{{ work.summary || '暂无简介' }}</p>
-          <div class="mt-4 flex flex-wrap gap-2">
-            <span v-for="tag in work.tags" :key="tag" class="rounded bg-surface-sunken px-2 py-1 text-xs text-ink-secondary">{{ tag }}</span>
+          <img v-else :src="work.coverUrl" :alt="work.title" class="aspect-[3/4] w-full max-w-[17rem] rounded-2xl object-cover ring-1 ring-border" />
+
+          <div class="min-w-0">
+            <div class="flex flex-wrap items-center gap-2 text-xs text-ink-muted">
+              <span class="rounded bg-brand-500/10 px-2 py-1 font-medium text-brand-300">{{ typeLabel(work.type) }}</span>
+              <span>v{{ work.versionNumber }}</span>
+              <span>{{ formatDate(work.publishedAt) }}</span>
+            </div>
+            <h1 class="mt-4 text-3xl font-semibold text-ink-primary">{{ work.title }}</h1>
+            <p class="mt-2 text-sm text-ink-muted">作者 {{ work.authorName }} · @{{ work.authorHandle }}</p>
+            <p class="mt-5 max-w-3xl whitespace-pre-wrap text-sm leading-7 text-ink-secondary">{{ work.summary || '暂无简介' }}</p>
+            <div class="mt-4 flex flex-wrap gap-2">
+              <span v-for="tag in work.tags" :key="tag" class="rounded bg-surface-sunken px-2 py-1 text-xs text-ink-secondary">{{ tag }}</span>
+            </div>
+            <div class="mt-6 flex flex-wrap items-center gap-3">
+              <AppButton size="lg" :disabled="starting" @click="useWork()">{{ starting ? (isMod ? '正在导入…' : '正在创建…') : (isMod ? '导入提示词' : '开始聊天') }}</AppButton>
+              <AppButton variant="secondary" size="lg" @click="toggleFavorite">{{ work.favorite ? '已收藏' : '收藏' }} · {{ work.favoriteCount }}</AppButton>
+            </div>
+
+            <!-- 统计：4 个独立小卡片 -->
+            <div class="mt-6 grid grid-cols-2 gap-3 sm:grid-cols-4">
+              <div class="rounded-xl border border-border-subtle bg-surface-sunken px-4 py-3">
+                <p class="text-xs text-ink-muted">{{ isMod ? '导入' : '启动' }}</p>
+                <p class="mt-1 text-lg font-semibold text-ink-primary">{{ work.launchCount }}</p>
+              </div>
+              <div class="rounded-xl border border-border-subtle bg-surface-sunken px-4 py-3">
+                <p class="text-xs text-ink-muted">评分</p>
+                <p class="mt-1 text-lg font-semibold text-ink-primary">{{ work.ratingAverage.toFixed(1) }}</p>
+              </div>
+              <div class="rounded-xl border border-border-subtle bg-surface-sunken px-4 py-3">
+                <p class="text-xs text-ink-muted">收藏</p>
+                <p class="mt-1 text-lg font-semibold text-ink-primary">{{ work.favoriteCount }}</p>
+              </div>
+              <div class="rounded-xl border border-border-subtle bg-surface-sunken px-4 py-3">
+                <p class="text-xs text-ink-muted">评论</p>
+                <p class="mt-1 text-lg font-semibold text-ink-primary">{{ work.commentCount }}</p>
+              </div>
+            </div>
           </div>
-          <div class="mt-6 flex flex-wrap items-center gap-3">
-            <AppButton size="lg" :disabled="starting" @click="useWork()">{{ starting ? (isMod ? '正在导入…' : '正在创建…') : (isMod ? '导入提示词' : '开始聊天') }}</AppButton>
-            <AppButton variant="secondary" size="lg" @click="toggleFavorite">{{ work.favorite ? '已收藏' : '收藏' }} · {{ work.favoriteCount }}</AppButton>
-          </div>
-          <dl class="mt-6 grid max-w-2xl grid-cols-2 gap-px overflow-hidden rounded-xl border border-border bg-border sm:grid-cols-4">
-            <div class="bg-surface px-4 py-3"><dt class="text-xs text-ink-muted">{{ isMod ? '导入' : '启动' }}</dt><dd class="mt-1 text-lg font-semibold">{{ work.launchCount }}</dd></div>
-            <div class="bg-surface px-4 py-3"><dt class="text-xs text-ink-muted">评分</dt><dd class="mt-1 text-lg font-semibold">{{ work.ratingAverage.toFixed(1) }}</dd></div>
-            <div class="bg-surface px-4 py-3"><dt class="text-xs text-ink-muted">收藏</dt><dd class="mt-1 text-lg font-semibold">{{ work.favoriteCount }}</dd></div>
-            <div class="bg-surface px-4 py-3"><dt class="text-xs text-ink-muted">评论</dt><dd class="mt-1 text-lg font-semibold">{{ work.commentCount }}</dd></div>
-          </dl>
         </div>
       </section>
 
@@ -370,14 +412,14 @@ onMounted(load)
               <h2 class="text-lg font-semibold text-ink-primary">提示词内容</h2>
               <span v-if="work.mod" class="rounded bg-surface-sunken px-2 py-1 text-xs text-ink-secondary">{{ positionLabels[work.mod.position] }}</span>
             </div>
-            <pre class="mt-4 max-h-[32rem] overflow-auto whitespace-pre-wrap break-words rounded-md border border-border bg-surface-sunken p-4 font-sans text-sm leading-7 text-ink-secondary">{{ work.mod?.content || '该版本没有可预览的提示词内容' }}</pre>
+            <pre class="mt-4 max-h-[32rem] overflow-auto whitespace-pre-wrap break-words rounded-xl border border-border-subtle bg-surface-sunken p-4 font-mono text-xs leading-relaxed text-ink-secondary">{{ work.mod?.content || '该版本没有可预览的提示词内容' }}</pre>
           </section>
 
           <section>
             <div class="flex items-center justify-between gap-4">
               <h2 class="text-lg font-semibold text-ink-primary">评论</h2>
               <div class="flex items-center gap-1" aria-label="作品评分">
-                <button v-for="score in 5" :key="score" class="p-1 text-xl" :class="score <= work.myRating ? 'text-amber-500' : 'text-ink-muted/35'" :title="`${score} 分`" @click="rate(score)">★</button>
+                <button v-for="score in 5" :key="score" class="p-1 text-xl" :class="score <= work.myRating ? 'text-warning' : 'text-ink-muted/35'" :title="`${score} 分`" @click="rate(score)">★</button>
               </div>
             </div>
             <form class="mt-4 space-y-3" @submit.prevent="submitComment">
@@ -386,10 +428,19 @@ onMounted(load)
             </form>
             <AppEmpty v-if="!work.comments.length" title="还没有评论" description="成为第一个发表评论的人。" />
             <div v-else class="mt-5 divide-y divide-border-subtle border-y border-border-subtle">
-              <article v-for="item in work.comments" :key="item.id" class="py-4">
+              <article v-for="item in work.comments" :key="item.id" class="group py-4">
                 <div class="flex items-center justify-between gap-3">
                   <p class="text-sm font-medium text-ink-primary">{{ item.userName }} <span class="font-normal text-ink-muted">@{{ item.userHandle }}</span></p>
-                  <button v-if="item.mine || session.isAdmin" class="text-xs text-red-600" @click="removeComment(item.id)">删除</button>
+                  <button
+                    v-if="item.mine || session.isAdmin"
+                    class="rounded p-1 text-xs text-danger opacity-100 transition-colors hover:bg-danger/10 hover:text-danger-strong focus-visible:opacity-100 md:opacity-0 md:group-hover:opacity-100"
+                    title="删除"
+                    @click="removeComment(item.id)"
+                  >
+                    <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                    </svg>
+                  </button>
                 </div>
                 <p class="mt-2 whitespace-pre-wrap text-sm leading-relaxed text-ink-secondary">{{ item.body }}</p>
                 <p class="mt-2 text-xs text-ink-muted">{{ formatDate(item.createdAt) }}</p>
@@ -400,11 +451,69 @@ onMounted(load)
 
         <aside>
           <h2 class="text-sm font-semibold text-ink-primary">版本</h2>
-          <div class="mt-3 space-y-2">
-            <button v-for="version in work.versions" :key="version.id" class="w-full rounded-md border border-border bg-surface p-3 text-left hover:border-brand-500/40 disabled:cursor-not-allowed disabled:opacity-50" :disabled="starting" @click="useWork(version.id)">
-              <div class="flex items-center justify-between gap-2"><span class="text-sm font-semibold">v{{ version.versionNumber }}<span v-if="isMod" class="ml-1.5 text-[11px] font-normal text-emerald-700">导入</span></span><span class="text-[11px] text-ink-muted">{{ formatDate(version.createdAt) }}</span></div>
+
+          <!-- 桌面端：垂直列表 -->
+          <div class="mt-3 hidden space-y-2 md:block">
+            <button
+              v-for="version in work.versions"
+              :key="version.id"
+              class="w-full rounded-xl border p-3 text-left transition-colors"
+              :class="selectedVersionId === version.id || currentVersionId === version.id
+                ? 'border-brand-500/50 bg-brand-500/10'
+                : 'border-border bg-surface hover:border-brand-500/40'"
+              :disabled="starting"
+              @click="selectVersion(version.id)"
+            >
+              <div class="flex items-center justify-between gap-2">
+                <span class="text-sm font-semibold">
+                  v{{ version.versionNumber }}
+                  <span v-if="version.id === currentVersionId" class="ml-1.5 text-[11px] font-normal text-brand-300">当前</span>
+                </span>
+                <span class="text-[11px] text-ink-muted">{{ formatDate(version.createdAt) }}</span>
+              </div>
               <p class="mt-1 line-clamp-2 text-xs text-ink-secondary">{{ version.versionNote || (version.versionNumber === 1 ? '初始发布' : '未填写版本说明') }}</p>
+
+              <div v-if="selectedVersionId === version.id" class="mt-3 flex items-center gap-2 border-t border-border-subtle pt-3">
+                <AppButton size="sm" :disabled="starting" @click.stop="confirmUseVersion(version.id)">{{ isMod ? '导入此版本' : '使用此版本' }}</AppButton>
+                <AppButton size="sm" variant="secondary" @click.stop="selectedVersionId = ''">收起</AppButton>
+              </div>
             </button>
+          </div>
+
+          <!-- 移动端：横向滚动 chips -->
+          <div class="relative -mx-1 mt-3 flex gap-2 overflow-x-auto px-1 pb-1 md:hidden">
+            <button
+              v-for="version in work.versions"
+              :key="version.id"
+              class="shrink-0 rounded-xl border px-3 py-2 text-left transition-colors"
+              :class="selectedVersionId === version.id || currentVersionId === version.id
+                ? 'border-brand-500 bg-brand-500/10'
+                : 'border-border bg-surface hover:border-brand-500/40'"
+              :disabled="starting"
+              @click="selectVersion(version.id)"
+            >
+              <span class="text-sm font-semibold">
+                v{{ version.versionNumber }}
+                <span v-if="version.id === currentVersionId" class="ml-1 text-[11px] font-normal text-brand-300">当前</span>
+              </span>
+            </button>
+          </div>
+
+          <!-- 移动端：展开的版本详情 -->
+          <div v-if="selectedVersionId" class="mt-3 rounded-xl border border-border-subtle bg-surface p-3 md:hidden">
+            <template v-for="version in work.versions" :key="version.id">
+              <div v-if="version.id === selectedVersionId">
+                <div class="flex items-center justify-between gap-2">
+                  <span class="text-sm font-semibold">v{{ version.versionNumber }}</span>
+                  <span class="text-[11px] text-ink-muted">{{ formatDate(version.createdAt) }}</span>
+                </div>
+                <p class="mt-1 text-xs text-ink-secondary">{{ version.versionNote || (version.versionNumber === 1 ? '初始发布' : '未填写版本说明') }}</p>
+                <div class="mt-3 flex items-center gap-2">
+                  <AppButton size="sm" :disabled="starting" @click="confirmUseVersion(version.id)">{{ isMod ? '导入此版本' : '使用此版本' }}</AppButton>
+                  <AppButton size="sm" variant="secondary" @click="selectedVersionId = ''">收起</AppButton>
+                </div>
+              </div>
+            </template>
           </div>
         </aside>
       </div>

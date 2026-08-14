@@ -7,6 +7,7 @@ import AppInput from '@/components/ui/AppInput.vue'
 import AppTextarea from '@/components/ui/AppTextarea.vue'
 import AppFormField from '@/components/ui/AppFormField.vue'
 import AppEmpty from '@/components/ui/AppEmpty.vue'
+import AppCheckbox from '@/components/ui/AppCheckbox.vue'
 
 const props = defineProps<{ file: WorldInfoFile }>()
 const emit = defineEmits<{
@@ -177,7 +178,7 @@ async function deleteEntry() {
         <h3 class="text-sm font-semibold text-ink-primary">条目设置</h3>
         <AppButton size="sm" variant="danger" @click="deleteEntry">删除条目</AppButton>
       </div>
-      <div class="grid md:grid-cols-2 gap-3">
+      <div class="grid gap-3 md:grid-cols-2">
         <AppFormField label="标题/备注">
           <AppInput
             :model-value="selectedEntry.comment || ''"
@@ -201,24 +202,18 @@ async function deleteEntry() {
         </AppFormField>
         <AppFormField label="开关" inline>
           <div class="flex items-center gap-4 text-xs text-ink-secondary">
-            <label class="flex items-center gap-1.5 cursor-pointer">
-              <input
-                type="checkbox"
-                class="accent-brand-500"
-                :checked="selectedEntry.constant"
-                @change="(e) => updateEntry({ constant: (e.target as HTMLInputElement).checked })"
-              />
+            <AppCheckbox
+              :model-value="selectedEntry.constant ?? false"
+              @update:model-value="(v) => updateEntry({ constant: v })"
+            >
               常驻(忽略关键词)
-            </label>
-            <label class="flex items-center gap-1.5 cursor-pointer">
-              <input
-                type="checkbox"
-                class="accent-brand-500"
-                :checked="selectedEntry.disable"
-                @change="(e) => updateEntry({ disable: (e.target as HTMLInputElement).checked })"
-              />
+            </AppCheckbox>
+            <AppCheckbox
+              :model-value="selectedEntry.disable ?? false"
+              @update:model-value="(v) => updateEntry({ disable: v })"
+            >
               禁用
-            </label>
+            </AppCheckbox>
           </div>
         </AppFormField>
       </div>
@@ -232,7 +227,7 @@ async function deleteEntry() {
       </AppFormField>
     </div>
 
-    <div v-else class="flex items-center justify-center text-xs text-ink-muted">
+    <div v-else class="flex min-h-[12rem] items-center justify-center rounded-lg border border-border-subtle bg-surface-sunken text-xs text-ink-muted">
       左侧选择或新增一个条目。
     </div>
   </div>

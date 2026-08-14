@@ -87,17 +87,24 @@ const activePlan = computed(() => {
   }
 })
 
-function createTarget() {
+const starting = ref(false)
+
+async function createTarget() {
   if (activeKind.value === 'story' && !chars.characters.length) {
     ui.addToast('故事开局需要先有角色卡', 'warning')
     activeKind.value = 'character'
     return
   }
-  const query = { mode: activeMode.value }
-  if (activeKind.value === 'character') {
-    router.push({ path: '/character/new', query })
-  } else {
-    router.push({ path: '/story/new', query })
+  starting.value = true
+  try {
+    const query = { mode: activeMode.value }
+    if (activeKind.value === 'character') {
+      await router.push({ path: '/character/new', query })
+    } else {
+      await router.push({ path: '/story/new', query })
+    }
+  } finally {
+    starting.value = false
   }
 }
 
@@ -144,10 +151,10 @@ onMounted(async () => {
         <section class="rounded-2xl bg-surface p-5 ring-1 ring-border-subtle md:p-6">
           <div class="flex flex-col gap-5 md:flex-row md:items-center md:justify-between">
             <div class="min-w-0 space-y-4">
-              <div class="flex flex-wrap gap-x-8 gap-y-4">
-                <div>
+              <div class="flex flex-col gap-4 md:flex-row md:flex-wrap md:gap-x-8">
+                <div class="w-full md:w-auto">
                   <p class="mb-1.5 text-[11px] font-semibold text-ink-muted">创作什么</p>
-                  <div class="inline-flex rounded-xl bg-surface-sunken p-1 ring-1 ring-border-subtle">
+                  <div class="inline-flex w-full rounded-xl bg-surface-sunken p-1 ring-1 ring-border-subtle md:w-auto">
                     <button
                       v-for="kind in kindTabs"
                       :key="kind.key"
@@ -161,9 +168,9 @@ onMounted(async () => {
                     </button>
                   </div>
                 </div>
-                <div>
+                <div class="w-full md:w-auto">
                   <p class="mb-1.5 text-[11px] font-semibold text-ink-muted">怎么开始</p>
-                  <div class="inline-flex rounded-xl bg-surface-sunken p-1 ring-1 ring-border-subtle">
+                  <div class="inline-flex w-full rounded-xl bg-surface-sunken p-1 ring-1 ring-border-subtle md:w-auto">
                     <button
                       v-for="mode in modeCards"
                       :key="mode.key"
@@ -181,7 +188,7 @@ onMounted(async () => {
               </div>
               <p class="text-sm leading-relaxed text-ink-secondary">{{ activePlan.description }}</p>
             </div>
-            <AppButton class="shrink-0" size="lg" variant="gradient" @click="createTarget">
+            <AppButton class="w-full shrink-0 md:w-auto" size="lg" variant="gradient" :loading="starting" @click="createTarget">
               {{ activePlan.actionLabel }}
             </AppButton>
           </div>
@@ -223,7 +230,7 @@ onMounted(async () => {
                   </div>
                   <div class="flex min-w-0 flex-1 flex-col">
                     <h4 class="truncate text-base font-semibold text-ink-primary">{{ story.title }}</h4>
-                    <p class="mt-1 truncate text-sm text-ink-muted">{{ getStoryCharacter(story)?.name || '角色已缺失' }}</p>
+                    <p class="mt-1 truncate text-xs text-ink-muted">{{ getStoryCharacter(story)?.name || '角色已缺失' }}</p>
                     <p class="mt-auto line-clamp-2 min-h-[2.75rem] pt-2 text-sm leading-relaxed text-ink-secondary">
                       {{ story.summary || story.scenario || '这个故事开局还没有简介。' }}
                     </p>
@@ -258,7 +265,7 @@ onMounted(async () => {
                   </div>
                   <div class="flex min-w-0 flex-1 flex-col">
                     <h4 class="truncate text-base font-semibold text-ink-primary">{{ character.name }}</h4>
-                    <p class="mt-1 text-sm text-ink-muted">{{ character.chat_size ? `${character.chat_size} 条聊天` : '未开始' }}</p>
+                    <p class="mt-1 text-xs text-ink-muted">{{ character.chat_size ? `${character.chat_size} 条聊天` : '未开始' }}</p>
                     <p class="mt-auto line-clamp-2 min-h-[2.75rem] pt-2 text-sm leading-relaxed text-ink-secondary">
                       {{ getCharacterDescription(character) || '还没有简介' }}
                     </p>

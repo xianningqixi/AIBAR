@@ -267,7 +267,7 @@ onMounted(loadData)
 <template>
   <div class="min-h-[100dvh] bg-bg">
     <!-- 开始故事只保留 hero 中的主按钮，避免与标题栏重复 -->
-    <AppPageHeader title="故事卡详情" back-to="/browse?tab=stories" width="4xl">
+    <AppPageHeader :title="story?.title || '故事卡详情'" subtitle="故事卡" back-to="/browse?tab=stories" width="4xl">
       <template #actions>
         <AppButton v-if="story" size="sm" variant="secondary" @click="router.push(`/story/${encodeURIComponent(story.id)}/edit`)">编辑</AppButton>
         <AppButton v-if="story" size="sm" variant="secondary" @click="router.push({ path: '/publish', query: { type: 'story', sourceId: story.id } })">发布</AppButton>
@@ -292,11 +292,11 @@ onMounted(loadData)
             <img
               v-if="storyHeroImage"
               :src="storyHeroImage"
-              class="w-40 aspect-[3/4] rounded-2xl object-cover ring-2 ring-accent-500/40 shadow-glow-accent"
+              class="w-40 md:w-52 aspect-[3/4] rounded-2xl object-cover ring-2 ring-accent-500/40 shadow-glow-accent"
             />
             <div
               v-else
-              class="w-40 aspect-[3/4] rounded-2xl bg-brand-soft ring-2 ring-accent-500/40 flex items-center justify-center text-accent-300 shadow-glow-accent"
+              class="w-40 md:w-52 aspect-[3/4] rounded-2xl bg-brand-soft ring-2 ring-accent-500/40 flex items-center justify-center text-accent-300 shadow-glow-accent"
             >
               <svg class="w-10 h-10" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
@@ -317,8 +317,8 @@ onMounted(loadData)
                 <span class="w-1.5 h-1.5 rounded-full bg-brand-gradient" />
                 {{ character.name }}
               </button>
-              <span v-else class="inline-flex items-center gap-1.5 text-sm text-red-600">
-                <span class="w-1.5 h-1.5 rounded-full bg-red-400" />
+              <span v-else class="inline-flex items-center gap-1.5 text-sm text-danger">
+                <span class="w-1.5 h-1.5 rounded-full bg-danger" />
                 绑定角色不存在
               </span>
               <span v-if="story.world">世界书 · {{ story.world }}</span>
@@ -338,8 +338,8 @@ onMounted(loadData)
               </button>
             </div>
             <div class="flex flex-wrap gap-2 pt-1">
-              <AppButton variant="gradient" :disabled="starting || !character" @click="startStory">
-                {{ starting ? '创建中…' : '▶ 开始故事' }}
+              <AppButton variant="gradient" :loading="starting" :disabled="starting || !character" @click="startStory">
+                开始故事
               </AppButton>
               <AppButton variant="secondary" @click="renameStory">重命名</AppButton>
               <AppButton variant="secondary" @click="router.push({ path: '/story/new', query: { avatar: story.characterAvatar } })">用同角色新建</AppButton>
@@ -387,25 +387,25 @@ onMounted(loadData)
           <span class="w-1 h-4 rounded-full bg-brand-gradient" />
           默认配置
         </h3>
-        <dl class="grid gap-4 sm:grid-cols-2 text-sm">
-          <div class="rounded-lg bg-surface-sunken p-3 ring-1 ring-border-subtle">
+        <dl class="grid gap-3 text-sm">
+          <div class="flex items-center justify-between gap-4 rounded-lg bg-surface-sunken p-3 ring-1 ring-border-subtle">
             <dt class="text-xs text-ink-muted">世界书</dt>
-            <dd class="mt-1 text-ink-primary">{{ story.world || '不绑定' }}</dd>
+            <dd class="text-ink-primary">{{ story.world || '不绑定' }}</dd>
           </div>
-          <div class="rounded-lg bg-surface-sunken p-3 ring-1 ring-border-subtle">
+          <div class="flex items-center justify-between gap-4 rounded-lg bg-surface-sunken p-3 ring-1 ring-border-subtle">
             <dt class="text-xs text-ink-muted">模型配置</dt>
-            <dd class="mt-1 text-ink-primary">{{ story.modelProfileId || '使用默认模型' }}</dd>
+            <dd class="text-ink-primary">{{ story.modelProfileId || '使用默认模型' }}</dd>
           </div>
-          <div class="rounded-lg bg-surface-sunken p-3 ring-1 ring-border-subtle">
+          <div class="flex items-center justify-between gap-4 rounded-lg bg-surface-sunken p-3 ring-1 ring-border-subtle">
             <dt class="text-xs text-ink-muted">默认 MOD</dt>
-            <dd class="mt-1 text-ink-primary">
+            <dd class="text-ink-primary">
               {{ modCount ? `${modCount} 个` : '不加载' }}
               <span v-if="selectedModNames" class="block mt-1 text-xs text-ink-muted line-clamp-2">{{ selectedModNames }}</span>
             </dd>
           </div>
-          <div class="rounded-lg bg-surface-sunken p-3 ring-1 ring-border-subtle">
+          <div class="flex items-center justify-between gap-4 rounded-lg bg-surface-sunken p-3 ring-1 ring-border-subtle">
             <dt class="text-xs text-ink-muted">模板 ID</dt>
-            <dd class="mt-1 text-ink-primary truncate">{{ story.id }}</dd>
+            <dd class="text-ink-primary truncate max-w-[12rem]">{{ story.id }}</dd>
           </div>
         </dl>
       </AppCard>
@@ -436,8 +436,8 @@ onMounted(loadData)
             </h3>
             <p class="text-xs text-ink-muted mt-1">使用当前故事设定和选定模型做一次单轮测试，不写入任何聊天记录。</p>
           </div>
-          <AppButton size="sm" variant="gradient" :disabled="testModel.loading" @click="runStoryTest">
-            {{ testModel.loading ? '生成中…' : '▶ 运行测试' }}
+          <AppButton size="sm" variant="gradient" :loading="testModel.loading" :disabled="testModel.loading" @click="runStoryTest">
+            运行测试
           </AppButton>
         </div>
         <div class="grid md:grid-cols-2 gap-4">
@@ -464,8 +464,11 @@ onMounted(loadData)
           <h4 class="text-xs font-semibold text-ink-muted">输出</h4>
           <div
             v-if="testModel.error"
-            class="text-xs whitespace-pre-wrap bg-red-500/10 text-red-600 ring-1 ring-red-500/20 p-3 rounded-lg"
+            class="flex items-start gap-2 text-xs whitespace-pre-wrap bg-danger/10 text-danger ring-1 ring-danger/20 p-3 rounded-lg"
           >
+            <svg class="mt-0.5 h-4 w-4 shrink-0" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+              <path fill-rule="evenodd" d="M18 10a8 8 0 1 1-16 0 8 8 0 0 1 16 0Zm-7 4a1 1 0 1 1-2 0 1 1 0 0 1 2 0Zm-1-9a1 1 0 0 0-1 1v4a1 1 0 1 0 2 0V6a1 1 0 0 0-1-1Z" clip-rule="evenodd" />
+            </svg>
             {{ testModel.error }}
           </div>
           <div

@@ -15,6 +15,7 @@ import { useStoriesStore } from '@/stores/stories'
 import { createChatFromCharacter, createChatFromStory } from '@/lib/storyStart'
 import { characterGreetings, saveStoryFromCharacterGreeting } from '@/lib/storyFromCharacter'
 import { formatDateTime, parseTags, stripJsonlName } from '@/lib/format'
+import { characterCover } from '@/lib/characterMeta'
 import { confirmDialog, promptDialog } from '@/composables/useDialog'
 import { getApiErrorMessage } from '@/api/client'
 import type { Character, CharacterStartSelection, ChatEntry, StoryCard } from '@/api/types'
@@ -48,6 +49,9 @@ const savingGreetingIndex = ref<number | null>(null)
 const compatDialogOpen = ref(false)
 const compatLaunching = ref(false)
 const pendingCompatChat = ref('')
+const modPanelOpen = ref(false)
+const descExpanded = ref(false)
+const moreMenuOpen = ref(false)
 
 const runtimeAnalysis = computed(() => (
   character.value ? analyzeCharacterRuntime(character.value) : null
@@ -62,6 +66,23 @@ const tags = computed(() => {
 const greetings = computed(() => {
   return characterGreetings(character.value)
 })
+
+const description = computed(() => (
+  character.value?.description || character.value?.data?.description || ''
+))
+
+const descriptionLong = computed(() => description.value.length > 200)
+
+const displayedDescription = computed(() => {
+  if (descExpanded.value || !descriptionLong.value) return description.value
+  return description.value.slice(0, 200)
+})
+
+function characterSubtitle(c: Character): string {
+  const parts = ['角色详情']
+  if (c.data?.creator) parts.push(c.data.creator)
+  return parts.join(' / ')
+}
 
 async function loadData() {
   loading.value = true
@@ -99,6 +120,11 @@ function getChatTitle(entry: ChatEntry): string {
   return entry.file_id || stripJsonlName(entry.file_name)
 }
 
+function chatAvatar(entry: ChatEntry): string {
+  if (!entry.avatar || entry.avatar === 'none') return ''
+  return `/thumbnail?type=avatar&file=${encodeURIComponent(entry.avatar)}`
+}
+
 async function toggleFavorite() {
   if (!character.value) return
   await chars.toggleFav(character.value)
@@ -130,6 +156,11 @@ function startCharacterWithMods() {
     return
   }
   startDialogOpen.value = true
+}
+
+function runMoreAction(action: () => void) {
+  moreMenuOpen.value = false
+  action()
 }
 
 async function confirmCompatibilityLaunch() {
@@ -262,20 +293,29 @@ async function quickTagEdit() {
   }
 }
 
+function storyCover(story: StoryCard): string {
+  return characterCover(story.characterAvatar)
+}
+
 onMounted(loadData)
 </script>
 
 <template>
   <div class="min-h-[100dvh] bg-bg">
-    <AppPageHeader title="角色详情" back-to="/browse" width="4xl" />
+    <AppPageHeader
+      :title="character?.name || '角色详情'"
+      :subtitle="character ? characterSubtitle(character) : ''"
+      back-to="/browse"
+      width="4xl"
+    />
 
     <div v-if="loading" class="flex justify-center py-16">
       <AppSpinner size="lg" />
     </div>
 
     <main v-else-if="character" class="mx-auto max-w-4xl space-y-6 px-5 py-6 animate-fade-in-up md:px-8 lg:px-10">
-      <!-- 详情页统一 hero：3:4 封面 + 右侧信息，与故事/社区页一致 -->
-      <section class="relative overflow-hidden rounded-2xl ring-1 ring-border-subtle bg-hero-radial">
+      <!-- hero：背景卡 + 操作主次 -->
+      <section class="relative overflow-hidden rounded-2xl bg-surface ring-1 ring-border-subtle shadow-sm">
         <div
           v-if="character.avatar && character.avatar !== 'none'"
           class="absolute inset-0 bg-cover bg-center opacity-20 blur-2xl pointer-events-none"
@@ -299,12 +339,12 @@ onMounted(loadData)
               </svg>
             </div>
             <button
-              class="absolute -top-1 -right-1 w-9 h-9 rounded-full bg-surface-elevated ring-1 ring-border flex items-center justify-center transition-colors"
-              :class="character.fav === 'true' ? 'text-accent-400 hover:text-accent-300' : 'text-ink-muted hover:text-ink-secondary'"
+              class="absolute -top-1 -right-1 w-10 h-10 rounded-full bg-surface-elevated ring-1 ring-border flex items-center justify-center transition-colors"
+              :class="character.fav === 'true' ? 'text-accent-400 hover:text-accent-300 bg-accent-500/10' : 'text-ink-muted hover:text-ink-secondary'"
               :title="character.fav === 'true' ? '取消收藏' : '加入收藏'"
               @click="toggleFavorite"
             >
-              <span class="text-base">{{ character.fav === 'true' ? '★' : '☆' }}</span>
+              <span class="text-lg">{{ character.fav === 'true' ? '★' : '☆' }}</span>
             </button>
           </div>
           <div class="min-w-0 flex-1 space-y-2.5">
@@ -315,7 +355,7 @@ onMounted(loadData)
               </span>
               <span
                 v-if="runtimeAnalysis?.requiresCompatibility"
-                class="rounded bg-amber-500/15 px-2 py-0.5 text-[11px] font-medium text-amber-700 ring-1 ring-amber-500/25"
+                class="rounded bg-warning/15 px-2 py-0.5 text-[11px] font-medium text-warning-strong ring-1 ring-warning/25"
               >ST 兼容卡</span>
             </div>
             <div class="flex flex-wrap items-center gap-3 text-xs text-ink-muted">
@@ -323,9 +363,14 @@ onMounted(loadData)
               <span>{{ chatList.length }} 段聊天</span>
               <span>{{ stories.length }} 张故事卡</span>
             </div>
-            <p class="text-sm text-ink-secondary leading-relaxed whitespace-pre-wrap line-clamp-5 max-w-2xl">
-              {{ character.description || character.data?.description || '(没有描述)' }}
-            </p>
+            <div class="text-sm text-ink-secondary leading-relaxed whitespace-pre-wrap max-w-2xl">
+              <p :class="descExpanded || !descriptionLong ? '' : 'line-clamp-3'">{{ displayedDescription || '(没有描述)' }}</p>
+              <button
+                v-if="descriptionLong"
+                class="mt-1 text-xs text-brand-300 hover:text-brand-200"
+                @click="descExpanded = !descExpanded"
+              >{{ descExpanded ? '收起' : '展开' }}</button>
+            </div>
             <div class="flex flex-wrap gap-1.5">
               <button
                 v-for="tag in tags"
@@ -337,16 +382,68 @@ onMounted(loadData)
                 {{ tags.length ? '+ 编辑' : '+ 添加标签' }}
               </button>
             </div>
-            <div class="flex flex-wrap gap-2 pt-1">
-              <AppButton variant="gradient" size="md" @click="startCharacterWithMods">
+
+            <!-- 主操作区 -->
+            <div class="flex flex-wrap items-center gap-2 pt-1">
+              <AppButton variant="gradient" size="md" :loading="startingWithMods" @click="startCharacterWithMods">
                 <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
                 </svg>
                 {{ runtimeAnalysis?.requiresCompatibility ? '进入兼容模式' : '开始对话' }}
               </AppButton>
-              <AppButton variant="secondary" @click="router.push(`/character/${encodeURIComponent(character.avatar)}/edit`)">编辑角色</AppButton>
-              <AppButton variant="secondary" @click="router.push({ path: '/story/new', query: { avatar: character.avatar } })">新建故事</AppButton>
-              <AppButton variant="secondary" @click="router.push({ path: '/publish', query: { type: 'character', sourceId: character.avatar } })">发布作品</AppButton>
+
+              <!-- 桌面端：独立快捷入口 -->
+              <div class="hidden md:flex items-center gap-2">
+                <AppButton variant="secondary" size="md" @click="router.push(`/character/${encodeURIComponent(character.avatar)}/edit`)">编辑</AppButton>
+                <AppButton variant="secondary" size="md" @click="router.push({ path: '/story/new', query: { avatar: character.avatar } })">新建故事</AppButton>
+                <AppButton variant="secondary" size="md" @click="router.push({ path: '/publish', query: { type: 'character', sourceId: character.avatar } })">发布作品</AppButton>
+              </div>
+
+              <!-- 移动端 + 桌面端都显示的更多菜单 -->
+              <div class="relative">
+                <AppButton variant="secondary" size="md" @click="moreMenuOpen = !moreMenuOpen">
+                  更多
+                  <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
+                  </svg>
+                </AppButton>
+                <template v-if="moreMenuOpen">
+                  <div class="fixed inset-0 z-30" @click="moreMenuOpen = false" />
+                  <div class="absolute right-0 top-full z-40 mt-1 w-40 overflow-hidden rounded-lg border border-border bg-surface-elevated py-1 shadow-elevated">
+                    <button class="detail-menu-item md:hidden" @click="runMoreAction(() => router.push(`/character/${encodeURIComponent(character!.avatar)}/edit`))">编辑角色</button>
+                    <button class="detail-menu-item md:hidden" @click="runMoreAction(() => router.push({ path: '/story/new', query: { avatar: character!.avatar } }))">新建故事</button>
+                    <button class="detail-menu-item md:hidden" @click="runMoreAction(() => router.push({ path: '/publish', query: { type: 'character', sourceId: character!.avatar } }))">发布作品</button>
+                    <div class="md:hidden my-1 h-px bg-border-subtle" />
+                    <button class="detail-menu-item" @click="runMoreAction(() => exportCard('png'))">导出 PNG</button>
+                    <button class="detail-menu-item" @click="runMoreAction(() => exportCard('json'))">导出 JSON</button>
+                    <button class="detail-menu-item" @click="runMoreAction(duplicateCharacter)">复制副本</button>
+                    <div class="my-1 h-px bg-border-subtle" />
+                    <button class="detail-menu-item text-danger hover:text-danger-strong" @click="runMoreAction(removeCharacter)">删除角色</button>
+                  </div>
+                </template>
+              </div>
+            </div>
+
+            <!-- MOD 折叠面板 -->
+            <div class="pt-2">
+              <button
+                class="inline-flex items-center gap-1.5 text-xs font-medium text-brand-300 hover:text-brand-200 transition-colors"
+                @click="modPanelOpen = !modPanelOpen"
+              >
+                <svg class="w-4 h-4 transition-transform" :class="modPanelOpen ? 'rotate-180' : ''" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
+                </svg>
+                {{ modPanelOpen ? '收起 MOD' : `加载 MOD${startModIds.length ? ` (${startModIds.length})` : ''}` }}
+              </button>
+              <div v-show="modPanelOpen" class="mt-3 rounded-xl border border-border-subtle bg-surface-sunken p-3">
+                <ModPicker
+                  v-model="startModIds"
+                  :mods="mods.mods"
+                  title="本次加载 MOD"
+                  description="选择本次聊天要加载的 MOD。创建后选择会写入该聊天存档，不影响其他聊天。"
+                  compact
+                />
+              </div>
             </div>
           </div>
         </div>
@@ -401,27 +498,6 @@ onMounted(loadData)
       </AppCard>
 
       <AppCard padding="md">
-        <div class="flex flex-wrap items-start justify-between gap-3 mb-3">
-          <div>
-            <h3 class="flex items-center gap-2 text-sm font-semibold text-ink-primary">
-              <span class="w-1 h-4 rounded-full bg-brand-gradient" />
-              开始互动
-            </h3>
-            <p class="mt-1 text-xs text-ink-muted">可先选择本次聊天要加载的 MOD。创建后选择会写入该聊天存档,不影响其他聊天。</p>
-          </div>
-          <AppButton size="sm" variant="gradient" :disabled="startingWithMods" @click="startCharacterWithMods">
-            {{ startingWithMods ? '创建中…' : startModIds.length ? '带 MOD 开始' : '新聊天' }}
-          </AppButton>
-        </div>
-        <ModPicker
-          v-model="startModIds"
-          :mods="mods.mods"
-          title="本次加载 MOD"
-          compact
-        />
-      </AppCard>
-
-      <AppCard padding="md">
         <div class="flex items-center justify-between mb-3">
           <h3 class="flex items-center gap-2 text-sm font-semibold text-ink-primary">
             <span class="w-1 h-4 rounded-full bg-brand-gradient" />
@@ -432,15 +508,22 @@ onMounted(loadData)
           v-if="!chatList.length"
           icon="chat"
           title="还没有聊天记录"
-          description="聊天记录会保存在 ST 本地服务器,开始对话后会出现在这里。"
+          description="聊天记录会保存在 ST 本地服务器，开始对话后会出现在这里。"
         />
-        <!-- 固定列宽的网格：条数 / 时间 / 操作在所有行上对齐，窄屏再堆叠 -->
         <div v-else class="space-y-2">
           <div
             v-for="entry in chatList"
             :key="entry.file_name"
-            class="grid grid-cols-1 items-center gap-x-3 gap-y-1.5 rounded-lg bg-surface-sunken px-3 py-2.5 ring-1 ring-border-subtle transition-colors hover:ring-brand-500/30 sm:grid-cols-[1fr_auto_auto_auto]"
+            class="grid grid-cols-1 items-center gap-x-3 gap-y-1.5 rounded-lg bg-surface-sunken px-3 py-2.5 ring-1 ring-border-subtle transition-colors hover:ring-brand-500/30 sm:grid-cols-[auto_1fr_auto_auto_auto]"
           >
+            <img
+              v-if="chatAvatar(entry)"
+              :src="chatAvatar(entry)"
+              class="hidden sm:block h-10 w-10 rounded-lg object-cover ring-1 ring-border-subtle"
+              loading="lazy"
+              alt=""
+            />
+            <div v-else class="hidden sm:flex h-10 w-10 items-center justify-center rounded-lg bg-gradient-to-br from-brand-500/30 to-accent-500/20 ring-1 ring-border-subtle text-lg">💬</div>
             <div class="min-w-0">
               <button
                 class="block w-full truncate text-left text-sm font-medium text-ink-primary transition-colors hover:text-brand-400"
@@ -471,35 +554,28 @@ onMounted(loadData)
           title="还没有故事"
           description="点击右上角创建一段新故事。"
         />
-        <div v-else class="space-y-2">
-          <div
+        <div v-else class="grid gap-3 sm:grid-cols-2">
+          <button
             v-for="entry in stories"
             :key="entry.id"
-            class="grid grid-cols-1 items-center gap-x-3 gap-y-1.5 rounded-lg bg-surface-sunken px-3 py-2.5 ring-1 ring-border-subtle transition-colors hover:ring-brand-500/30 sm:grid-cols-[1fr_auto_auto]"
+            class="flex items-center gap-3 rounded-xl border border-border-subtle bg-surface-sunken p-3 text-left transition-colors hover:border-brand-500/40 hover:bg-surface"
+            @click="openStoryDetail(entry)"
           >
-            <div class="min-w-0">
-              <button
-                class="block w-full truncate text-left text-sm font-medium text-ink-primary transition-colors hover:text-brand-400"
-                @click="openStoryDetail(entry)"
-              >{{ entry.title }}</button>
+            <img
+              v-if="storyCover(entry)"
+              :src="storyCover(entry)"
+              class="h-16 w-16 shrink-0 rounded-lg object-cover ring-1 ring-border-subtle"
+              loading="lazy"
+              alt=""
+            />
+            <div v-else class="flex h-16 w-16 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-brand-500/30 to-accent-500/20 text-2xl ring-1 ring-border-subtle">📖</div>
+            <div class="min-w-0 flex-1">
+              <p class="truncate text-sm font-semibold text-ink-primary">{{ entry.title }}</p>
               <p class="mt-0.5 text-xs text-ink-muted line-clamp-1">{{ entry.summary || entry.scenario || '(无简介)' }}</p>
+              <p class="mt-1 text-[11px] text-ink-muted">{{ entry.world ? `世界书 ${entry.world}` : '' }}</p>
             </div>
-            <span class="truncate text-[11px] text-ink-muted sm:text-right">{{ entry.world ? `世界书 ${entry.world}` : '' }}</span>
-            <button class="justify-self-start text-xs text-brand-300 hover:text-brand-200 sm:justify-self-end" @click="startStory(entry)">开始</button>
-          </div>
-        </div>
-      </AppCard>
-
-      <AppCard padding="md">
-        <h3 class="flex items-center gap-2 text-sm font-semibold text-ink-primary mb-3">
-          <span class="w-1 h-4 rounded-full bg-brand-gradient" />
-          管理
-        </h3>
-        <div class="flex flex-wrap gap-2">
-          <AppButton size="sm" variant="secondary" @click="exportCard('png')">导出 PNG</AppButton>
-          <AppButton size="sm" variant="secondary" @click="exportCard('json')">导出 JSON</AppButton>
-          <AppButton size="sm" variant="secondary" @click="duplicateCharacter">复制副本</AppButton>
-          <AppButton size="sm" variant="danger" @click="removeCharacter">删除角色</AppButton>
+            <AppButton size="sm" variant="secondary" @click.stop="startStory(entry)">开始</AppButton>
+          </button>
         </div>
       </AppCard>
 
@@ -519,3 +595,9 @@ onMounted(loadData)
     </main>
   </div>
 </template>
+
+<style scoped>
+.detail-menu-item {
+  @apply block w-full px-3 py-2 text-left text-xs text-ink-secondary transition-colors hover:bg-ink-primary/5 hover:text-ink-primary;
+}
+</style>
