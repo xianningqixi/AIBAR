@@ -3,6 +3,7 @@ import { computed, reactive, ref, watch } from 'vue'
 import { useModelProfilesStore } from '@/stores/modelProfiles'
 import { useSessionStore } from '@/stores/session'
 import { useUiStore } from '@/stores/ui'
+import { confirmDialog } from '@/composables/useDialog'
 import AppButton from '@/components/ui/AppButton.vue'
 import AppInput from '@/components/ui/AppInput.vue'
 import AppSelect from '@/components/ui/AppSelect.vue'
@@ -256,7 +257,7 @@ function addProfile(source = 'custom') {
 }
 
 async function deleteProfile(profile: ModelProfile) {
-  if (!window.confirm(`删除共享模型「${profile.name || '未命名'}」？所有用户将立即不可用。`)) return
+  if (!await confirmDialog({ title: '删除共享模型', message: `删除共享模型「${profile.name || '未命名'}」？所有用户将立即不可用。`, danger: true, confirmText: '删除' })) return
   const epoch = viewEpoch
   const handle = session.user?.handle || ''
   if (!isCurrentView(epoch, handle)) return

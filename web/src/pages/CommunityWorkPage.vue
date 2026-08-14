@@ -21,6 +21,8 @@ import {
   type CommunityWorkDetail,
 } from '@/api/community'
 import { createCharacterChatName, createChatFromCharacter, createChatFromStory } from '@/lib/storyStart'
+import { formatDate } from '@/lib/format'
+import { confirmDialog } from '@/composables/useDialog'
 import CharacterStartDialog from '@/components/chat/CharacterStartDialog.vue'
 import StCompatibilityDialog from '@/components/chat/StCompatibilityDialog.vue'
 import AppButton from '@/components/ui/AppButton.vue'
@@ -73,10 +75,6 @@ function typeLabel(type: CommunityWorkDetail['type']): string {
   if (type === 'story') return '故事作品'
   if (type === 'mod') return '提示词'
   return '角色卡'
-}
-
-function formatDate(value: string) {
-  return new Intl.DateTimeFormat('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(value))
 }
 
 async function load() {
@@ -137,7 +135,7 @@ async function submitComment() {
 
 async function removeComment(id: string) {
   if (!work.value) return
-  if (!window.confirm('删除这条评论？')) return
+  if (!await confirmDialog({ title: '删除评论', message: '删除这条评论？', danger: true, confirmText: '删除' })) return
   try {
     await deleteCommunityComment(id)
     work.value.comments = work.value.comments.filter(item => item.id !== id)
@@ -164,7 +162,7 @@ async function toggleVisibility() {
 
 async function removeWork() {
   if (!work.value || managing.value) return
-  if (!window.confirm(`永久删除社区作品「${work.value.title}」及其全部版本？`)) return
+  if (!await confirmDialog({ title: '删除社区作品', message: `永久删除社区作品「${work.value.title}」及其全部版本？`, danger: true, confirmText: '永久删除' })) return
   managing.value = true
   try {
     await deleteCommunityWork(work.value.id)

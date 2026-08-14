@@ -3,6 +3,7 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useUiStore } from '@/stores/ui'
 import { useModsStore, type ModItem } from '@/stores/mods'
+import { confirmDialog } from '@/composables/useDialog'
 import AppButton from '@/components/ui/AppButton.vue'
 import AppInput from '@/components/ui/AppInput.vue'
 import AppSelect from '@/components/ui/AppSelect.vue'
@@ -33,9 +34,9 @@ function addMod() {
   selectedModId.value = mod.id
 }
 
-function deleteSelectedMod(mod: ModItem) {
+async function deleteSelectedMod(mod: ModItem) {
   // 内置 MOD 的“删除”只是停用，无需拦截
-  if (!mod.builtin && !window.confirm(`删除 MOD「${mod.name || '未命名'}」？此操作不可恢复。`)) return
+  if (!mod.builtin && !await confirmDialog({ title: '删除 MOD', message: `删除 MOD「${mod.name || '未命名'}」？此操作不可恢复。`, danger: true, confirmText: '删除' })) return
   mods.deleteMod(mod.id)
   selectedModId.value = mods.mods[0]?.id || ''
 }

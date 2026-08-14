@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { usePersonasStore } from '@/stores/personas'
+import { confirmDialog } from '@/composables/useDialog'
 import type { Persona } from '@/api/types'
 import AppButton from '@/components/ui/AppButton.vue'
 import AppInput from '@/components/ui/AppInput.vue'
@@ -22,8 +23,8 @@ function addPersona() {
   selectedPersonaId.value = p.id
 }
 
-function deleteSelectedPersona(persona: Persona) {
-  if (!window.confirm(`删除身份「${persona.name || '未命名'}」？此操作不可恢复。`)) return
+async function deleteSelectedPersona(persona: Persona) {
+  if (!await confirmDialog({ title: '删除身份', message: `删除身份「${persona.name || '未命名'}」？此操作不可恢复。`, danger: true, confirmText: '删除' })) return
   personas.deletePersona(persona.id)
   selectedPersonaId.value = personas.personas[0]?.id || ''
 }

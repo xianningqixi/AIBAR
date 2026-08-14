@@ -14,7 +14,8 @@ import {
 import { useStoriesStore } from '@/stores/stories'
 import { createChatFromCharacter, createChatFromStory } from '@/lib/storyStart'
 import { characterGreetings, saveStoryFromCharacterGreeting } from '@/lib/storyFromCharacter'
-import { stripJsonlName } from '@/lib/format'
+import { formatDateTime, parseTags, stripJsonlName } from '@/lib/format'
+import { confirmDialog, promptDialog } from '@/composables/useDialog'
 import { getApiErrorMessage } from '@/api/client'
 import type { Character, CharacterStartSelection, ChatEntry, StoryCard } from '@/api/types'
 import CharacterStartDialog from '@/components/chat/CharacterStartDialog.vue'
@@ -96,18 +97,6 @@ function openChat(file?: string) {
 
 function getChatTitle(entry: ChatEntry): string {
   return entry.file_id || stripJsonlName(entry.file_name)
-}
-
-function formatDate(value?: unknown): string {
-  if (!value) return '未更新'
-  const date = new Date(value as string | number)
-  if (Number.isNaN(date.getTime())) return '未更新'
-  return new Intl.DateTimeFormat('zh-CN', {
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-  }).format(date)
 }
 
 async function toggleFavorite() {
@@ -212,7 +201,7 @@ async function exportCard(format: 'png' | 'json') {
 
 async function removeCharacter() {
   if (!character.value) return
-  if (!window.confirm(`删除「${character.value.name}」及其所有聊天记录?此操作不可撤销。`)) return
+  if (!await confirmDialog({ title: '删除角色', message: `删除「${character.value.name}」及其所有聊天记录？此操作不可撤销。`, danger: true, confirmText: '删除' })) return
   try {
     await deleteCharacter(character.value.avatar)
     await chars.load()
@@ -224,7 +213,7 @@ async function removeCharacter() {
 
 async function duplicateCharacter() {
   if (!character.value) return
-  const newName = window.prompt('副本角色名', `${character.value.name} 副本`)
+  const newName = await promptDialog({ title: '副本角色名', defaultValue: `${character.value.name} 副本` })
   if (!newName?.trim()) return
   try {
     const trimmed = newName.trim()
@@ -260,12 +249,9 @@ async function duplicateCharacter() {
 async function quickTagEdit() {
   if (!character.value) return
   const current = (character.value.tags || character.value.data?.tags || []).join(', ')
-  const next = window.prompt('编辑标签 (逗号分隔)', current)
+  const next = await promptDialog({ title: '编辑标签 (逗号分隔)', defaultValue: current })
   if (next === null) return
-  const arr = next
-    .split(',')
-    .map((s) => s.trim())
-    .filter(Boolean)
+  const arr = parseTags(next)
   try {
     await mergeAttributes(character.value.avatar, { tags: arr, data: { tags: arr } })
     ui.addToast('标签已更新', 'success')
@@ -463,7 +449,7 @@ onMounted(loadData)
               <p class="mt-0.5 text-xs text-ink-muted line-clamp-1">{{ entry.mes || '(暂无消息)' }}</p>
             </div>
             <span class="text-[11px] tabular-nums text-ink-muted sm:text-right">{{ entry.chat_items || 0 }} 条</span>
-            <span class="text-[11px] tabular-nums text-ink-muted sm:text-right">{{ formatDate(entry.last_mes) }}</span>
+            <span class="text-[11px] tabular-nums text-ink-muted sm:text-right">{{ formatDateTime(entry.last_mes) }}</span>
             <button class="justify-self-start text-xs text-brand-300 hover:text-brand-200 sm:justify-self-end" @click="openChat(entry.file_name)">继续</button>
           </div>
         </div>

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { onBeforeRouteLeave, useRoute, useRouter } from 'vue-router'
 import { useCharactersStore } from '@/stores/characters'
 import { useUiStore } from '@/stores/ui'
@@ -9,9 +9,10 @@ import { useImageGenStore } from '@/stores/imageGen'
 import { useStoriesStore } from '@/stores/stories'
 import { useWorldInfoStore } from '@/stores/worldInfo'
 import { getStory, saveStory } from '@/api/stories'
-import { generateReply } from '@/api/generate'
 import { getApiErrorMessage } from '@/api/client'
-import type { Character, ImageAsset, ModelProfile, StoryCard } from '@/api/types'
+import { confirmDialog } from '@/composables/useDialog'
+import { parseTags } from '@/lib/format'
+import type { Character, ImageAsset, StoryCard } from '@/api/types'
 import AppButton from '@/components/ui/AppButton.vue'
 import AppInput from '@/components/ui/AppInput.vue'
 import AppSelect from '@/components/ui/AppSelect.vue'
@@ -27,10 +28,10 @@ import { buildStoryImagePrompt } from '@/lib/imagePrompts'
 import {
   buildStoryDraftPayload,
   buildStoryDraftQuestionsPayload,
-  parseDraftQuestions,
   parseStoryDraft,
-  type DraftQuestion,
+  type StoryDraft,
 } from '@/lib/aiDraft'
+import { useAiDraft } from '@/composables/useAiDraft'
 
 const route = useRoute()
 const router = useRouter()
@@ -65,15 +66,6 @@ const worldInfoStore = useWorldInfoStore()
 const storiesStore = useStoriesStore()
 const worlds = computed(() => worldInfoStore.worlds)
 const submitting = ref(false)
-const draft = reactive({
-  profileId: '',
-  idea: '',
-  questions: [] as DraftQuestion[],
-  answers: {} as Record<string, string>,
-  asking: false,
-  loading: false,
-  error: '',
-})
 
 const selectedCharacter = computed<Character | null>(() => {
   return chars.findCharacter(characterAvatar.value) || null
@@ -102,13 +94,6 @@ const pageTitle = computed(() => {
 })
 const backTo = computed(() => isEdit.value ? `/story/${editId.value}` : '/create?kind=story')
 
-function parseTags(value: string): string[] {
-  return value
-    .split(/[,，、\n]/)
-    .map((s) => s.trim())
-    .filter(Boolean)
-}
-
 function fillFromStory(story: StoryCard) {
   title.value = story.title || ''
   summary.value = story.summary || ''
@@ -135,25 +120,6 @@ function fillFromStory(story: StoryCard) {
   }
 }
 
-function getDraftProfile() {
-  return models.getProfile(draft.profileId) || models.activeProfile
-}
-
-function isLocalPlaceholderProfile(profile?: ModelProfile): boolean {
-  return Boolean(profile?.source === 'custom' && /(?:127\.0\.0\.1|localhost):11434/i.test(profile.endpoint || ''))
-}
-
-function defaultDraftProfileId(): string {
-  const active = models.getProfile(models.activeProfileId)
-  if (active && !isLocalPlaceholderProfile(active)) return active.id
-  const remote = models.profiles.find((profile) => (
-    profile.id !== active?.id
-    && !isLocalPlaceholderProfile(profile)
-    && (profile.apiKeySaved || profile.secretId)
-  ))
-  return remote?.id || active?.id || models.profiles[0]?.id || ''
-}
-
 function currentStoryDraftForm() {
   return {
     title: title.value,
@@ -166,104 +132,35 @@ function currentStoryDraftForm() {
   }
 }
 
-function draftAnswersText(): string {
-  return draft.questions
-    .map((item, index) => {
-      const answer = (draft.answers[item.id] || '').trim()
-      return answer ? `Q${index + 1}: ${item.question}\nA${index + 1}: ${answer}` : ''
-    })
-    .filter(Boolean)
-    .join('\n\n')
-}
-
-function selectDraftOption(question: DraftQuestion, option: string) {
-  draft.answers[question.id] = option
-}
-
-function useCustomDraftAnswer(question: DraftQuestion) {
-  draft.answers[question.id] = ''
-}
-
-function isDraftOptionSelected(question: DraftQuestion, option: string): boolean {
-  return (draft.answers[question.id] || '').trim() === option
-}
-
-function isCustomDraftAnswer(question: DraftQuestion): boolean {
-  const answer = (draft.answers[question.id] || '').trim()
-  return Boolean(answer) && !question.options.includes(answer)
-}
-
-async function askDraftQuestions() {
-  if (!selectedCharacter.value) {
-    ui.addToast('请先选择角色', 'warning')
-    return
-  }
-  if (!draft.idea.trim()) {
-    ui.addToast('先写一句你想要的故事方向', 'warning')
-    return
-  }
-  const profile = getDraftProfile()
-  if (!profile) {
-    ui.addToast('未配置可用模型', 'warning')
-    return
-  }
-
-  draft.asking = true
-  draft.error = ''
-  try {
-    const reply = await generateReply(
-      buildStoryDraftQuestionsPayload(
-        profile,
-        draft.idea,
-        selectedCharacter.value,
-        currentStoryDraftForm(),
-      ),
-    )
-    const questions = parseDraftQuestions(reply)
-    if (!questions.length) throw new Error('模型没有返回有效问题')
-    const nextAnswers: Record<string, string> = {}
-    for (const question of questions) {
-      nextAnswers[question.id] = draft.answers[question.id] || ''
-    }
-    draft.questions = questions
-    draft.answers = nextAnswers
-    ui.addToast('问题已生成，按你的偏好回答后再生成', 'success')
-  } catch (e: unknown) {
-    draft.error = getApiErrorMessage(e, '追问生成失败')
-    ui.addToast(`追问生成失败：${draft.error}`, 'error')
-  } finally {
-    draft.asking = false
-  }
-}
-
-async function draftWithAi() {
-  if (!selectedCharacter.value) {
-    ui.addToast('请先选择角色', 'warning')
-    return
-  }
-  if (!draft.idea.trim()) {
-    ui.addToast('先写一句你想要的故事方向', 'warning')
-    return
-  }
-  const profile = getDraftProfile()
-  if (!profile) {
-    ui.addToast('未配置可用模型', 'warning')
-    return
-  }
-
-  draft.loading = true
-  draft.error = ''
-  try {
-    const reply = await generateReply(
-      buildStoryDraftPayload(
-        profile,
-        draft.idea,
-        selectedCharacter.value,
-        currentStoryDraftForm(),
-        draftAnswersText(),
-      ),
-    )
-    const result = parseStoryDraft(reply)
+const {
+  draft,
+  getDraftProfile,
+  defaultDraftProfileId,
+  selectDraftOption,
+  useCustomDraftAnswer,
+  isDraftOptionSelected,
+  isCustomDraftAnswer,
+  askDraftQuestions,
+  draftWithAi,
+} = useAiDraft<StoryDraft>({
+  ideaRequiredMessage: '先写一句你想要的故事方向',
+  draftReadyMessage: 'AI 故事初稿已填入表单，可以继续手改',
+  guard: () => selectedCharacter.value ? null : '请先选择角色',
+  buildQuestionsPayload: (profile, idea) => buildStoryDraftQuestionsPayload(
+    profile,
+    idea,
+    selectedCharacter.value!,
+    currentStoryDraftForm(),
+  ),
+  buildDraftPayload: (profile, idea, guidance) => buildStoryDraftPayload(
+    profile,
+    idea,
+    selectedCharacter.value!,
+    currentStoryDraftForm(),
+    guidance,
+  ),
+  parseDraft: parseStoryDraft,
+  applyDraft: (result, profile) => {
     if (result.title) title.value = result.title
     if (result.summary) summary.value = result.summary
     if (result.scenario) scenario.value = result.scenario
@@ -275,14 +172,8 @@ async function draftWithAi() {
     if (result.systemAppend) systemAppend.value = result.systemAppend
     if (result.tags.length) tags.value = result.tags.join(', ')
     if (!modelProfileId.value) modelProfileId.value = profile.id
-    ui.addToast('AI 故事初稿已填入表单，可以继续手改', 'success')
-  } catch (e: unknown) {
-    draft.error = getApiErrorMessage(e, '起草失败')
-    ui.addToast(`起草失败：${draft.error}`, 'error')
-  } finally {
-    draft.loading = false
-  }
-}
+  },
+})
 
 // 未保存离开保护：对比可编辑字段与最近一次载入/保存的快照。
 function editableSnapshot() {
@@ -306,10 +197,10 @@ let savedSnapshot = ''
 function markStorySaved() {
   savedSnapshot = editableSnapshot()
 }
-onBeforeRouteLeave(() => {
+onBeforeRouteLeave(async () => {
   // 新建页初始快照在 onMounted 里补齐默认角色后建立
   if (!savedSnapshot || editableSnapshot() === savedSnapshot) return true
-  return window.confirm('有未保存的修改，确定离开吗？AI 生成的草稿也会一并丢失。')
+  return confirmDialog({ title: '离开页面？', message: '有未保存的修改，确定离开吗？AI 生成的草稿也会一并丢失。' })
 })
 
 async function saveHandler() {

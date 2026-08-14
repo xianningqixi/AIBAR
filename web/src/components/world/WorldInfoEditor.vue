@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import type { WorldInfoEntry, WorldInfoFile } from '@/api/types'
+import { confirmDialog } from '@/composables/useDialog'
 import AppButton from '@/components/ui/AppButton.vue'
 import AppInput from '@/components/ui/AppInput.vue'
 import AppTextarea from '@/components/ui/AppTextarea.vue'
@@ -116,9 +117,9 @@ function addEntry() {
   })
 }
 
-function deleteEntry() {
+async function deleteEntry() {
   if (!selectedEntry.value) return
-  if (!window.confirm(`删除条目「${entryDisplay(selectedEntry.value)}」？`)) return
+  if (!await confirmDialog({ title: '删除条目', message: `删除条目「${entryDisplay(selectedEntry.value)}」？`, danger: true, confirmText: '删除' })) return
   emitUpdate((file) => {
     if (Array.isArray(file.entries)) {
       const idx = Number(selectedKey.value)

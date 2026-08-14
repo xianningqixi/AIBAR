@@ -7,6 +7,7 @@ import { changePassword } from '@/api/auth'
 import { getApiErrorMessage } from '@/api/client'
 import { useBillingStore } from '@/stores/billing'
 import { formatPoints } from '@/lib/points'
+import { formatDateTime } from '@/lib/format'
 import AppButton from '@/components/ui/AppButton.vue'
 import AppFormField from '@/components/ui/AppFormField.vue'
 import AppInput from '@/components/ui/AppInput.vue'
@@ -55,15 +56,6 @@ function ledgerLabel(kind: string): string {
   if (kind === 'redemption') return '额度卡兑换'
   if (kind === 'generation') return '模型生成'
   return kind
-}
-
-function formatDate(value: string): string {
-  return new Intl.DateTimeFormat('zh-CN', {
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-  }).format(new Date(value))
 }
 
 async function redeem() {
@@ -121,7 +113,7 @@ onMounted(() => billing.load().catch((error: unknown) => {
             <div v-for="entry in billing.ledger" :key="entry.id" class="flex items-center gap-4 py-3 text-sm">
               <div class="min-w-0 flex-1">
                 <p class="font-medium text-ink-primary">{{ ledgerLabel(entry.kind) }}</p>
-                <p class="mt-1 text-xs text-ink-muted">{{ formatDate(entry.createdAt) }} · 余额 {{ formatPoints(entry.balanceAfter) }}</p>
+                <p class="mt-1 text-xs text-ink-muted">{{ formatDateTime(entry.createdAt) }} · 余额 {{ formatPoints(entry.balanceAfter) }}</p>
               </div>
               <span class="shrink-0 font-semibold tabular-nums" :class="entry.delta >= 0 ? 'text-emerald-600' : 'text-ink-primary'">
                 {{ entry.delta >= 0 ? '+' : '' }}{{ formatPoints(entry.delta) }}

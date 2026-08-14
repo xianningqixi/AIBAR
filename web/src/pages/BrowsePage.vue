@@ -16,7 +16,8 @@ import AppSelect from '@/components/ui/AppSelect.vue'
 import SearchInput from '@/components/ui/SearchInput.vue'
 import { getApiErrorMessage } from '@/api/client'
 import { fetchRecentChats } from '@/api/chats'
-import { stripJsonlName } from '@/lib/format'
+import { formatDateTime, formatRelative, stripJsonlName } from '@/lib/format'
+import { characterCover, getCharacterDescription, getCharacterTags, storyThumbnail } from '@/lib/characterMeta'
 import { createChatFromCharacter } from '@/lib/storyStart'
 import { getProviderLabel } from '@/lib/providers'
 import { formatModelPricing } from '@/lib/points'
@@ -98,33 +99,6 @@ function toTimestamp(value: unknown): number {
   if (typeof value === 'number') return value
   if (typeof value === 'string') return new Date(value).getTime()
   return NaN
-}
-
-function formatDate(value?: unknown): string {
-  if (!value) return '未更新'
-  const date = new Date(value as string | number)
-  if (Number.isNaN(date.getTime())) return '未更新'
-  return new Intl.DateTimeFormat('zh-CN', {
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-  }).format(date)
-}
-
-function formatRelative(value?: unknown): string {
-  const t = toTimestamp(value)
-  if (!Number.isFinite(t)) return '未更新'
-  const diff = Date.now() - t
-  if (diff < 0) return formatDate(value)
-  const min = 60 * 1000
-  const hour = 60 * min
-  const day = 24 * hour
-  if (diff < min) return '刚刚'
-  if (diff < hour) return `${Math.floor(diff / min)} 分钟前`
-  if (diff < day) return `${Math.floor(diff / hour)} 小时前`
-  if (diff < 7 * day) return `${Math.floor(diff / day)} 天前`
-  return formatDate(value)
 }
 
 function isProfileUsable(profile: ModelProfile): boolean {
@@ -292,12 +266,6 @@ function chatThumbnail(entry: ChatEntry): string {
   return `/thumbnail?type=avatar&file=${encodeURIComponent(entry.avatar)}`
 }
 
-function characterCover(avatar: string): string {
-  if (!avatar || avatar === 'none') return ''
-  // 网格用缩略图端点：原始角色卡 PNG 内嵌了完整卡片 JSON，单张常在 0.5-3 MB。
-  return `/thumbnail?type=avatar&file=${encodeURIComponent(avatar)}`
-}
-
 function getChatTitle(entry: ChatEntry): string {
   return entry.file_id || stripJsonlName(entry.file_name)
 }
@@ -370,11 +338,8 @@ function getStoryCharacter(story: StoryCard): Character | undefined {
   return store.findCharacter(story.characterAvatar)
 }
 
-function storyThumbnail(story: StoryCard): string {
-  if (story.coverImage) return story.coverImage
-  const character = getStoryCharacter(story)
-  if (!character?.avatar || character.avatar === 'none') return ''
-  return characterCover(character.avatar)
+function storyCover(story: StoryCard): string {
+  return storyThumbnail(story, getStoryCharacter(story))
 }
 
 function openStoryDetail(story: StoryCard) {
@@ -475,14 +440,6 @@ const charFilters = [
   { key: 'favorites' as const, label: '收藏' },
   { key: 'withChat' as const, label: '有聊天' },
 ]
-
-function getCharacterTags(c: Character): string[] {
-  return c.tags?.length ? c.tags : c.data?.tags || []
-}
-
-function getCharacterDescription(c: Character): string {
-  return c.description || c.data?.description || ''
-}
 
 function cleanDescription(c: Character): string {
   let t = getCharacterDescription(c)
@@ -888,8 +845,8 @@ onMounted(loadBrowseData)
           >
             <div class="relative aspect-[3/4] w-full overflow-hidden bg-gradient-to-br from-brand-500/25 to-accent-500/15">
               <img
-                v-if="storyThumbnail(story)"
-                :src="storyThumbnail(story)"
+                v-if="storyCover(story)"
+                :src="storyCover(story)"
                 loading="lazy"
                 decoding="async"
                 alt=""
@@ -916,7 +873,7 @@ onMounted(loadBrowseData)
                     class="rounded bg-brand-500/10 px-1.5 py-0.5 text-[11px] font-medium text-brand-300"
                   >{{ tag }}</span>
                 </div>
-                <span class="shrink-0 text-[11px] text-ink-muted">{{ formatDate(story.updatedAt || story.createdAt) }}</span>
+                <span class="shrink-0 text-[11px] text-ink-muted">{{ formatDateTime(story.updatedAt || story.createdAt) }}</span>
               </div>
             </div>
           </button>

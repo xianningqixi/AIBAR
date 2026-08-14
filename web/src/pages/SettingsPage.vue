@@ -59,6 +59,11 @@ const tabs = computed(() => [
 const availableTabKeys = computed(() => tabs.value.map((tab) => tab.key))
 const activeTab = ref(initialTab())
 
+/** 概览计数卡片点击跳转对应 Tab；该 Tab 对当前用户不可用时保持静止 */
+function goTab(key: string) {
+  if (availableTabKeys.value.includes(key)) activeTab.value = key
+}
+
 const tabComponents: Record<string, Component> = {
   model: ModelTab,
   presets: PresetsTab,
@@ -107,25 +112,27 @@ watch(
           <button class="rounded-lg border border-border bg-surface px-2 py-3 text-sm font-medium text-ink-secondary" @click="router.push('/mods')">提示词 MOD</button>
         </nav>
 
-        <!-- 概览计数：紧凑一条，标题与说明已由页面标题栏和侧栏承载 -->
+        <!-- 概览计数：点击跳转到对应 Tab -->
         <AppCard padding="sm">
           <div class="grid grid-cols-2 gap-3 lg:grid-cols-4">
-            <div class="rounded-lg bg-surface-sunken px-3 py-2.5 text-center">
-              <p class="text-[11px] text-ink-muted">模型</p>
-              <p class="mt-0.5 text-lg font-semibold text-ink-primary tabular-nums">{{ models.profiles.length }}</p>
-            </div>
-            <div class="rounded-lg bg-surface-sunken px-3 py-2.5 text-center">
-              <p class="text-[11px] text-ink-muted">预设</p>
-              <p class="mt-0.5 text-lg font-semibold text-ink-primary tabular-nums">{{ presets.presets.length }}</p>
-            </div>
-            <div class="rounded-lg bg-surface-sunken px-3 py-2.5 text-center">
-              <p class="text-[11px] text-ink-muted">身份</p>
-              <p class="mt-0.5 text-lg font-semibold text-ink-primary tabular-nums">{{ personas.personas.length }}</p>
-            </div>
-            <div class="rounded-lg bg-surface-sunken px-3 py-2.5 text-center">
-              <p class="text-[11px] text-ink-muted">图片</p>
-              <p class="mt-0.5 text-lg font-semibold text-ink-primary tabular-nums">{{ imageHistory.length }}</p>
-            </div>
+            <button
+              v-for="card in [
+                { key: 'model', label: '模型', count: models.profiles.length },
+                { key: 'presets', label: '预设', count: presets.presets.length },
+                { key: 'personas', label: '身份', count: personas.personas.length },
+                { key: 'image', label: '图片', count: imageHistory.length },
+              ]"
+              :key="card.key"
+              type="button"
+              class="rounded-lg bg-surface-sunken px-3 py-2.5 text-center transition-colors"
+              :class="availableTabKeys.includes(card.key)
+                ? 'hover:bg-surface-elevated hover:ring-1 hover:ring-border cursor-pointer'
+                : 'cursor-default opacity-70'"
+              @click="goTab(card.key)"
+            >
+              <p class="text-[11px] text-ink-muted">{{ card.label }}</p>
+              <p class="mt-0.5 text-lg font-semibold text-ink-primary tabular-nums">{{ card.count }}</p>
+            </button>
           </div>
         </AppCard>
 

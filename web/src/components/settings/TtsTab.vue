@@ -3,6 +3,7 @@ import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useUiStore } from '@/stores/ui'
 import { useTtsStore } from '@/stores/tts'
 import { writeSecret } from '@/api/secrets'
+import { confirmDialog } from '@/composables/useDialog'
 import { TTS_PROVIDERS, PROVIDER_MODELS, PROVIDER_VOICES, synthesizeSpeech, type ProviderSecret } from '@/api/tts'
 import type { TtsProvider, TtsVoiceProfile } from '@/api/types'
 import AppButton from '@/components/ui/AppButton.vue'
@@ -195,9 +196,9 @@ function addTtsVoiceProfile() {
   ui.addToast('音色已保存', 'success')
 }
 
-function removeTtsVoiceProfile(voice: TtsVoiceItem) {
+async function removeTtsVoiceProfile(voice: TtsVoiceItem) {
   if (voice.source !== '自定义') return
-  if (!window.confirm(`删除自定义音色「${voice.name}」？`)) return
+  if (!await confirmDialog({ title: '删除自定义音色', message: `删除音色「${voice.name}」？`, danger: true, confirmText: '删除' })) return
   tts.removeCustomVoice(voice.provider, voice.id)
   ui.addToast('音色已删除', 'success')
 }
