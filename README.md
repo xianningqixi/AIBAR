@@ -38,6 +38,8 @@ AIBAR 的私人数据沿用 SillyTavern 用户目录，共享社区数据使用 
 
 需要 **Node >= 20**。
 
+也可以直接运行 `scripts/dev.sh` 一键完成下述准备并同时启动前后端（后端 :8001 后台、前端 :5173 前台，Ctrl-C 一并退出）。
+
 生产服务器的目录、systemd、HTTPS、备份和回滚方案见 [`docs/server-deployment-plan.md`](./docs/server-deployment-plan.md)。
 
 ### 1. 拉取代码（含 submodule）
@@ -114,7 +116,7 @@ npm start
 
 ## 前端如何连到后端
 
-- **开发模式**：`web/vite.config.ts` 把 `/api`、`/csrf-token`、`/thumbnail`、`/characters`、`/User Avatars` 代理到 `VITE_ST_BACKEND`（见 `web/.env.development`，默认 `http://localhost:8001`）。`changeOrigin: false` 保持 Host 一致，cookie/CSRF 天然工作；`/api` 代理透传 `x-accel-buffering: no` 以避免 SSE 缓冲。
+- **开发模式**：`web/vite.config.ts` 把 `/api`、`/csrf-token` 以及一整套 ST 静态资源路径（`/thumbnail`、`/characters`、`/User Avatars`、`/st-compat`、`/scripts`、`/lib` 等，完整清单见 `web/vite.config.ts`）代理到 `VITE_ST_BACKEND`（见 `web/.env.development`，默认 `http://localhost:8001`）。`changeOrigin: false` 保持 Host 一致，cookie/CSRF 天然工作；`/api` 代理透传 `x-accel-buffering: no` 以避免 SSE 缓冲。
 - **生产模式**：`npm run build:install` 把产物拷到 `SillyTavern/public/aibar/`，由 Express 同源服务于 `/aibar/`。`vite.config.ts` 仅在生产构建时设置 `base: '/aibar/'`。默认访问入口为 `http://localhost:8001/aibar/`。
 - **对外边界**：普通用户只使用 AIBAR 的 `/aibar/` 入口。原生 SillyTavern 前端不作为用户入口，应在反向代理或访问控制层保持管理员私有；AIBAR 所需的同源 API、CSRF、角色和媒体路径仍需正常转发。
 - **CSRF / 会话**：`src/api/client.ts` 的 `bootCsrf()` 在启动时（`router/index.ts` 的全局导航守卫）拉取 `/csrf-token`，之后每个请求都带 `X-CSRF-Token`。`stores/session.ts` 每 5 分钟 ping `/api/ping?extend=true` 保活；登录、退出或会话失效时会清空账号级缓存和运行状态。

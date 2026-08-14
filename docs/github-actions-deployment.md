@@ -37,6 +37,8 @@
 
 仓库中的 `deploy/` 文件是服务器配置的唯一来源。更新它们时，需要先在服务器执行 `bash -n` / `visudo -cf`，再替换 root-owned 文件。
 
+**部署拓扑约束：AIBAR 后端只能以单进程运行**（不要用 cluster、PM2 多实例或多副本水平扩容）。共享模型的限流器、每用户并发计数（`activeGenerationCounts`）与在途积分预留集合（`activeReservationIds`）都保存在进程内存里；多实例会让限流按实例数倍增，且 stale 预留清理会误释放其他实例在途请求的额度。SQLite（better-sqlite3 同步 API + WAL）也按单进程访问设计。
+
 ## 发布与回滚
 
 部署顺序：

@@ -8,7 +8,7 @@ import { useModelProfilesStore } from '@/stores/modelProfiles'
 import { useImageGenStore } from '@/stores/imageGen'
 import { useWorldInfoStore } from '@/stores/worldInfo'
 import { generateReply } from '@/api/generate'
-import { getApiErrorMessage } from '@/api/client'
+import { apiGetBlob, getApiErrorMessage } from '@/api/client'
 import { confirmDialog } from '@/composables/useDialog'
 import { buildGeneratePayload } from '@/lib/buildPayload'
 import { getMatchedWorldInfo } from '@/lib/worldInfoMatch'
@@ -234,10 +234,9 @@ const avatarPreview = computed(() => {
   return ''
 })
 
-async function blobFromAsset(asset: ImageAsset): Promise<Blob> {
-  const response = await fetch(asset.url, { credentials: 'same-origin' })
-  if (!response.ok) throw new Error('读取生成图片失败')
-  return response.blob()
+function blobFromAsset(asset: ImageAsset): Promise<Blob> {
+  // 走 api/client 统一封装（凭据 + ApiError），失败信息由调用方的 getApiErrorMessage 兜底展示
+  return apiGetBlob(asset.url)
 }
 
 async function applyGeneratedAvatar(asset: ImageAsset) {

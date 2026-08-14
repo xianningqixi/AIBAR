@@ -14,6 +14,14 @@ import { getApiErrorMessage } from '@/api/client'
 import { buildChatCompletionPayload, buildGeneratePayload, getCharacterChatName } from '@/lib/buildPayload'
 import { buildReplyDraftPayload, parseReplyDraftOptions, type ReplyDraftOption } from '@/lib/replyDraft'
 import { getMatchedWorldInfo } from '@/lib/worldInfoMatch'
+import * as chatMeta from '@/lib/chatMetadata'
+import {
+  buildMemoryPromptMessages,
+  formatMemoryTranscript,
+  normalizeMemoryReply,
+  shouldRefreshMemory,
+  trimMemoryTranscript,
+} from '@/lib/chatMemory'
 import { useModelProfilesStore } from './modelProfiles'
 import { useModsStore } from './mods'
 import { usePresetsStore } from './presets'
@@ -27,15 +35,6 @@ type GenerationOptions = {
   updateMemory?: boolean
 }
 
-type ChatMemoryState = {
-  summary: string
-  updatedAt: string
-  messageCount: number
-}
-
-const MEMORY_TRANSCRIPT_MAX_CHARS = 120000
-const MEMORY_SUMMARY_MAX_CHARS = 1800
-const MEMORY_REFRESH_MESSAGE_INTERVAL = 8
 export const useChatStore = defineStore('chat', () => {
   let accountEpoch = 0
   let chatEpoch = 0
@@ -221,69 +220,32 @@ export const useChatStore = defineStore('chat', () => {
     return run.promise
   }
 
-  function getMetadataProfileId(): string {
-    const aibar = metadata.value.aibar
-    if (aibar && typeof aibar === 'object' && 'profileId' in aibar) {
-      return String((aibar as Record<string, unknown>).profileId || '')
-    }
-    return ''
-  }
-
-  function getMetadataAibar(): Record<string, unknown> {
-    return metadata.value.aibar && typeof metadata.value.aibar === 'object'
-      ? (metadata.value.aibar as Record<string, unknown>)
-      : {}
-  }
+  // metadata 编解码是纯函数（lib/chatMetadata），这里只做响应式状态的读写接线。
+  const getMetadataProfileId = () => chatMeta.getMetadataProfileId(metadata.value)
+  const getMetadataPresetId = () => chatMeta.getMetadataPresetId(metadata.value)
+  const getMetadataWorld = () => chatMeta.getMetadataWorld(metadata.value)
+  const getMetadataModIds = () => chatMeta.getMetadataModIds(metadata.value)
+  const getMetadataPersona = () => chatMeta.getMetadataPersona(metadata.value)
+  const getMetadataAibar = () => chatMeta.getMetadataAibar(metadata.value)
 
   function mergeMetadataAibar(updates: Record<string, unknown>) {
-    metadata.value = {
-      ...metadata.value,
-      aibar: { ...getMetadataAibar(), ...updates },
-    }
+    metadata.value = chatMeta.mergeMetadataAibar(metadata.value, updates)
   }
 
   function writeMetadataProfileId(profileId: string) {
     mergeMetadataAibar({ profileId })
   }
 
-  function getMetadataPresetId(): string {
-    const v = getMetadataAibar().presetId
-    return typeof v === 'string' ? v : ''
-  }
-
   function writeMetadataPresetId(presetId: string) {
     mergeMetadataAibar({ presetId })
-  }
-
-  function getMetadataWorld(): string {
-    const v = getMetadataAibar().world
-    return typeof v === 'string' ? v : ''
   }
 
   function writeMetadataWorld(world: string) {
     mergeMetadataAibar({ world })
   }
 
-  function getMetadataModIds(): string[] {
-    const v = getMetadataAibar().mods
-    return Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : []
-  }
-
   function writeMetadataModIds(ids: string[]) {
     mergeMetadataAibar({ mods: ids })
-  }
-
-  function getMetadataPersona(): ChatPersonaSnapshot | null {
-    const value = getMetadataAibar().persona
-    if (!value || typeof value !== 'object') return null
-    const data = value as Record<string, unknown>
-    const name = typeof data.name === 'string' ? data.name.trim() : ''
-    if (!name) return null
-    return {
-      id: typeof data.id === 'string' ? data.id : '',
-      name,
-      description: typeof data.description === 'string' ? data.description : '',
-    }
   }
 
   function getGenerationPersona(): ChatPersonaSnapshot {
@@ -319,19 +281,7 @@ export const useChatStore = defineStore('chat', () => {
     await persistSafe()
   }
 
-  function getMemoryState(): ChatMemoryState {
-    const memory = getMetadataAibar().memory
-    if (!memory || typeof memory !== 'object') {
-      return { summary: '', updatedAt: '', messageCount: 0 }
-    }
-
-    const data = memory as Record<string, unknown>
-    return {
-      summary: typeof data.summary === 'string' ? data.summary : '',
-      updatedAt: typeof data.updatedAt === 'string' ? data.updatedAt : '',
-      messageCount: typeof data.messageCount === 'number' ? data.messageCount : 0,
-    }
-  }
+  const getMemoryState = () => chatMeta.getMemoryState(metadata.value)
 
   function writeMemoryState(summary: string, messageCount: number) {
     mergeMetadataAibar({
@@ -350,34 +300,7 @@ export const useChatStore = defineStore('chat', () => {
 
   function getEffectiveCharacter(): Character | null {
     if (!character.value) return null
-    const aibar = getMetadataAibar()
-    const storyParts = [
-      typeof aibar.storyTitle === 'string' && aibar.storyTitle ? `故事标题：${aibar.storyTitle}` : '',
-      typeof aibar.storySummary === 'string' && aibar.storySummary ? `故事简介：${aibar.storySummary}` : '',
-      typeof aibar.storyScenario === 'string' && aibar.storyScenario ? `故事场景：${aibar.storyScenario}` : '',
-    ].filter(Boolean)
-    const storySystemAppend =
-      typeof aibar.storySystemAppend === 'string' ? aibar.storySystemAppend.trim() : ''
-
-    if (!storyParts.length && !storySystemAppend) return character.value
-
-    const data = character.value.data || { name: character.value.name }
-    const scenario = [data.scenario || character.value.scenario || '', ...storyParts]
-      .filter(Boolean)
-      .join('\n\n')
-    const systemPrompt = [data.system_prompt || '', storySystemAppend]
-      .filter(Boolean)
-      .join('\n\n')
-
-    return {
-      ...character.value,
-      scenario,
-      data: {
-        ...data,
-        scenario,
-        system_prompt: systemPrompt,
-      },
-    }
+    return chatMeta.applyStoryOverlay(character.value, getMetadataAibar())
   }
 
   async function setSelectedPresetId(presetId: string) {
@@ -437,55 +360,6 @@ export const useChatStore = defineStore('chat', () => {
     return true
   }
 
-  function formatMemoryTranscript(
-    historyMessages: ChatMessage[],
-    userName: string,
-    characterName: string,
-  ): string {
-    return historyMessages
-      .map((message, index) => {
-        const content = message.content.trim()
-        if (!content) return ''
-        const role =
-          message.role === 'assistant'
-            ? characterName
-            : message.role === 'system'
-              ? '系统'
-              : userName
-        return `${index + 1}. ${role}：${content}`
-      })
-      .filter(Boolean)
-      .join('\n\n')
-  }
-
-  function trimMemoryTranscript(transcript: string): string {
-    if (transcript.length <= MEMORY_TRANSCRIPT_MAX_CHARS) return transcript
-    return [
-      '（早前内容已由旧记忆承接，下面保留最近的历史对话。）',
-      transcript.slice(-MEMORY_TRANSCRIPT_MAX_CHARS),
-    ].join('\n\n')
-  }
-
-  function normalizeMemoryReply(reply: string): string {
-    const cleaned = reply
-      .trim()
-      .replace(/^```[a-zA-Z0-9_-]*\s*/, '')
-      .replace(/\s*```$/, '')
-      .trim()
-
-    if (!cleaned || /^(无|暂无|没有|空)$/i.test(cleaned)) return ''
-    if (cleaned.length <= MEMORY_SUMMARY_MAX_CHARS) return cleaned
-    return `${cleaned.slice(0, MEMORY_SUMMARY_MAX_CHARS).trim()}...`
-  }
-
-  function shouldRefreshMemory(sourceMessages: ChatMessage[]): boolean {
-    const historyCount = Math.max(0, sourceMessages.length - 1)
-    const previousCount = getMemoryState().messageCount
-    if (historyCount < 2) return false
-    if (previousCount === 0) return true
-    return historyCount - previousCount >= MEMORY_REFRESH_MESSAGE_INTERVAL
-  }
-
   async function refreshMemorySummary(
     sourceMessages: ChatMessage[],
     config: ModelProfile,
@@ -515,28 +389,7 @@ export const useChatStore = defineStore('chat', () => {
     try {
       const payload = buildChatCompletionPayload(
         config,
-        [
-          {
-            role: 'system',
-            content: [
-              '你是聊天记忆整理器，只负责整理历史对话背景。',
-              '不要续写剧情，不要扮演角色，不要解释过程，只输出可直接注入下一轮角色扮演的背景记忆。',
-            ].join('\n'),
-          },
-          {
-            role: 'user',
-            content: [
-              '请把旧记忆与历史对话合并成一份稳定、紧凑的背景信息。',
-              '保留：用户身份与偏好、角色关系变化、重要剧情事实、世界状态、未完成目标、关键约定。',
-              '忽略：寒暄、重复措辞、无长期价值的临时表达。',
-              `摘要控制在 ${MEMORY_SUMMARY_MAX_CHARS} 字以内；如果没有值得记忆的信息，输出“无”。`,
-              '',
-              `旧记忆：\n${previousMemory || '无'}`,
-              '',
-              `历史对话：\n${transcript}`,
-            ].join('\n'),
-          },
-        ],
+        buildMemoryPromptMessages(previousMemory, transcript),
         effectiveCharacter,
         userName,
       )
@@ -562,7 +415,7 @@ export const useChatStore = defineStore('chat', () => {
   ) {
     if (memoryUpdating.value || !shouldCommit()) return
     const sourceMessages = [...messages.value]
-    if (!shouldRefreshMemory(sourceMessages)) return
+    if (!shouldRefreshMemory(sourceMessages, getMemoryState().messageCount)) return
 
     void refreshMemorySummary(sourceMessages, config, effectiveCharacter, userName, shouldCommit)
       .catch((e: unknown) => {

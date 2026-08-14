@@ -8,6 +8,7 @@
 | [`github-actions-deployment.md`](./github-actions-deployment.md) | GitHub Actions 自动发布：受限 SSH、Secrets、release 切换、健康检查与失败回滚 | 运维 / 部署执行者 |
 | [`discord-hot-import-runbook.md`](./discord-hot-import-runbook.md) | Discord 热门角色卡同步与导入的可执行操作手册（浏览器助手或人工均可执行） | 浏览器助手 / 管理员 |
 | [`discord-browser-import.md`](./discord-browser-import.md) | Discord 浏览器协作导入的版本 1 契约：manifest schema、双阶段授权、安全红线、去重规则 | 前后端开发 / 浏览器助手 |
+| [`local-discord-import-service.md`](./local-discord-import-service.md) | 本地 Discord 手动同步/发布服务的契约与所有权边界：loopback 面板、任务与 worker 心跳、token 鉴权 | 管理员 / 前后端开发 |
 | [`aibar-web-app-bridge.md`](./aibar-web-app-bridge.md) | 第三方网页应用在 AIBAR 隔离页运行的桥接协议 | 前端开发 / 应用作者 |
 | [`PLAN.md`](./PLAN.md) | 原始实施/对照计划（中文，历史资料），解释设计取舍与旧 `simple-ui.js` 基线的差异 | 新成员了解背景 |
 

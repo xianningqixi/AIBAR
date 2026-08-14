@@ -1,5 +1,7 @@
 # AIBAR 新前端实施方案
 
+> **⚠️ 历史文档，前提已失效**：本文写作时的前提是「本机单用户使用，不考虑远程/多用户部署」（见下文 Context），该前提**已不再成立**。项目现为多用户生产部署：共享社区数据使用 SQLite（`community.sqlite`）、注册需邀请码审核、并已部署到生产域名对外服务。本文仅作为历史设计动机与旧 `simple-ui.js` 对照基线的参考保留，**请勿据此做任何架构决策**；当前架构以根目录 `README.md` 和 `AGENTS.md` 为准。
+
 ## Context
 
 最初基线:用户在 SillyTavern fork(`xianningqixi/SillyTavern.git`,旧分支 `codex-aibar-simple-ui`)上,做过一个简版 UI(`public/simple.html` + `public/scripts/simple-ui.js`,4485 行)。但原生 SillyTavern 前端太重(主 `script.js` 12537 行,总前端源码约 8.7MB),旧简版 UI 仍然是单文件巨型 vanilla JS,可维护性差。

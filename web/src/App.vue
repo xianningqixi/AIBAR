@@ -15,6 +15,7 @@ import { invalidateSettingsCache } from '@/api/settings'
 import { clearSettingsSharedState } from '@/components/settings/shared'
 import { useStoriesStore } from '@/stores/stories'
 import { useWorldInfoStore } from '@/stores/worldInfo'
+import { useChatFilesStore } from '@/stores/chatFiles'
 import {
   clearLegacyDiscordImportQueue,
   clearLegacyTelegramBotAdminToken,
@@ -62,6 +63,7 @@ watch(
     models.reset()
     useStoriesStore().reset()
     useWorldInfoStore().reset()
+    useChatFilesStore().reset()
     clearSettingsSharedState()
     if (!handle) {
       if (session.booted && !route.meta.public) {

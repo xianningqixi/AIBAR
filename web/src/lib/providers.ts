@@ -118,18 +118,11 @@ export const providerConfigs: Record<string, ProviderConfig> = {
     modelKey: 'fireworks_model',
     defaultModel: 'accounts/fireworks/models/kimi-k2-instruct',
   },
-  cometapi: {
-    label: 'CometAPI',
-    secretKey: 'api_key_cometapi',
-    modelKey: 'cometapi_model',
-    defaultModel: 'gpt-4o-mini',
-  },
-  azure_openai: {
-    label: 'Azure OpenAI',
-    secretKey: 'api_key_azure_openai',
-    modelKey: 'azure_openai_model',
-    endpointKey: 'reverse_proxy',
-    defaultModel: 'gpt-4o-mini',
+  ai21: {
+    label: 'AI21',
+    secretKey: 'api_key_ai21',
+    modelKey: 'ai21_model',
+    defaultModel: 'jamba-large',
   },
   zai: {
     label: 'Z.AI',
@@ -150,22 +143,16 @@ export const providerConfigs: Record<string, ProviderConfig> = {
     modelKey: 'minimax_model',
     defaultModel: 'MiniMax-M1',
   },
-  workers_ai: {
-    label: 'Cloudflare Workers AI',
-    secretKey: 'api_key_workers_ai',
-    modelKey: 'workers_ai_model',
-    defaultModel: '@cf/meta/llama-3.1-8b-instruct',
-  },
 }
 
-// Keep this list aligned with the sources accepted by the shared-model backend.
-// Providers outside this list may exist in SillyTavern, but are not safe to
-// expose through AIBAR's shared credential flow.
-export const sharedModelProviderSources = [
+// 后端 /api/aibar/models/list 返回的 supportedSources 才是权威清单；
+// 这份静态清单只在列表尚未加载时兜底，避免再出现前后端手工同步漂移。
+export const fallbackSharedModelProviderSources = [
   'custom',
   'openai',
   'claude',
   'openrouter',
+  'ai21',
   'makersuite',
   'deepseek',
   'mistralai',
@@ -184,10 +171,6 @@ export const sharedModelProviderSources = [
   'pollinations',
   'minimax',
 ] as const
-
-export function isSharedModelProviderSource(source: string): boolean {
-  return (sharedModelProviderSources as readonly string[]).includes(source)
-}
 
 export function getProviderLabel(source: string): string {
   return providerConfigs[source]?.label || source

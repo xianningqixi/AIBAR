@@ -1,6 +1,10 @@
 import { apiPost } from './client'
+import { aibarSettingsSchema } from './schemas'
 
-let cachedRaw: Record<string, unknown> | null = null
+// AIBAR 设置走专用端点 /api/aibar/settings/*：服务端在 settings.json 的 aibar 键下
+// 浅合并。之前前端拉取整个 ST settings blob 再整体写回，会和 /st-compat 原生界面的
+// 设置写入发生 last-writer-wins 互相覆盖；现在两边各写各的键，互不干扰。
+let cached: Record<string, unknown> | null = null
 let settingsGeneration = 0
 let fetchState: {
   generation: number
@@ -8,55 +12,45 @@ let fetchState: {
 } | null = null
 let saveQueue: Promise<void> = Promise.resolve()
 
-async function fetchSettingsRaw(): Promise<Record<string, unknown>> {
-  const r = await apiPost<{ settings?: string }>('/api/settings/get')
-  const raw = r?.settings
-  if (typeof raw !== 'string' || !raw.trim()) return {}
-  try {
-    return JSON.parse(raw) as Record<string, unknown>
-  } catch {
-    return {}
-  }
+async function fetchAibarSettings(): Promise<Record<string, unknown>> {
+  const r = await apiPost<{ settings?: unknown }>('/api/aibar/settings/get')
+  const parsed = aibarSettingsSchema.safeParse(r?.settings)
+  return parsed.success ? parsed.data : {}
 }
 
 export async function loadAibarSettings<T = Record<string, unknown>>(): Promise<T> {
   const generation = settingsGeneration
-  if (!cachedRaw) {
+  if (!cached) {
     if (!fetchState || fetchState.generation !== generation) {
-      const promise = fetchSettingsRaw()
+      const promise = fetchAibarSettings()
       fetchState = { generation, promise }
     }
     const state = fetchState
-    let raw: Record<string, unknown>
+    let aibar: Record<string, unknown>
     try {
-      raw = await state.promise
+      aibar = await state.promise
     } catch (error) {
       if (fetchState === state) fetchState = null
       throw error
     }
     if (generation === settingsGeneration) {
-      cachedRaw = raw
+      cached = aibar
       if (fetchState === state) fetchState = null
     }
-    const aibar = (raw.aibar as Record<string, unknown>) || {}
     return aibar as T
   }
-  const aibar = (cachedRaw.aibar as Record<string, unknown>) || {}
-  return aibar as T
+  return cached as T
 }
 
 export function saveAibarSettings(updates: Record<string, unknown>): Promise<void> {
   const generation = settingsGeneration
+  // 本地仍串行化写入：保证同一会话内的更新按提交顺序到达服务端。
   const task = saveQueue.then(async () => {
     if (generation !== settingsGeneration) return
-    const raw = await fetchSettingsRaw()
+    const r = await apiPost<{ settings?: unknown }>('/api/aibar/settings/save', updates)
     if (generation !== settingsGeneration) return
-
-    const aibar = (raw.aibar as Record<string, unknown>) || {}
-    const next = { ...raw, aibar: { ...aibar, ...updates } }
-    if (generation !== settingsGeneration) return
-    await apiPost('/api/settings/save', next)
-    if (generation === settingsGeneration) cachedRaw = next
+    const parsed = aibarSettingsSchema.safeParse(r?.settings)
+    if (parsed.success) cached = parsed.data
   })
   saveQueue = task.catch(() => {})
   return task
@@ -64,6 +58,6 @@ export function saveAibarSettings(updates: Record<string, unknown>): Promise<voi
 
 export function invalidateSettingsCache(): void {
   settingsGeneration += 1
-  cachedRaw = null
+  cached = null
   fetchState = null
 }

@@ -5,9 +5,9 @@ import { deleteSharedModel, listSharedModels, saveSharedModel } from '@/api/bill
 import { readSecretState, writeSecret } from '@/api/secrets'
 import { loadAibarSettings, saveAibarSettings } from '@/api/settings'
 import {
-  isSharedModelProviderSource,
+  fallbackSharedModelProviderSources,
+  getProviderLabel,
   providerConfigs,
-  sharedModelProviderSources,
 } from '@/lib/providers'
 import { generateId } from '@/lib/format'
 import { useSessionStore } from './session'
@@ -31,6 +31,9 @@ const UNAVAILABLE_PROFILE: ModelProfile = {
 
 export const useModelProfilesStore = defineStore('modelProfiles', () => {
   const profiles = ref<ModelProfile[]>([])
+  // 渠道白名单以后端 /models/list 返回为准，静态清单仅在列表加载前兜底，
+  // 避免前后端两份手工清单再次漂移。
+  const supportedSources = ref<string[]>([...fallbackSharedModelProviderSources])
   const activeProfileId = ref('')
   const secretState = ref<SecretStateMap>({})
   const loadingSecrets = ref(false)
@@ -53,10 +56,14 @@ export const useModelProfilesStore = defineStore('modelProfiles', () => {
     || UNAVAILABLE_PROFILE
   ))
 
-  const providerOptions = computed(() => sharedModelProviderSources.map((value) => ({
+  const providerOptions = computed(() => supportedSources.value.map((value) => ({
     value,
-    label: providerConfigs[value].label,
+    label: getProviderLabel(value),
   })))
+
+  function isSupportedSource(source: string): boolean {
+    return supportedSources.value.includes(source)
+  }
 
   function getProfile(id: string): ModelProfile | undefined {
     return profiles.value.find((profile) => profile.id === id)
@@ -90,11 +97,15 @@ export const useModelProfilesStore = defineStore('modelProfiles', () => {
     const version = loadVersion
     const promise = (async () => {
       try {
-        const [remoteProfiles, settings] = await Promise.all([
+        const [remoteModels, settings] = await Promise.all([
           listSharedModels(),
           loadAibarSettings<{ simple_ui_active_profile?: string }>(),
         ])
         if (version !== loadVersion) return
+        const remoteProfiles = remoteModels.models
+        if (remoteModels.supportedSources.length) {
+          supportedSources.value = remoteModels.supportedSources
+        }
         profiles.value = remoteProfiles
         profileRevisions.clear()
         for (const profile of remoteProfiles) profileRevisions.set(profile.id, 0)
@@ -142,11 +153,12 @@ export const useModelProfilesStore = defineStore('modelProfiles', () => {
 
   function createProfile(source = 'custom'): ModelProfile {
     requireAdmin()
-    const safeSource = isSharedModelProviderSource(source) ? source : 'custom'
-    const config = providerConfigs[safeSource]
+    const safeSource = isSupportedSource(source) ? source : 'custom'
+    // 后端新增而前端尚无展示配置的渠道，用 custom 的默认参数兜底。
+    const config = providerConfigs[safeSource] || providerConfigs.custom
     const profile: ModelProfile = {
       id: generateId(),
-      name: config.label,
+      name: getProviderLabel(safeSource),
       source: safeSource,
       model: config.defaultModel || '',
       endpoint: config.defaultEndpoint || '',
@@ -171,7 +183,7 @@ export const useModelProfilesStore = defineStore('modelProfiles', () => {
     requireAdmin()
     const index = profiles.value.findIndex((profile) => profile.id === id)
     if (index === -1) return
-    if (updates.source && !isSharedModelProviderSource(updates.source)) {
+    if (updates.source && !isSupportedSource(updates.source)) {
       throw new Error('不支持的共享模型渠道')
     }
     const current = profiles.value[index]
@@ -233,7 +245,7 @@ export const useModelProfilesStore = defineStore('modelProfiles', () => {
           if (lastSaved) return lastSaved
           throw new Error('共享模型不存在')
         }
-        if (!isSharedModelProviderSource(profile.source)) throw new Error('不支持的共享模型渠道')
+        if (!isSupportedSource(profile.source)) throw new Error('不支持的共享模型渠道')
         const revision = profileRevision(id)
         const saved = await saveSharedModel({ ...profile })
         lastSaved = saved
@@ -336,6 +348,7 @@ export const useModelProfilesStore = defineStore('modelProfiles', () => {
     deletingProfileIds.clear()
     saveRuns.clear()
     profiles.value = []
+    supportedSources.value = [...fallbackSharedModelProviderSources]
     activeProfileId.value = ''
     secretState.value = {}
     loadingSecrets.value = false
@@ -369,6 +382,8 @@ export const useModelProfilesStore = defineStore('modelProfiles', () => {
     secretState,
     loadingSecrets,
     providerOptions,
+    supportedSources,
+    isSupportedSource,
     loaded,
     load,
     loadSecrets,
