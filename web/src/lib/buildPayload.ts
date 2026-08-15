@@ -5,6 +5,10 @@ import { normalizeText, trimText } from './format'
 const HISTORY_CHAR_BUDGET = 48_000
 const HISTORY_MESSAGE_LIMIT = 120
 
+// 注意：telegram-bot/src/index.js 的 buildGeneratePayload/getSystemPrompt 是本文件
+// 提示词拼装逻辑的 Node 端平行实现（浏览器与 bot 无法共享包）。调整系统提示词
+// 结构、字段注入顺序时必须同步修改两边。
+
 export function selectRecentMessages(
   sourceMessages: ChatMessage[],
   charBudget = HISTORY_CHAR_BUDGET,

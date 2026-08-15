@@ -139,7 +139,8 @@ async function initChat() {
     return
   }
   await chat.loadChat(character.value, routeChatFile.value)
-  await loadChatList()
+  // 聊天记录列表只服务于历史抽屉，不阻塞主对话渲染
+  void loadChatList()
 }
 
 async function loadChatList() {

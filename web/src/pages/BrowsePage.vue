@@ -36,6 +36,14 @@ const storiesStore = useStoriesStore()
 const stories = computed(() => storiesStore.stories)
 const chatEntries = ref<ChatEntry[]>([])
 const loading = ref(true)
+// 聊天列表两级加载：首屏只拉少量预览（最近在聊横条 12 条足够），
+// 完整列表等用户切到“继续聊天”tab 再拉。后端 /api/chats/recent 会逐文件
+// 完整读取 max 个 JSONL，直接拉 500 会让首屏等几百次文件 IO。
+const CHATS_PREVIEW_COUNT = 60
+const CHATS_FULL_COUNT = 500
+const chatsLoading = ref(true)
+let chatsFullLoaded = false
+let chatsFullPromise: Promise<void> | null = null
 
 function normalizeTab(value: unknown): BrowseTab {
   return value === 'stories' || value === 'chats' ? value : 'characters'
@@ -73,6 +81,7 @@ function includesQuery(fields: Array<string | undefined | null>): boolean {
 watch(activeTab, (tab) => {
   router.replace({ query: { ...route.query, tab } })
   searchQuery.value = ''
+  if (tab === 'chats') void ensureFullChats()
   if (typeof window !== 'undefined') window.scrollTo({ top: 0, behavior: 'smooth' })
 })
 
@@ -407,17 +416,42 @@ function cleanDescription(c: Character): string {
 async function loadBrowseData() {
   loading.value = true
   try {
-    await Promise.all([
-      store.characters.length ? Promise.resolve() : store.load(),
-      models.loadSecrets().catch(() => undefined),
-      storiesStore.load().catch(() => undefined),
-      fetchRecentChats(500)
-        .then((res) => (chatEntries.value = res))
-        .catch(() => undefined),
-    ])
+    // 首屏骨架只等角色列表（主 tab）；模型/故事/聊天预览并行补齐
+    await (store.characters.length ? Promise.resolve() : store.load())
   } finally {
     loading.value = false
   }
+
+  chatsLoading.value = true
+  fetchRecentChats(CHATS_PREVIEW_COUNT)
+    // 完整列表已就位时不再用预览覆盖（切 tab 快于预览返回的竞态）
+    .then((res) => {
+      if (!chatsFullLoaded) chatEntries.value = res
+    })
+    .catch(() => undefined)
+    .finally(() => {
+      chatsLoading.value = false
+      // 直接落在“继续聊天”tab 时（?tab=chats）也需要完整列表
+      if (activeTab.value === 'chats') void ensureFullChats()
+    })
+  models.loadSecrets().catch(() => undefined)
+  storiesStore.load().catch(() => undefined)
+}
+
+async function ensureFullChats() {
+  if (chatsFullLoaded) return
+  if (chatsFullPromise) return chatsFullPromise
+  chatsFullPromise = (async () => {
+    try {
+      chatEntries.value = await fetchRecentChats(CHATS_FULL_COUNT)
+      chatsFullLoaded = true
+    } catch {
+      // 保留已有预览数据，下次切 tab 重试
+    } finally {
+      chatsFullPromise = null
+    }
+  })()
+  return chatsFullPromise
 }
 
 onMounted(loadBrowseData)
@@ -505,7 +539,7 @@ const scrollHintLeft = 'after:absolute after:right-0 after:top-0 after:h-full af
           </section>
 
           <section
-            v-if="!hasUsableModel"
+            v-if="models.loaded && !hasUsableModel"
             class="flex flex-col gap-3 rounded-lg bg-warning/10 p-4 ring-1 ring-warning/35 sm:flex-row sm:items-center sm:justify-between"
           >
             <div>
@@ -590,7 +624,7 @@ const scrollHintLeft = 'after:absolute after:right-0 after:top-0 after:h-full af
             </div>
 
             <!-- 加载骨架 -->
-            <div v-if="loading && activeTab === 'chats'" class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            <div v-if="activeTab === 'chats' && chatsLoading && !chatEntries.length" class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
               <div v-for="n in 6" :key="n" class="rounded-2xl bg-surface p-5 ring-1 ring-border-subtle">
                 <div class="flex gap-4">
                   <div class="skeleton h-16 w-16 shrink-0 rounded-lg" />
@@ -748,7 +782,7 @@ const scrollHintLeft = 'after:absolute after:right-0 after:top-0 after:h-full af
             <!-- 故事卡列表 -->
             <section v-if="!loading && activeTab === 'stories'">
               <AppEmpty
-                v-if="!stories.length"
+                v-if="storiesStore.loaded && !stories.length"
                 icon="book"
                 title="还没有故事卡"
                 description="故事卡是可复用开局模板 — 绑定角色、场景、开场消息和默认 MOD。创建后每次都能基于同一设定快速开新存档。"
@@ -759,7 +793,7 @@ const scrollHintLeft = 'after:absolute after:right-0 after:top-0 after:h-full af
                 </template>
               </AppEmpty>
               <AppEmpty
-                v-else-if="!filteredStories.length"
+                v-else-if="storiesStore.loaded && !filteredStories.length"
                 icon="search"
                 title="没有匹配的故事卡"
                 description="换个关键词试试。"
