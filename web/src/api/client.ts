@@ -135,10 +135,11 @@ export async function apiPost<T = unknown>(
   return parseByContentType<T>(await postJson(url, body, init))
 }
 
-export async function apiGet<T = unknown>(url: string): Promise<T> {
+export async function apiGet<T = unknown>(url: string, init?: { signal?: AbortSignal }): Promise<T> {
   return parseByContentType<T>(await doFetch(url, {
     method: 'GET',
     headers: headers(),
+    signal: init?.signal,
   }))
 }
 

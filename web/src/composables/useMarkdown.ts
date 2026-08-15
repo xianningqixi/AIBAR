@@ -14,6 +14,15 @@ function getRenderer(): Marked {
   return _renderer
 }
 
+function isAllowedImageSrc(raw: string): boolean {
+  try {
+    const url = new URL(raw, window.location.href)
+    return url.origin === window.location.origin || url.protocol === 'data:'
+  } catch {
+    return false
+  }
+}
+
 function ensureHook() {
   if (_hookReady) return
   // 外链统一新标签打开,避免在 SPA 内跳走,并补安全 rel
@@ -21,6 +30,10 @@ function ensureHook() {
     if (node.tagName === 'A' && node.getAttribute('href')) {
       node.setAttribute('target', '_blank')
       node.setAttribute('rel', 'noopener noreferrer')
+    }
+    if (node.nodeName === 'IMG') {
+      const element = node as HTMLImageElement
+      if (!isAllowedImageSrc(element.getAttribute('src') || '')) element.remove()
     }
   })
   _hookReady = true
