@@ -9,8 +9,8 @@ import type { Character, CharacterStartSelection, ChatEntry, ModelProfile, Story
 import { useStoriesStore } from '@/stores/stories'
 import CharacterStartDialog from '@/components/chat/CharacterStartDialog.vue'
 import StCompatibilityDialog from '@/components/chat/StCompatibilityDialog.vue'
+import DefaultModelPicker from '@/components/browse/DefaultModelPicker.vue'
 import AppButton from '@/components/ui/AppButton.vue'
-import AppDrawer from '@/components/ui/AppDrawer.vue'
 import AppEmpty from '@/components/ui/AppEmpty.vue'
 import AppSelect from '@/components/ui/AppSelect.vue'
 import AppSegmentedControl from '@/components/ui/AppSegmentedControl.vue'
@@ -20,10 +20,8 @@ import { fetchRecentChats } from '@/api/chats'
 import { formatDateTime, formatRelative, stripJsonlName } from '@/lib/format'
 import { characterCover, getCharacterDescription, getCharacterTags, storyThumbnail } from '@/lib/characterMeta'
 import { createChatFromCharacter } from '@/lib/storyStart'
-import { getProviderLabel } from '@/lib/providers'
-import { formatModelPricing } from '@/lib/points'
-import { analyzeCharacterRuntime, type CharacterRuntimeAnalysis } from '@/lib/characterRuntime'
-import { fetchCharacterForRuntime, launchStCompatibility } from '@/lib/stCompatibility'
+import { fetchCharacterForRuntime } from '@/lib/stCompatibility'
+import { useStCompatibilityGate } from '@/composables/useStCompatibilityGate'
 
 type BrowseTab = 'characters' | 'stories' | 'chats'
 
@@ -51,11 +49,14 @@ const startDialogOpen = ref(false)
 const startCharacter = ref<Character | null>(null)
 const modelPickerOpen = ref(false)
 const searchQuery = ref('')
-const compatDialogOpen = ref(false)
-const compatLaunching = ref(false)
-const compatCharacter = ref<Character | null>(null)
-const compatAnalysis = ref<CharacterRuntimeAnalysis | null>(null)
-const pendingCompatChat = ref('')
+const {
+  dialogOpen: compatDialogOpen,
+  launching: compatLaunching,
+  character: compatCharacter,
+  analysis: compatAnalysis,
+  gate: compatibilityGate,
+  confirmLaunch: confirmCompatibilityLaunch,
+} = useStCompatibilityGate()
 
 const searchPlaceholder = computed(() => {
   if (activeTab.value === 'stories') return '搜索故事卡（标题、简介、标签）…'
@@ -108,18 +109,10 @@ function isProfileUsable(profile: ModelProfile): boolean {
   return Boolean(profile.id && profile.model && profile.enabled !== false)
 }
 
-const usableModelProfiles = computed(() => models.profiles.filter(isProfileUsable))
-
-const hasUsableModel = computed(() => usableModelProfiles.value.length > 0)
+const hasUsableModel = computed(() => models.profiles.some(isProfileUsable))
 
 const activeModelTitle = computed(() =>
   models.activeProfile.model || models.activeProfile.name || '选择模型',
-)
-
-const activeModelSubtitle = computed(() =>
-  isProfileUsable(models.activeProfile)
-    ? formatModelPricing(models.activeProfile)
-    : '等待管理员提供共享模型',
 )
 
 const activeModelReady = computed(() => isProfileUsable(models.activeProfile))
@@ -160,33 +153,6 @@ const activeTabMeta = computed<TabAction>(() => {
   }
 })
 
-function modelStatusLabel(profile: ModelProfile): string {
-  if (profile.id === models.activeProfileId) return isProfileUsable(profile) ? '当前' : '需配置'
-  return isProfileUsable(profile) ? '可用' : '需配置'
-}
-
-function modelStatusClass(profile: ModelProfile): string {
-  if (profile.id === models.activeProfileId) {
-    return isProfileUsable(profile)
-      ? 'bg-brand-500/15 text-brand-200 ring-brand-500/30'
-      : 'bg-warning/15 text-warning ring-warning/30'
-  }
-  return isProfileUsable(profile)
-    ? 'bg-success/10 text-success ring-success/20'
-    : 'bg-warning/10 text-warning ring-warning/20'
-}
-
-function selectDefaultModel(profile: ModelProfile) {
-  if (!isProfileUsable(profile)) return
-  models.setActive(profile.id)
-  modelPickerOpen.value = false
-  ui.addToast('默认模型已切换', 'success')
-}
-
-function openModelSettings() {
-  modelPickerOpen.value = false
-  router.push('/settings')
-}
 
 // 角色卡标签多选筛选（“或”关系，与本地控制台一致）
 const activeCharTags = ref<string[]>([])
@@ -216,17 +182,9 @@ const popularTags = computed(() => {
 async function resolveRuntime(character: Character, chat = ''): Promise<boolean> {
   const fullCharacter = await fetchCharacterForRuntime(character)
   store.upsertCharacter(fullCharacter)
-  const analysis = analyzeCharacterRuntime(fullCharacter)
-  if (!analysis.requiresCompatibility) {
-    startCharacter.value = fullCharacter
-    return false
-  }
-
-  compatCharacter.value = fullCharacter
-  compatAnalysis.value = analysis
-  pendingCompatChat.value = chat.replace(/\.jsonl$/i, '')
-  compatDialogOpen.value = true
-  return true
+  if (compatibilityGate(fullCharacter, chat)) return true
+  startCharacter.value = fullCharacter
+  return false
 }
 
 async function openCharacter(character: Character) {
@@ -235,19 +193,6 @@ async function openCharacter(character: Character) {
     startDialogOpen.value = true
   } catch (e: unknown) {
     ui.addToast(`读取角色卡失败：${getApiErrorMessage(e)}`, 'error')
-  }
-}
-
-async function confirmCompatibilityLaunch() {
-  if (!compatCharacter.value || compatLaunching.value) return
-  compatLaunching.value = true
-  try {
-    await launchStCompatibility(compatCharacter.value, {
-      chat: pendingCompatChat.value || undefined,
-    })
-  } catch (e: unknown) {
-    compatLaunching.value = false
-    ui.addToast(`进入兼容模式失败：${getApiErrorMessage(e)}`, 'error')
   }
 }
 
@@ -927,46 +872,7 @@ const scrollHintLeft = 'after:absolute after:right-0 after:top-0 after:h-full af
         </div>
       </div>
 
-      <AppDrawer v-model="modelPickerOpen" title="选择默认模型" width="24rem">
-        <div class="space-y-3 p-4">
-          <div class="rounded-lg bg-surface-sunken p-4 ring-1 ring-border-subtle">
-            <p class="text-xs font-semibold text-ink-muted">当前模型</p>
-            <p class="mt-2 truncate text-base font-semibold text-ink-primary">{{ activeModelTitle }}</p>
-            <p class="mt-1 text-sm text-ink-muted">{{ activeModelSubtitle }}</p>
-          </div>
-
-          <button
-            v-for="profile in usableModelProfiles"
-            :key="profile.id"
-            class="w-full rounded-lg bg-surface p-4 text-left ring-1 ring-border-subtle transition-all hover:ring-brand-500/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500"
-            :class="profile.id === models.activeProfileId ? 'bg-brand-500/10 ring-brand-500/35' : ''"
-            @click="selectDefaultModel(profile)"
-          >
-            <div class="flex items-start justify-between gap-3">
-              <div class="min-w-0">
-                <p class="truncate text-sm font-semibold text-ink-primary">{{ profile.name }}</p>
-                <p class="mt-1 truncate text-xs text-ink-muted">
-                  {{ getProviderLabel(profile.source) }} · {{ profile.model || '未填写模型' }}
-                </p>
-                <p class="mt-1 text-xs text-ink-muted">{{ formatModelPricing(profile) }}</p>
-              </div>
-              <span
-                class="shrink-0 rounded-full px-2 py-0.5 text-xs font-semibold ring-1"
-                :class="modelStatusClass(profile)"
-              >
-                {{ modelStatusLabel(profile) }}
-              </span>
-            </div>
-          </button>
-        </div>
-
-        <template #footer>
-          <div class="flex items-center justify-end gap-2">
-            <AppButton size="sm" variant="ghost" @click="modelPickerOpen = false">关闭</AppButton>
-            <AppButton v-if="session.isAdmin" size="sm" variant="secondary" @click="openModelSettings">管理模型</AppButton>
-          </div>
-        </template>
-      </AppDrawer>
+      <DefaultModelPicker v-model="modelPickerOpen" />
       <CharacterStartDialog
         v-model="startDialogOpen"
         :character="startCharacter"

@@ -41,6 +41,8 @@ export const useChatStore = defineStore('chat', () => {
   let loadRequestId = 0
   let generationRequestId = 0
   let replyDraftRequestId = 0
+  // 记忆整理在回复后后台进行：切走聊天时中断请求，避免白扣积分
+  let memoryRefreshController: AbortController | null = null
   const messages = ref<ChatMessage[]>([])
   const metadata = ref<Record<string, unknown>>({})
   const serverHeader = ref<Record<string, unknown> | undefined>()
@@ -83,6 +85,8 @@ export const useChatStore = defineStore('chat', () => {
     chatEpoch += 1
     generationRequestId += 1
     replyDraftRequestId += 1
+    memoryRefreshController?.abort()
+    memoryRefreshController = null
     streaming.value.controller?.abort()
     messages.value = []
     metadata.value = {}
@@ -386,6 +390,8 @@ export const useChatStore = defineStore('chat', () => {
     }
 
     memoryUpdating.value = true
+    memoryRefreshController = new AbortController()
+    const controller = memoryRefreshController
     try {
       const payload = buildChatCompletionPayload(
         config,
@@ -394,13 +400,21 @@ export const useChatStore = defineStore('chat', () => {
         userName,
       )
       if (!shouldCommit()) return previousMemory
-      const reply = await generateReply(payload)
+      let reply: string
+      try {
+        reply = await generateReply(payload, controller.signal)
+      } catch (e) {
+        // 用户切走聊天（clearState abort）：静默放弃，不再请求也不再计费
+        if (controller.signal.aborted) return previousMemory
+        throw e
+      }
       const summary = normalizeMemoryReply(reply)
       if (!shouldCommit()) return previousMemory
       writeMemoryState(summary, historyMessages.length)
       await persistSafe()
       return summary
     } finally {
+      if (memoryRefreshController === controller) memoryRefreshController = null
       // 只要还停在同一个聊天就必须解除 busy 状态，否则输入框会被永久锁死
       if (isSameChat()) memoryUpdating.value = false
     }
