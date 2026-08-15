@@ -488,11 +488,32 @@ async function generateAssistantReply(character, messages, metadata, from) {
   }
 }
 
+// 设置与共享模型列表对每条消息都是同一份，只有聊天元数据里的 profileId/presetId 因聊天而异。
+// 用短 TTL 缓存共享部分，连续对话时避免每条消息都双请求 ST。
+const GENERATION_CONFIG_TTL_MS = 30_000;
+let generationConfigCache = null;
+let generationConfigPromise = null;
+
+async function fetchGenerationConfigSources() {
+  if (generationConfigCache && Date.now() - generationConfigCache.fetchedAt < GENERATION_CONFIG_TTL_MS) {
+    return generationConfigCache;
+  }
+  if (generationConfigPromise) return generationConfigPromise;
+  generationConfigPromise = (async () => {
+    const [raw, sharedModelResult] = await Promise.all([
+      st.post('/api/settings/get'),
+      st.post('/api/aibar/models/list'),
+    ]);
+    generationConfigCache = { fetchedAt: Date.now(), raw, sharedModelResult };
+    return generationConfigCache;
+  })().finally(() => {
+    generationConfigPromise = null;
+  });
+  return generationConfigPromise;
+}
+
 async function loadAibarGenerationConfig(metadata = {}) {
-  const [raw, sharedModelResult] = await Promise.all([
-    st.post('/api/settings/get'),
-    st.post('/api/aibar/models/list'),
-  ]);
+  const { raw, sharedModelResult } = await fetchGenerationConfigSources();
   const settings = parseSettings(raw?.settings);
   const aibar = settings.aibar || {};
   const profiles = Array.isArray(sharedModelResult?.models)
@@ -722,8 +743,9 @@ async function setDefaultCharacterChat(avatar, fileName) {
   }
 }
 
-function buildGeneratePayload(profile, character, sourceMessages, userName, metadata = {}, preset = null) {
-  const recentMessages = sourceMessages.slice(-24).map((message) => ({
+// 提示词拼装的 Node 端实现：与 web/src/lib/buildPayload.ts（浏览器端，无法共享包）
+// 平行存在。调整系统提示词结构、字段注入顺序时必须同步修改两边。
+function buildGeneratePayload(profile, character, sourceMessages, userName, metadata = {}, preset = null) {  const recentMessages = sourceMessages.slice(-24).map((message) => ({
     role: message.role === 'assistant' ? 'assistant' : 'user',
     content: message.content,
   }));
@@ -1320,6 +1342,7 @@ function reloadRuntime() {
   statePath = nextStatePath;
   state = nextState;
   st = nextSt;
+  generationConfigCache = null;
 }
 
 function getSession(userId, chatId) {

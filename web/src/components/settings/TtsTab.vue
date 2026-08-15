@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useUiStore } from '@/stores/ui'
 import { useTtsStore } from '@/stores/tts'
 import { writeSecret } from '@/api/secrets'
@@ -27,6 +27,41 @@ const ttsTestResults = reactive<Record<string, TtsTestResult | undefined>>({})
 const ttsTesting = reactive<Record<string, boolean>>({})
 const TTS_SAMPLE_TEXT = '你好，我是 AIBAR 的语音测试。'
 let testAudio: HTMLAudioElement | null = null
+let testAudioUrl = ''
+
+// 停止当前试听并释放资源；新试听开始与组件卸载时都会走到这里
+function stopTestAudio() {
+  if (!testAudio) return
+  testAudio.pause()
+  testAudio.src = ''
+  testAudio = null
+  if (testAudioUrl) {
+    URL.revokeObjectURL(testAudioUrl)
+    testAudioUrl = ''
+  }
+}
+
+async function playTestAudio(blob: Blob) {
+  stopTestAudio()
+  const url = URL.createObjectURL(blob)
+  testAudioUrl = url
+  const audio = new Audio(url)
+  testAudio = audio
+  audio.addEventListener('ended', () => {
+    URL.revokeObjectURL(url)
+    if (testAudioUrl === url) testAudioUrl = ''
+    if (testAudio === audio) testAudio = null
+  })
+  audio.addEventListener('error', () => {
+    URL.revokeObjectURL(url)
+    if (testAudioUrl === url) testAudioUrl = ''
+    if (testAudio === audio) testAudio = null
+  })
+  await audio.play()
+}
+
+// 离开设置页时正在播放的试听音频继续播到结束体验很差，卸载时立即停掉
+onBeforeUnmount(stopTestAudio)
 
 const ttsProviderOrder = new Map(TTS_PROVIDERS.map((provider, index) => [provider.id, index]))
 const enabledTtsProviders = computed(() => TTS_PROVIDERS
@@ -136,11 +171,6 @@ function selectTtsVoice(voice: TtsVoiceItem) {
 async function testTtsVoice(voice: TtsVoiceItem) {
   ttsTesting[voice.provider] = true
   delete ttsTestResults[voice.provider]
-  if (testAudio) {
-    testAudio.pause()
-    testAudio.src = ''
-    testAudio = null
-  }
   try {
     const cfg = tts.settings[voice.provider]
     const blob = await synthesizeSpeech({
@@ -151,18 +181,7 @@ async function testTtsVoice(voice: TtsVoiceItem) {
       endpoint: cfg.endpoint,
       extra: cfg.extra,
     })
-    const url = URL.createObjectURL(blob)
-    const audio = new Audio(url)
-    testAudio = audio
-    audio.addEventListener('ended', () => {
-      URL.revokeObjectURL(url)
-      if (testAudio === audio) testAudio = null
-    })
-    audio.addEventListener('error', () => {
-      URL.revokeObjectURL(url)
-      if (testAudio === audio) testAudio = null
-    })
-    await audio.play()
+    await playTestAudio(blob)
     ttsTestResults[voice.provider] = { ok: true, message: `${voice.name} 播放成功` }
   } catch (e: unknown) {
     ttsTestResults[voice.provider] = { ok: false, message: getApiErrorMessage(e, '测试失败') }
@@ -214,11 +233,6 @@ watch(selectedTtsProvider, () => {
 async function testTtsProvider(provider: TtsProvider) {
   ttsTesting[provider] = true
   delete ttsTestResults[provider]
-  if (testAudio) {
-    testAudio.pause()
-    testAudio.src = ''
-    testAudio = null
-  }
   try {
     const cfg = tts.settings[provider]
     const blob = await synthesizeSpeech({
@@ -229,18 +243,7 @@ async function testTtsProvider(provider: TtsProvider) {
       endpoint: cfg.endpoint,
       extra: cfg.extra,
     })
-    const url = URL.createObjectURL(blob)
-    const audio = new Audio(url)
-    testAudio = audio
-    audio.addEventListener('ended', () => {
-      URL.revokeObjectURL(url)
-      if (testAudio === audio) testAudio = null
-    })
-    audio.addEventListener('error', () => {
-      URL.revokeObjectURL(url)
-      if (testAudio === audio) testAudio = null
-    })
-    await audio.play()
+    await playTestAudio(blob)
     ttsTestResults[provider] = { ok: true, message: '播放成功' }
   } catch (e: unknown) {
     ttsTestResults[provider] = { ok: false, message: getApiErrorMessage(e, '测试失败') }
