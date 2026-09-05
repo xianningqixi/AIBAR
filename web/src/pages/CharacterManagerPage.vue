@@ -13,6 +13,8 @@ import {
 import type { Character } from '@/api/types'
 import { getApiErrorMessage } from '@/api/client'
 import { parseTags } from '@/lib/format'
+import { CARD_FILE_ACCEPT, isCardFile } from '@/lib/cardFiles'
+import { mapLimit } from '@/lib/mapLimit'
 import { confirmDialog, promptDialog } from '@/composables/useDialog'
 import AppButton from '@/components/ui/AppButton.vue'
 import AppCard from '@/components/ui/AppCard.vue'
@@ -64,7 +66,7 @@ async function removeCharacter(avatar: string, name: string) {
   try {
     await deleteCharacter(avatar)
     ui.addToast('角色已删除', 'success')
-    await chars.load()
+    await chars.load(true)
   } catch (e: unknown) {
     ui.addToast(`删除失败：${getApiErrorMessage(e)}`, 'error')
   }
@@ -84,25 +86,94 @@ async function exportCard(avatar: string, format: 'png' | 'json') {
   }
 }
 
-async function importCards() {
+// 批量导入：并发受限（服务端每张卡要做解析 + 缩略图生成），
+// 单项失败不影响其他项，进度与结果聚合展示
+const IMPORT_CONCURRENCY = 3
+const importing = ref(false)
+const importProgress = ref({ done: 0, total: 0 })
+
+function importCards() {
+  if (importing.value) return
   const input = document.createElement('input')
   input.type = 'file'
-  input.accept = '.png,.json,.yaml,.yml,.charx,.byaf'
+  input.accept = CARD_FILE_ACCEPT
   input.multiple = true
-  input.onchange = async () => {
-    const files = input.files
-    if (!files?.length) return
-    for (const file of files) {
-      try {
-        await importCharacter(file)
-        ui.addToast(`已导入：${file.name}`, 'success')
-      } catch (e: unknown) {
-        ui.addToast(`导入失败：${getApiErrorMessage(e)}`, 'error')
-      }
-    }
-    await chars.load()
+  input.onchange = () => {
+    const files = Array.from(input.files || [])
+    if (files.length) void importFiles(files)
   }
   input.click()
+}
+
+async function importFiles(files: File[]) {
+  if (importing.value) return
+  const cardFiles = files.filter(isCardFile)
+  const skipped = files.length - cardFiles.length
+  if (skipped) ui.addToast(`已跳过 ${skipped} 个非角色卡文件（仅支持 PNG / JSON / YAML / CHARX / BYAF）`, 'warning')
+  if (!cardFiles.length) return
+
+  importing.value = true
+  importProgress.value = { done: 0, total: cardFiles.length }
+  try {
+    const results = await mapLimit(
+      cardFiles,
+      IMPORT_CONCURRENCY,
+      (file) => importCharacter(file),
+      (done, total) => { importProgress.value = { done, total } },
+    )
+    const failures: Array<{ file: File; error: unknown }> = []
+    results.forEach((result, index) => {
+      if (!result.ok) failures.push({ file: cardFiles[index], error: result.error })
+    })
+    const succeeded = results.length - failures.length
+
+    if (succeeded) ui.addToast(`已导入 ${succeeded} 张角色卡`, 'success')
+    // 失败逐张提示（带原因），超过 5 张时聚合，避免刷屏
+    if (failures.length <= 5) {
+      for (const failure of failures) {
+        ui.addToast(`导入失败 ${failure.file.name}：${getApiErrorMessage(failure.error)}`, 'error', 6000)
+      }
+    } else {
+      const names = failures.slice(0, 3).map((f) => f.file.name).join('、')
+      ui.addToast(`导入失败 ${failures.length} 张（${names} 等）`, 'error', 8000)
+    }
+
+    if (succeeded) await chars.load(true)
+  } finally {
+    importing.value = false
+  }
+}
+
+// 整页拖拽导入：拖入时高亮，松手即批量导入
+const dragActive = ref(false)
+let dragDepth = 0
+
+function dragHasFiles(e: DragEvent): boolean {
+  return Array.from(e.dataTransfer?.types || []).includes('Files')
+}
+
+function onDragEnter(e: DragEvent) {
+  if (!dragHasFiles(e)) return
+  dragDepth += 1
+  dragActive.value = true
+}
+
+function onDragOver(e: DragEvent) {
+  if (dragHasFiles(e)) e.preventDefault()
+}
+
+function onDragLeave() {
+  dragDepth = Math.max(0, dragDepth - 1)
+  if (!dragDepth) dragActive.value = false
+}
+
+function onDrop(e: DragEvent) {
+  if (!dragHasFiles(e)) return
+  e.preventDefault()
+  dragDepth = 0
+  dragActive.value = false
+  const files = Array.from(e.dataTransfer?.files || [])
+  if (files.length) void importFiles(files)
 }
 
 async function duplicate(character: Character) {
@@ -128,7 +199,7 @@ async function duplicate(character: Character) {
     }
     await createCharacter(next)
     ui.addToast('已创建副本', 'success')
-    await chars.load()
+    await chars.load(true)
   } catch (e: unknown) {
     ui.addToast(`复制失败：${getApiErrorMessage(e)}`, 'error')
   }
@@ -178,10 +249,30 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div class="min-h-[100dvh] bg-bg">
-    <AppPageHeader title="角色管理" :subtitle="`${chars.characters.length} 个角色`" back-to="/browse" mobile-only-back>
+  <div
+    class="min-h-[100dvh] bg-bg"
+    @dragenter="onDragEnter"
+    @dragover="onDragOver"
+    @dragleave="onDragLeave"
+    @drop="onDrop"
+  >
+    <!-- 拖拽导入覆盖层：不拦截指针事件，避免 dragleave 抖动 -->
+    <div
+      v-if="dragActive"
+      class="pointer-events-none fixed inset-0 z-50 flex items-center justify-center bg-bg/80 backdrop-blur-sm"
+    >
+      <div class="rounded-2xl border-2 border-dashed border-brand-500/60 bg-surface px-10 py-8 text-center shadow-glow">
+        <p class="text-2xl">🎴</p>
+        <p class="mt-2 text-base font-semibold text-ink-primary">松手导入角色卡</p>
+        <p class="mt-1 text-sm text-ink-muted">支持 PNG / JSON / YAML / CHARX / BYAF，可多选</p>
+      </div>
+    </div>
+
+    <AppPageHeader title="角色管理" :subtitle="`${chars.characters.length} 个角色`" back-to="/browse" mobile-only-back mobile-actions-below>
       <template #actions>
-        <AppButton variant="secondary" size="sm" @click="importCards">导入</AppButton>
+        <AppButton variant="secondary" size="sm" :disabled="importing" @click="importCards">
+          {{ importing ? `导入 ${importProgress.done}/${importProgress.total}` : '导入' }}
+        </AppButton>
         <AppButton variant="secondary" size="sm" @click="router.push('/hub')">社区导入</AppButton>
         <AppButton variant="gradient" size="sm" @click="router.push('/character/new')">+ 新建</AppButton>
       </template>
@@ -192,7 +283,7 @@ onBeforeUnmount(() => {
       <div class="flex flex-wrap items-center gap-x-6 gap-y-1">
         <span class="text-sm text-ink-secondary">总数 <span class="ml-1 font-semibold tabular-nums text-ink-primary">{{ chars.characters.length }}</span></span>
         <span class="text-sm text-ink-secondary">收藏 <span class="ml-1 font-semibold tabular-nums text-accent-300">{{ favoriteCount }}</span></span>
-        <p class="text-xs text-ink-muted">导入 PNG / JSON / YAML / charx，数据写入 ST 原生角色目录。</p>
+        <p class="text-xs text-ink-muted">点击导入或把卡体文件拖进本页；数据写入 ST 原生角色目录。</p>
       </div>
 
       <div class="flex flex-wrap items-center gap-3">
@@ -208,10 +299,12 @@ onBeforeUnmount(() => {
       <AppEmpty
         v-else-if="chars.characters.length === 0"
         title="暂无角色"
-        description="先从导入或新建开始。"
+        description="先从导入或新建开始，也可以把卡体文件直接拖进本页。"
       >
         <template #actions>
-          <AppButton variant="secondary" size="sm" @click="importCards">导入角色</AppButton>
+          <AppButton variant="secondary" size="sm" :disabled="importing" @click="importCards">
+            {{ importing ? `导入 ${importProgress.done}/${importProgress.total}` : '导入角色' }}
+          </AppButton>
           <AppButton variant="secondary" size="sm" @click="router.push('/hub')">社区导入</AppButton>
           <AppButton size="sm" @click="router.push('/character/new')">+ 新建角色</AppButton>
         </template>

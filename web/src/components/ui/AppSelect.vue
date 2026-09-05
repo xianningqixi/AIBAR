@@ -1,4 +1,5 @@
 <script setup lang="ts">
+defineOptions({ inheritAttrs: false })
 defineProps<{
   modelValue: string
   disabled?: boolean
@@ -10,11 +11,12 @@ defineEmits<{
 </script>
 
 <template>
-  <div class="relative">
+  <div :class="$attrs.class" class="relative">
     <select
+      v-bind="{ ...$attrs, class: undefined }"
       :value="modelValue"
       :disabled="disabled"
-      class="h-10 w-full appearance-none rounded-lg bg-surface border border-border pl-3 pr-9 text-sm text-ink-primary transition-all duration-150 hover:border-border-strong focus:outline-none focus:border-brand-500/70 focus:ring-2 focus:ring-brand-500/30 focus:shadow-glow disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+      class="h-11 w-full appearance-none rounded-xl bg-surface border border-border pl-3 pr-9 text-base md:text-sm text-ink-primary transition-all duration-150 hover:border-border-strong focus:outline-none focus:border-brand-500/70 focus:ring-2 focus:ring-brand-500/30 focus:shadow-glow disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
       @change="$emit('update:modelValue', ($event.target as HTMLSelectElement).value)"
     >
       <slot />

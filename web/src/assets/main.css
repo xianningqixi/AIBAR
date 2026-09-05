@@ -7,14 +7,14 @@
     color-scheme: light;
 
     /* 主题变量（RGB 三元组，供 tailwind.config.ts 的 v() 引用） */
-    --c-bg: 243 245 250;
+    --c-bg: 247 247 250;
     --c-surface: 255 255 255;
     --c-surface-elevated: 255 255 255;
-    --c-surface-sunken: 237 240 247;
+    --c-surface-sunken: 240 240 246;
     --c-border: 22 30 60;
     --c-ink-primary: 29 36 56;
     --c-ink-secondary: 74 84 112;
-    --c-ink-muted: 122 132 156;
+    --c-ink-muted: 103 110 132;
     --c-shadow: 23 30 60;
 
     /* 品牌色：低号段为深紫，保证白底正文可读 */
@@ -22,7 +22,7 @@
     --c-brand-200: 109 40 217;
     --c-brand-300: 124 58 237;
     --c-brand-400: 139 92 246;
-    --c-brand-500: 139 92 246;
+    --c-brand-500: 117 73 222;
     --c-brand-600: 124 58 237;
     --c-brand-700: 109 40 217;
     --c-accent-200: 190 24 93;
@@ -50,14 +50,14 @@
   html.dark {
     color-scheme: dark;
 
-    --c-bg: 11 14 26;
-    --c-surface: 21 26 46;
-    --c-surface-elevated: 29 35 60;
-    --c-surface-sunken: 15 19 34;
+    --c-bg: 17 18 24;
+    --c-surface: 25 26 34;
+    --c-surface-elevated: 33 34 44;
+    --c-surface-sunken: 21 22 29;
     --c-border: 226 232 240;
-    --c-ink-primary: 230 233 244;
-    --c-ink-secondary: 167 176 200;
-    --c-ink-muted: 111 120 145;
+    --c-ink-primary: 241 240 246;
+    --c-ink-secondary: 182 181 197;
+    --c-ink-muted: 145 145 164;
     --c-shadow: 0 0 0;
 
     /* 暗色下低号段翻转为浅紫/浅粉，保证深底正文可读 */
@@ -93,6 +93,12 @@
     @apply bg-bg text-ink-primary antialiased;
     font-family: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', 'PingFang SC',
       'Hiragino Sans GB', 'Microsoft YaHei', 'Noto Sans CJK SC', sans-serif;
+    -webkit-tap-highlight-color: transparent;
+    overflow-wrap: break-word;
+  }
+
+  button, a, input, textarea, select {
+    touch-action: manipulation;
   }
 
   *::selection {
@@ -127,6 +133,34 @@
 }
 
 @layer components {
+  .page-shell {
+    @apply mx-auto w-full max-w-7xl px-4 py-6 md:px-8 md:py-8 lg:px-10;
+  }
+
+  .resource-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(min(100%, 170px), 1fr));
+    gap: 1.25rem;
+  }
+  @media (max-width: 479px) {
+    .resource-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .75rem; }
+  }
+
+  .resource-card {
+    @apply flex h-full min-w-0 w-full flex-col overflow-hidden rounded-2xl border border-border-subtle bg-surface text-left transition-[border-color,box-shadow,transform] duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500;
+  }
+  @media (hover: hover) {
+    .resource-card:hover { @apply -translate-y-1 border-brand-500/40 shadow-elevated; }
+  }
+
+  .resource-tag {
+    @apply max-w-full shrink-0 truncate rounded-md bg-surface-sunken px-2 py-1 text-[11px] leading-none text-ink-secondary;
+  }
+
+  .icon-button {
+    @apply inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl text-ink-secondary transition-colors hover:bg-ink-primary/5 hover:text-ink-primary disabled:cursor-not-allowed disabled:opacity-40;
+  }
+
   .card-hover {
     @apply transition-all duration-200;
   }
@@ -154,8 +188,9 @@
     @apply rounded bg-ink-primary/[0.06] px-1.5 py-0.5 text-[0.85em] text-accent-300 before:content-none after:content-none;
   }
   .prose :where(pre) {
-    @apply rounded-xl border border-border-subtle bg-surface-sunken;
+    @apply max-w-full overflow-x-auto rounded-xl border border-border-subtle bg-surface-sunken p-4;
   }
+  .prose :where(table) { @apply block max-w-full overflow-x-auto; }
   .prose :where(blockquote) {
     @apply border-l-2 border-brand-500/50 not-italic text-ink-secondary;
   }

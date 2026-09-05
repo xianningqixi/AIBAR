@@ -34,8 +34,10 @@ export async function loadAibarSettings<T = Record<string, unknown>>(): Promise<
       throw error
     }
     if (generation === settingsGeneration) {
-      cached = aibar
+      // 在途读取可能比保存更晚返回，保留保存响应中更新的设置。
+      cached ??= aibar
       if (fetchState === state) fetchState = null
+      return cached as T
     }
     return aibar as T
   }
@@ -44,10 +46,12 @@ export async function loadAibarSettings<T = Record<string, unknown>>(): Promise<
 
 export function saveAibarSettings(updates: Record<string, unknown>): Promise<void> {
   const generation = settingsGeneration
+  // 排队前固定提交内容，避免 Vue 表单继续编辑时改变已提交的更新。
+  const snapshot = JSON.parse(JSON.stringify(updates)) as Record<string, unknown>
   // 本地仍串行化写入：保证同一会话内的更新按提交顺序到达服务端。
   const task = saveQueue.then(async () => {
     if (generation !== settingsGeneration) return
-    const r = await apiPost<{ settings?: unknown }>('/api/aibar/settings/save', updates)
+    const r = await apiPost<{ settings?: unknown }>('/api/aibar/settings/save', snapshot)
     if (generation !== settingsGeneration) return
     const parsed = aibarSettingsSchema.safeParse(r?.settings)
     if (parsed.success) cached = parsed.data

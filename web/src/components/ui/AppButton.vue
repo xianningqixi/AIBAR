@@ -19,10 +19,10 @@ const isDisabled = () => props.disabled || props.loading
       'inline-flex items-center justify-center gap-1.5 font-medium whitespace-nowrap transition-all duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-2 focus-visible:ring-offset-bg disabled:opacity-40 disabled:cursor-not-allowed disabled:shadow-none select-none',
       variant === 'icon'
         ? 'rounded-full text-ink-secondary hover:text-ink-primary hover:bg-ink-primary/5 active:scale-95'
-        : 'rounded-lg',
+        : 'rounded-xl',
       variant === 'icon'
-        ? (size === 'sm' ? 'p-1' : size === 'lg' ? 'p-2.5' : 'p-1.5')
-        : (size === 'sm' ? 'px-3 py-1.5 text-xs' : size === 'lg' ? 'px-5 py-2.5 text-sm' : 'px-4 py-2 text-sm'),
+        ? (size === 'sm' ? 'min-h-9 min-w-9 p-1.5' : size === 'lg' ? 'h-12 w-12 p-2.5' : 'h-10 w-10 p-2')
+        : (size === 'sm' ? 'min-h-9 px-3 py-2 text-xs' : size === 'lg' ? 'min-h-12 px-5 py-3 text-sm' : 'min-h-10 px-4 py-2.5 text-sm'),
       variant === 'secondary'
         ? 'bg-surface border border-border text-ink-primary hover:bg-surface-elevated hover:border-border-strong active:bg-surface-sunken'
         : variant === 'ghost'

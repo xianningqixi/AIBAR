@@ -119,7 +119,7 @@ function openLightbox(idx: number) {
   <div
     :class="[
       'group message-bubble flex gap-2.5',
-      isContinuation ? 'py-1' : 'py-3 md:py-4',
+      isContinuation ? 'py-1' : 'py-2.5 md:py-3',
       animate ? 'animate-fade-in-up' : '',
       isUser ? 'flex-row-reverse' : 'flex-row',
     ]"
@@ -150,13 +150,13 @@ function openLightbox(idx: number) {
       </div>
     </div>
 
-    <div :class="['flex min-w-0 flex-col', isUser ? 'items-end' : 'items-start']">
+    <div :class="['flex min-w-0 max-w-[min(calc(100%_-_3rem),44rem)] flex-col', isUser ? 'items-end' : 'items-start']">
       <div
         :class="[
-          'rounded-2xl px-4 py-2.5 text-sm leading-relaxed shadow-sm',
+          'rounded-2xl px-4 py-2.5 text-[15px] leading-7 shadow-sm',
           isUser
-            ? 'max-w-[min(88%,48rem)] rounded-br-md border border-brand-500/40 bg-brand-500/20 text-ink-primary'
-            : 'max-w-[min(82%,44rem)] rounded-bl-md border border-border-subtle bg-surface-elevated/90 text-ink-primary backdrop-blur-sm',
+            ? 'rounded-br-md border border-brand-500/40 bg-brand-500/20 text-ink-primary'
+            : 'rounded-bl-md border border-border-subtle bg-surface-elevated/90 text-ink-primary backdrop-blur-sm',
         ]"
       >
         <div v-if="hasReasoning" class="mb-2">
@@ -180,14 +180,14 @@ function openLightbox(idx: number) {
           >{{ message.reasoning }}</div>
         </div>
 
-        <div v-if="editing" class="flex min-w-[260px] flex-col gap-2">
+        <div v-if="editing" class="flex w-[min(26rem,60vw)] min-w-0 flex-col gap-2">
           <AppTextarea
             v-model="editContent"
             :rows="4"
             auto-grow
             :max-height="320"
           />
-          <div class="flex items-center justify-end gap-2">
+          <div class="flex flex-wrap items-center justify-end gap-2">
             <button
               class="rounded-md px-2.5 py-1 text-xs text-ink-secondary transition-colors hover:bg-ink-primary/5 hover:text-ink-primary"
               @click="editing = false"
@@ -238,7 +238,7 @@ function openLightbox(idx: number) {
       <div
         v-if="showActions && !editing"
         :class="[
-          'mt-1 flex items-center gap-0.5 text-ink-muted md:opacity-0 md:transition-opacity md:duration-150 md:group-hover:opacity-100 md:focus-within:opacity-100',
+          'mt-1 flex flex-wrap items-center gap-0.5 text-ink-muted md:opacity-0 md:transition-opacity md:duration-150 md:group-hover:opacity-100 md:focus-within:opacity-100',
           isUser ? 'flex-row-reverse' : 'flex-row',
           isLastAssistant ? 'md:opacity-100' : '',
         ]"

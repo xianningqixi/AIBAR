@@ -30,9 +30,9 @@ export const useCharactersStore = defineStore('characters', () => {
     list.value[index] = character
   }
 
-  async function load() {
+  async function load(force = false) {
     // 多个页面会在挂载时并发调用 load，复用在途请求避免重复拉全量角色列表。
-    if (loadPromise) return loadPromise
+    if (loadPromise && !force) return loadPromise
     const version = ++requestVersion
     loading.value = true
     error.value = ''
@@ -43,8 +43,10 @@ export const useCharactersStore = defineStore('characters', () => {
       } catch (e: unknown) {
         if (version === requestVersion) error.value = getApiErrorMessage(e, '角色列表加载失败')
       } finally {
-        if (version === requestVersion) loading.value = false
-        loadPromise = null
+        if (version === requestVersion) {
+          loading.value = false
+          loadPromise = null
+        }
       }
     })()
     loadPromise = promise
@@ -76,6 +78,7 @@ export const useCharactersStore = defineStore('characters', () => {
 
   function reset() {
     requestVersion += 1
+    loadPromise = null
     list.value = []
     loading.value = false
     error.value = ''

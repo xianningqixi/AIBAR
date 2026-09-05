@@ -29,6 +29,7 @@ export default {
         },
         // 品牌色：亮色主题下 100-300 是深紫（白底可读）；暗色主题变量翻转为浅紫
         brand: {
+          DEFAULT: v('--c-brand-500'),
           100: v('--c-brand-100'),
           200: v('--c-brand-200'),
           300: v('--c-brand-300'),
@@ -38,6 +39,7 @@ export default {
           700: v('--c-brand-700'),
         },
         accent: {
+          DEFAULT: v('--c-accent-500'),
           200: v('--c-accent-200'),
           300: v('--c-accent-300'),
           400: v('--c-accent-400'),
@@ -68,10 +70,6 @@ export default {
           soft: 'var(--c-info-soft)',
         },
       },
-      ringColor: {
-        brand: 'rgb(var(--c-brand-500))',
-        accent: 'rgb(var(--c-accent-500))',
-      },
       boxShadow: {
         elevated: '0 10px 30px -10px rgb(var(--c-shadow) / 0.16), 0 4px 12px -4px rgb(var(--c-shadow) / 0.08)',
         glow: '0 0 0 1px rgba(139, 92, 246, 0.18), 0 8px 24px -8px rgba(139, 92, 246, 0.30)',
@@ -79,8 +77,8 @@ export default {
         'glow-accent': '0 0 0 1px rgba(236, 72, 153, 0.18), 0 8px 24px -8px rgba(236, 72, 153, 0.30)',
       },
       backgroundImage: {
-        'brand-gradient': 'linear-gradient(135deg, #8b5cf6 0%, #ec4899 100%)',
-        'brand-soft': 'linear-gradient(135deg, rgba(139,92,246,0.12) 0%, rgba(236,72,153,0.08) 50%, rgba(139,92,246,0.03) 100%)',
+        'brand-gradient': 'linear-gradient(135deg, #8b5cf6 0%, #7154d8 100%)',
+        'brand-soft': 'linear-gradient(140deg, rgb(var(--c-brand-500) / .12), rgb(var(--c-brand-500) / .025))',
         'hero-radial': 'radial-gradient(120% 80% at 0% 0%, rgba(139,92,246,0.12) 0%, transparent 55%), radial-gradient(80% 60% at 100% 0%, rgba(236,72,153,0.09) 0%, transparent 60%)',
         shimmer: 'linear-gradient(100deg, transparent 20%, rgb(var(--c-shadow) / 0.04) 40%, rgb(var(--c-shadow) / 0.07) 50%, rgb(var(--c-shadow) / 0.04) 60%, transparent 80%)',
       },

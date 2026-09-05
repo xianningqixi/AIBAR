@@ -1,14 +1,12 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { storeToRefs } from 'pinia'
+import { useCommunityCatalogStore } from '@/stores/communityCatalog'
 import { useRoute, useRouter } from 'vue-router'
 import { useSessionStore } from '@/stores/session'
 import { useUiStore } from '@/stores/ui'
 import {
-  listCommunityWorks,
-  listCommunityWorkTags,
   publishDiscordCommunityBatch,
-  type CommunityWorkTag,
-  type CommunityWork,
   type CommunityWorkType,
   type DiscordCommunitySource,
   type DiscordBatchPublishResult,
@@ -34,37 +32,12 @@ const ui = useUiStore()
 type HubSource = 'community' | 'discord'
 
 const source = ref<HubSource>(route.query.source === 'discord' ? 'discord' : 'community')
-const works = ref<CommunityWork[]>([])
-const loading = ref(false)
-const loadingMore = ref(false)
-const search = ref('')
-const type = ref<'' | CommunityWorkType>('')
-const ranking = ref<'recommended' | 'recent' | 'daily' | 'weekly' | 'monthly' | 'all'>('recommended')
-const noImage = ref(false)
-const favoritesOnly = ref(false)
-const mineOnly = ref(false)
+const catalog = useCommunityCatalogStore()
+const { works, loading, loadingMore, search, type, ranking, noImage, favoritesOnly, mineOnly, hasMore, activeTag, availableTags, error: catalogError } = storeToRefs(catalog)
+const { loadWorks, loadTags } = catalog
 const moreFiltersOpen = ref(false)
-const page = ref(1)
-const hasMore = ref(false)
 let searchTimer: ReturnType<typeof setTimeout> | null = null
-let requestSequence = 0
-
-const activeTag = ref('')
-const availableTags = ref<CommunityWorkTag[]>([])
-
-async function loadTags() {
-  try {
-    const result = await listCommunityWorkTags(type.value)
-    availableTags.value = result.tags
-    // 类型切换后旧标签可能不存在，静默清除
-    if (activeTag.value && !result.tags.some(item => item.tag === activeTag.value)) {
-      activeTag.value = ''
-    }
-  } catch {
-    availableTags.value = []
-  }
-}
-
+const hasFilters = computed(() => Boolean(search.value.trim() || type.value || activeTag.value || favoritesOnly.value || mineOnly.value))
 const importUrl = ref('')
 const importing = ref(false)
 const importResult = ref('')
@@ -99,12 +72,12 @@ const sourceOptions = [
 ]
 
 const rankings = [
-  { value: 'recommended', label: '推荐', icon: '✨' },
-  { value: 'recent', label: '最新', icon: '🔥' },
-  { value: 'daily', label: '日榜', icon: '📅' },
-  { value: 'weekly', label: '周榜', icon: '📊' },
-  { value: 'monthly', label: '月榜', icon: '🏆' },
-  { value: 'all', label: '总榜', icon: '🌟' },
+  { value: 'recommended', label: '推荐' },
+  { value: 'recent', label: '最新' },
+  { value: 'daily', label: '日榜' },
+  { value: 'weekly', label: '周榜' },
+  { value: 'monthly', label: '月榜' },
+  { value: 'all', label: '总榜' },
 ] as const
 
 const typeFilters: { value: '' | CommunityWorkType; label: string }[] = [
@@ -114,47 +87,8 @@ const typeFilters: { value: '' | CommunityWorkType; label: string }[] = [
   { value: 'mod', label: '提示词' },
 ]
 
-async function loadWorks(append = false) {
-  const requestId = ++requestSequence
-  const requestedPage = append ? page.value + 1 : 1
-  if (append) {
-    loadingMore.value = true
-  } else {
-    loading.value = true
-    loadingMore.value = false
-    works.value = []
-    hasMore.value = false
-  }
-  try {
-    const result = await listCommunityWorks({
-      search: search.value,
-      tag: activeTag.value,
-      type: type.value,
-      ranking: ranking.value,
-      favoritesOnly: favoritesOnly.value,
-      mineOnly: mineOnly.value,
-      page: requestedPage,
-    })
-    if (requestId !== requestSequence) return
-    if (append) {
-      const existingIds = new Set(works.value.map(work => work.id))
-      works.value = [...works.value, ...result.works.filter(work => !existingIds.has(work.id))]
-    } else {
-      works.value = result.works
-    }
-    page.value = result.page
-    hasMore.value = result.hasMore
-  } catch (e: unknown) {
-    if (requestId === requestSequence) ui.addToast(`加载社区失败：${getApiErrorMessage(e)}`, 'error')
-  } finally {
-    if (requestId === requestSequence) {
-      loading.value = false
-      loadingMore.value = false
-    }
-  }
-}
-
 function loadCommunityWorks() {
+  if (searchTimer) clearTimeout(searchTimer)
   if (source.value === 'community') void loadWorks()
 }
 
@@ -180,12 +114,14 @@ watch(
     if (next === 'community' && !works.value.length) void loadWorks()
   },
 )
-watch([type, ranking, favoritesOnly, mineOnly, activeTag], loadCommunityWorks)
-watch(type, () => { void loadTags() })
-watch(search, () => {
+watch([search, type, ranking, favoritesOnly, mineOnly, activeTag], (next, previous) => {
+  catalog.cancelWorks()
   if (searchTimer) clearTimeout(searchTimer)
-  searchTimer = setTimeout(loadCommunityWorks, 250)
+  const onlySearchChanged = next[0] !== previous[0] && next.slice(1).every((value, index) => value === previous[index + 1])
+  if (onlySearchChanged && search.value.trim()) searchTimer = setTimeout(loadCommunityWorks, 250)
+  else loadCommunityWorks()
 })
+watch(type, () => { void loadTags() })
 
 // 后端 /api/characters/import 支持的全部卡体格式；ZIP/RAR/APK 等仍不支持
 const CARD_FILE_EXTENSIONS = ['png', 'json', 'yaml', 'yml', 'charx', 'byaf'] as const
@@ -370,7 +306,7 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => {
-  requestSequence += 1
+  catalog.cancel()
   if (searchTimer) clearTimeout(searchTimer)
 })
 </script>
@@ -387,22 +323,27 @@ onBeforeUnmount(() => {
       </template>
     </AppPageHeader>
 
-    <main class="mx-auto max-w-6xl px-5 py-6 md:px-8 lg:px-10">
+    <main class="page-shell">
       <AppSegmentedControl
         v-model="source"
         class="mb-6"
+        aria-label="社区来源"
         :options="sourceOptions"
         @update:model-value="selectSource"
       />
 
       <template v-if="source === 'community'">
         <div class="space-y-6">
+          <div>
+            <h2 class="text-2xl font-semibold tracking-tight md:text-3xl">发现下一段好故事</h2>
+            <p class="mt-2 text-sm text-ink-secondary">探索社区分享的角色、故事开局与提示词。</p>
+          </div>
           <!-- 筛选栏：搜索 + 类型/榜单分段控件 + 更多筛选抽屉 -->
           <div class="flex flex-col gap-3 border-b border-border pb-5">
             <div class="flex flex-col gap-3 lg:flex-row lg:items-center">
-              <SearchInput v-model="search" class="min-w-0 flex-1" placeholder="搜索标题、作者或简介" />
+              <SearchInput v-model="search" class="min-w-0 flex-1" placeholder="搜索标题、作者或简介" size="lg" />
               <div class="flex flex-wrap items-center gap-2">
-                <AppSegmentedControl v-model="type" size="sm" :options="typeFilters" />
+                <AppSegmentedControl v-model="type" size="sm" :options="typeFilters" aria-label="作品类型" />
                 <button
                   class="inline-flex h-9 shrink-0 items-center rounded-lg border px-3 text-xs font-medium transition-colors"
                   :class="moreFiltersOpen || favoritesOnly || mineOnly || noImage || activeTag
@@ -418,24 +359,33 @@ onBeforeUnmount(() => {
               </div>
             </div>
             <div class="overflow-x-auto">
-              <AppSegmentedControl v-model="ranking" size="sm" :options="rankings.map(r => ({ value: r.value, label: r.label, icon: r.icon }))" />
+              <AppSegmentedControl v-model="ranking" size="sm" :options="rankings" aria-label="作品排序" />
             </div>
           </div>
 
-          <!-- 骨架屏：复用 BrowsePage 的网格比例 -->
-          <div v-if="loading" class="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
-            <div v-for="n in 10" :key="n" class="overflow-hidden rounded-2xl bg-surface ring-1 ring-border-subtle">
-              <div class="skeleton aspect-[3/4] w-full" />
-              <div class="space-y-2 p-3">
-                <div class="skeleton h-3 w-3/4" />
-                <div class="skeleton h-3 w-1/2" />
-              </div>
+          <div v-if="hasFilters" class="flex flex-wrap items-center gap-2 text-xs text-ink-secondary" aria-label="当前筛选">
+            <span v-if="search.trim()" class="resource-tag">搜索：{{ search }}</span>
+            <span v-if="activeTag" class="resource-tag">#{{ activeTag }}</span>
+            <span v-if="favoritesOnly" class="resource-tag">我的收藏</span>
+            <span v-if="mineOnly" class="resource-tag">我的作品</span>
+            <button class="ml-auto min-h-8 text-brand-300 hover:underline" @click="catalog.clearFilters">重置筛选</button>
+          </div>
+          <div v-if="loading" class="resource-grid" role="status" aria-label="正在加载社区作品">
+            <div v-for="n in 8" :key="n" class="overflow-hidden rounded-2xl bg-surface ring-1 ring-border-subtle">
+              <div class="skeleton aspect-[4/5] w-full" />
+              <div class="space-y-3 p-4"><div class="skeleton h-4 w-3/4" /><div class="skeleton h-3 w-1/2" /></div>
             </div>
           </div>
-          <AppEmpty v-else-if="!works.length" class="!py-8 md:!py-16" icon="search" title="没有匹配的作品" description="调整筛选条件，或发布第一份公共作品。">
-            <template #actions><AppButton @click="router.push('/publish')">发布作品</AppButton></template>
+          <AppEmpty v-else-if="catalogError && !works.length" icon="box" title="社区暂时无法加载" :description="catalogError">
+            <template #actions><AppButton variant="secondary" @click="loadWorks()">重新加载</AppButton></template>
           </AppEmpty>
-          <section v-else :class="noImage ? 'grid gap-4 sm:grid-cols-2 lg:grid-cols-3' : 'grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5'">
+          <AppEmpty v-else-if="!works.length" class="!py-8 md:!py-16" icon="search" :title="hasFilters ? '没有匹配的作品' : '社区里还没有作品'" :description="hasFilters ? '换个关键词，或清除筛选看看。' : '分享一个角色或故事，邀请大家一起体验。'">
+            <template #actions>
+              <AppButton v-if="hasFilters" variant="secondary" @click="catalog.clearFilters">清除筛选</AppButton>
+              <AppButton v-else @click="router.push('/publish')">发布作品</AppButton>
+            </template>
+          </AppEmpty>
+          <section v-else :class="noImage ? 'grid gap-4 sm:grid-cols-2 lg:grid-cols-3' : 'resource-grid'">
             <WorkCard
               v-for="(work, index) in works"
               :key="work.id"
@@ -446,8 +396,9 @@ onBeforeUnmount(() => {
               @click="router.push(`/work/${encodeURIComponent(work.id)}`)"
             />
           </section>
+          <p v-if="catalogError && works.length" class="text-center text-sm text-danger" role="alert">{{ catalogError }}，可重试加载更多。</p>
           <div v-if="hasMore" class="flex justify-center">
-            <AppButton variant="secondary" :disabled="loadingMore" @click="loadMoreWorks">{{ loadingMore ? '加载中…' : '加载更多' }}</AppButton>
+            <AppButton variant="secondary" :loading="loadingMore" @click="loadMoreWorks">{{ loadingMore ? '加载中…' : '加载更多' }}</AppButton>
           </div>
         </div>
       </template>

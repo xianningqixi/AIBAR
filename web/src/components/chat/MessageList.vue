@@ -70,16 +70,18 @@ function updateAtBottom() {
 function scrollToBottom(smooth = false) {
   const el = container.value
   if (!el) return
-  el.scrollTo({ top: el.scrollHeight, behavior: smooth ? 'smooth' : 'auto' })
+  const allowMotion = !window.matchMedia('(prefers-reduced-motion: reduce)').matches
+  el.scrollTo({ top: el.scrollHeight, behavior: smooth && allowMotion ? 'smooth' : 'auto' })
   atBottom.value = true
 }
 
-// 新消息(发送/收到回复)总是跟随到底部
+// 自己发送时跟随；收到回复时尊重用户正在向上阅读的位置。
 watch(
   () => props.messages.length,
   async () => {
+    const shouldFollow = atBottom.value || props.messages[props.messages.length - 1]?.role === 'user'
     await nextTick()
-    scrollToBottom()
+    if (shouldFollow) scrollToBottom()
   },
 )
 
@@ -103,8 +105,8 @@ onMounted(() => nextTick(() => scrollToBottom()))
 </script>
 
 <template>
-  <div class="relative flex-1 overflow-hidden">
-    <div ref="container" class="h-full overflow-y-auto px-4 py-4 md:py-6" @scroll="updateAtBottom">
+  <div class="relative min-h-0 flex-1 overflow-hidden">
+    <div ref="container" role="region" aria-label="聊天消息" :aria-busy="loading" tabindex="0" class="h-full overflow-y-auto overscroll-contain px-4 py-5 md:py-8" @scroll="updateAtBottom">
       <template v-if="loading">
         <div class="flex justify-center py-10">
           <AppSpinner size="lg" />
@@ -142,7 +144,7 @@ onMounted(() => nextTick(() => scrollToBottom()))
 
       <template v-else>
         <!-- 消息列的左右留白只在这里给一次，气泡自身不再带 px -->
-        <div class="mx-auto max-w-4xl px-0 xl:max-w-5xl 2xl:max-w-6xl">
+        <div class="mx-auto max-w-4xl px-0">
           <!-- 事件处理器不引用循环变量（气泡自带 index），编译器才能缓存它们，
                避免流式期间每个 tick 强制 patch 所有气泡 -->
           <div
@@ -189,9 +191,9 @@ onMounted(() => nextTick(() => scrollToBottom()))
               </div>
             </div>
             <div
-              class="relative max-w-[min(82%,44rem)] rounded-2xl rounded-bl-md border border-brand-500/30 bg-surface-elevated/90 px-4 py-2.5 text-sm leading-relaxed text-ink-primary shadow-sm backdrop-blur-sm"
+              class="relative min-w-0 max-w-[min(88%,44rem)] rounded-2xl rounded-bl-md border border-brand-500/30 bg-surface-elevated/90 px-4 py-3 text-[15px] leading-7 text-ink-primary shadow-sm backdrop-blur-sm"
             >
-              <div class="absolute -left-px top-3 h-6 w-1 rounded-full bg-brand-gradient" />
+              <div class="hidden" />
               <div
                 v-if="streamingHtml"
                 class="prose max-w-none break-words"
@@ -213,7 +215,7 @@ onMounted(() => nextTick(() => scrollToBottom()))
     <Transition name="fab">
       <button
         v-if="!atBottom"
-        class="absolute bottom-[calc(5.5rem+env(safe-area-inset-bottom))] right-4 z-10 flex h-9 w-9 items-center justify-center rounded-full bg-surface-elevated/90 text-ink-secondary shadow-elevated ring-1 ring-border backdrop-blur transition-colors hover:text-ink-primary hover:ring-brand-500/50"
+        class="absolute bottom-4 right-4 z-10 flex h-11 w-11 items-center justify-center rounded-full bg-surface-elevated/90 text-ink-secondary shadow-elevated ring-1 ring-border backdrop-blur transition-colors hover:text-ink-primary hover:ring-brand-500/50"
         title="回到底部"
         aria-label="回到底部"
         @click="scrollToBottom(true)"
