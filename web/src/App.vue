@@ -16,6 +16,8 @@ import { clearSettingsSharedState } from '@/components/settings/shared'
 import { useStoriesStore } from '@/stores/stories'
 import { useWorldInfoStore } from '@/stores/worldInfo'
 import { useChatFilesStore } from '@/stores/chatFiles'
+import { useRecentChatsStore } from '@/stores/recentChats'
+import { useCommunityCatalogStore } from '@/stores/communityCatalog'
 import {
   clearLegacyDiscordImportQueue,
   clearLegacyTelegramBotAdminToken,
@@ -42,7 +44,7 @@ const tts = useTtsStore()
 // 聊天和独立网页应用全屏沉浸：不显示侧栏和底部导航
 const isImmersive = computed(() => route.name === 'chat' || route.name === 'webApp')
 const isAuth = computed(() => route.name === 'login' || route.name === 'register')
-const chromeHidden = computed(() => isImmersive.value || isAuth.value)
+const chromeHidden = computed(() => isImmersive.value || isAuth.value || !session.authenticated)
 
 watch(
   [() => session.user?.handle || '', () => session.isAdmin],
@@ -64,6 +66,8 @@ watch(
     useStoriesStore().reset()
     useWorldInfoStore().reset()
     useChatFilesStore().reset()
+    useRecentChatsStore().reset()
+    useCommunityCatalogStore().reset()
     clearSettingsSharedState()
     if (!handle) {
       if (session.booted && !route.meta.public) {

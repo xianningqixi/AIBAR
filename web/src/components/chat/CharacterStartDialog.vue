@@ -7,6 +7,7 @@ import {
   isInteractiveCharacterGreeting,
 } from '@/lib/storyFromCharacter'
 import type { Character, CharacterStartSelection } from '@/api/types'
+import ResourceCover from '@/components/ui/ResourceCover.vue'
 import AppButton from '@/components/ui/AppButton.vue'
 import AppDialog from '@/components/ui/AppDialog.vue'
 import AppFormField from '@/components/ui/AppFormField.vue'
@@ -96,7 +97,7 @@ async function initialize() {
   await nextTick()
   // 自动聚焦玩家名称输入框
   const input = nameInput.value?.$el?.querySelector('input') as HTMLInputElement | undefined
-  input?.focus()
+  if (window.matchMedia('(pointer: fine)').matches) input?.focus({ preventScroll: true })
 }
 
 function updateOpen(open: boolean) {
@@ -133,24 +134,11 @@ watch(
     size="lg"
     @update:model-value="updateOpen"
   >
-    <div class="grid max-h-[min(70dvh,720px)] gap-5 overflow-y-auto md:grid-cols-[200px_minmax(0,1fr)]">
+    <div class="grid gap-5 md:grid-cols-[200px_minmax(0,1fr)]">
       <!-- 左侧：角色封面与背景 -->
-      <div class="space-y-4">
-        <div class="mx-auto w-40 md:w-full">
-          <img
-            v-if="avatarUrl"
-            :src="avatarUrl"
-            class="aspect-[3/4] w-full rounded-2xl object-cover shadow-elevated ring-1 ring-border-subtle"
-            alt=""
-          />
-          <div
-            v-else
-            class="flex aspect-[3/4] w-full items-center justify-center rounded-2xl bg-brand-soft text-brand-300 shadow-elevated ring-1 ring-border-subtle"
-          >
-            <svg class="h-16 w-16" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
-            </svg>
-          </div>
+      <div class="grid grid-cols-[4rem_minmax(0,1fr)] items-start gap-3 md:block md:space-y-4">
+        <div class="w-16 md:w-full">
+          <ResourceCover :src="avatarUrl" :title="character?.name || '角色'" eager class="aspect-[4/5] w-full rounded-xl" />
         </div>
 
         <div v-if="background" class="rounded-xl bg-surface-sunken p-3 ring-1 ring-border-subtle">
@@ -207,10 +195,11 @@ watch(
             <p class="text-sm font-semibold text-ink-primary">玩家身份</p>
             <p class="mt-1 text-xs text-ink-muted">身份会固定在这段聊天中。</p>
           </div>
-          <AppFormField label="身份来源">
+          <AppFormField label="身份来源" for="start-persona">
             <select
+              id="start-persona"
               :value="selectedPersonaId"
-              class="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-ink-primary focus:outline-none focus:border-brand-500/70 focus:ring-2 focus:ring-brand-500/30"
+              class="w-full rounded-lg border border-border bg-surface px-3 py-2 text-base text-ink-primary md:text-sm focus:outline-none focus:border-brand-500/70 focus:ring-2 focus:ring-brand-500/30"
               @change="applyPersona(($event.target as HTMLSelectElement).value)"
             >
               <option v-for="persona in personas.personas" :key="persona.id" :value="persona.id">
@@ -220,11 +209,12 @@ watch(
             </select>
           </AppFormField>
           <div class="grid gap-4 sm:grid-cols-2">
-            <AppFormField label="玩家名称" required>
-              <AppInput ref="nameInput" v-model="playerName" placeholder="你的名字" />
+            <AppFormField label="玩家名称" for="start-player" required>
+              <AppInput id="start-player" ref="nameInput" v-model="playerName" placeholder="你的名字" />
             </AppFormField>
-            <AppFormField label="身份摘要">
+            <AppFormField label="身份摘要" for="start-description">
               <AppTextarea
+                id="start-description"
                 v-model="playerDescription"
                 :rows="3"
                 auto-grow

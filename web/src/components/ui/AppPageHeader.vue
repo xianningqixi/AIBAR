@@ -9,6 +9,8 @@ const props = withDefaults(defineProps<{
   showBack?: boolean
   // 顶层页面桌面端有常驻侧栏，返回按钮只在移动端显示
   mobileOnlyBack?: boolean
+  // 操作较多时在移动端单独占一行，给标题保留阅读空间
+  mobileActionsBelow?: boolean
   sticky?: boolean
   // 标题字号：默认 text-base，详情页传入 text-lg 更突出内容名
   titleClass?: string
@@ -17,8 +19,9 @@ const props = withDefaults(defineProps<{
 }>(), {
   showBack: true,
   mobileOnlyBack: false,
+  mobileActionsBelow: false,
   sticky: true,
-  titleClass: 'text-base md:text-lg',
+  titleClass: 'text-lg md:text-xl',
   width: '6xl',
 })
 
@@ -52,13 +55,17 @@ function goBack() {
 <template>
   <header
     :class="[
-      'border-b border-border-subtle bg-surface/80 backdrop-blur-md shadow-sm z-20',
+      'border-b border-border-subtle bg-bg/90 backdrop-blur-xl z-20',
       sticky ? 'sticky top-0' : '',
     ]"
   >
     <div class="px-5 md:px-8 lg:px-10">
-      <!-- 固定 h-16：所有页面标题栏等高，且与正文容器同宽同边距 -->
-      <div :class="['mx-auto flex h-16 items-center gap-3', maxWidthClass]">
+      <!-- 桌面保持 h-16；移动端可将较多的操作按钮放在标题下方 -->
+      <div :class="[
+        'mx-auto flex items-center gap-3',
+        mobileActionsBelow ? 'min-h-16 flex-wrap py-3 md:h-16 md:flex-nowrap md:py-0' : 'h-16',
+        maxWidthClass,
+      ]">
         <slot name="breadcrumb" />
         <button
           v-if="showBack"
@@ -78,9 +85,12 @@ function goBack() {
           <!-- 超长时显示完整名称 tooltip -->
           <h1 :title="title" :class="['font-semibold text-ink-primary truncate leading-tight', titleClass]">{{ title }}</h1>
           <!-- 副标题只占一行，标题栏高度恒定 -->
-          <p v-if="subtitle" :title="subtitle" class="text-xs text-ink-muted truncate leading-tight">{{ subtitle }}</p>
+          <p v-if="subtitle" :title="subtitle" class="mt-1 text-xs text-ink-muted truncate leading-tight">{{ subtitle }}</p>
         </div>
-        <div v-if="$slots.actions" class="flex shrink-0 items-center gap-2">
+        <div v-if="$slots.actions" :class="[
+          'flex shrink-0 items-center gap-2',
+          mobileActionsBelow ? 'w-full flex-wrap justify-end md:w-auto md:flex-nowrap' : '',
+        ]">
           <slot name="actions" />
         </div>
       </div>

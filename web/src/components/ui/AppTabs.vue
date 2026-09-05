@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 
 export interface Tab {
   key: string
@@ -11,7 +11,28 @@ export interface Tab {
 const props = defineProps<{
   modelValue: string
   tabs: Tab[]
+  ariaLabel?: string
+  panelPrefix?: string
 }>()
+
+const emit = defineEmits<{ 'update:modelValue': [value: string] }>()
+const tablist = ref<HTMLElement>()
+function onKeydown(event: KeyboardEvent, key: string) {
+  const index = props.tabs.findIndex(tab => tab.key === key)
+  let next: number
+  if (event.key === 'ArrowRight') next = (index + 1) % props.tabs.length
+  else if (event.key === 'ArrowLeft') next = (index - 1 + props.tabs.length) % props.tabs.length
+  else if (event.key === 'Home') next = 0
+  else if (event.key === 'End') next = props.tabs.length - 1
+  else return
+  event.preventDefault()
+  const tab = props.tabs[next]
+  if (!tab) return
+  emit('update:modelValue', tab.key)
+  const button = tablist.value?.querySelectorAll<HTMLButtonElement>('[role="tab"]')[next]
+  button?.focus({ preventScroll: true })
+  button?.scrollIntoView?.({ block: 'nearest', inline: 'nearest' })
+}
 
 const grouped = computed(() => {
   const result: Array<{ type: 'group'; label: string } | { type: 'tab'; tab: Tab }> = []
@@ -29,8 +50,8 @@ const grouped = computed(() => {
 
 <template>
   <div class="relative">
-    <div class="flex items-center gap-1 overflow-x-auto border-b border-border-subtle pb-0.5" role="tablist">
-      <template v-for="(item, index) in grouped" :key="item.type === 'group' ? `g-${item.label}` : item.tab.key">
+    <div ref="tablist" class="flex items-center gap-2 overflow-x-auto border-b border-border-subtle" role="tablist" :aria-label="ariaLabel || '页面选项'">
+      <template v-for="item in grouped" :key="item.type === 'group' ? `g-${item.label}` : item.tab.key">
         <span
           v-if="item.type === 'group'"
           class="ml-2 mr-1 shrink-0 select-none text-[11px] font-semibold uppercase tracking-wider text-ink-muted"
@@ -40,20 +61,19 @@ const grouped = computed(() => {
         </span>
         <button
           v-else
-          :id="`tab-${item.tab.key}`"
+          type="button"
           role="tab"
           :aria-selected="modelValue === item.tab.key"
-          :aria-controls="`tabpanel-${item.tab.key}`"
+          :aria-controls="panelPrefix ? `${panelPrefix}${item.tab.key}` : undefined"
           :tabindex="modelValue === item.tab.key ? 0 : -1"
           :class="[
-            'relative shrink-0 px-4 py-2.5 text-sm font-medium whitespace-nowrap transition-colors',
+            'relative shrink-0 min-h-12 px-4 py-3 text-sm font-medium whitespace-nowrap transition-colors',
             modelValue === item.tab.key
-              ? 'text-ink-primary'
+              ? 'text-brand-300'
               : 'text-ink-muted hover:text-ink-secondary',
           ]"
-          @click="$emit('update:modelValue', item.tab.key)"
-          @keydown.left.prevent="$emit('update:modelValue', grouped[index - 1]?.type === 'tab' ? (grouped[index - 1] as Extract<typeof grouped[number], { type: 'tab' }>).tab.key : '')"
-          @keydown.right.prevent="$emit('update:modelValue', grouped[index + 1]?.type === 'tab' ? (grouped[index + 1] as Extract<typeof grouped[number], { type: 'tab' }>).tab.key : '')"
+          @keydown="onKeydown($event, item.tab.key)"
+          @click="emit('update:modelValue', item.tab.key)"
         >
           <span class="inline-flex items-center gap-2">
             {{ item.tab.label }}
@@ -74,10 +94,5 @@ const grouped = computed(() => {
         </button>
       </template>
     </div>
-    <!-- 右侧滚动渐变提示 -->
-    <div
-      class="pointer-events-none absolute right-0 top-0 h-full w-8 bg-gradient-to-l from-bg to-transparent"
-      aria-hidden="true"
-    />
   </div>
 </template>

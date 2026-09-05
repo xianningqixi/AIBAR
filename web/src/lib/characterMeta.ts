@@ -13,6 +13,16 @@ export function getCharacterDescription(c: Character): string {
   return c.description || c.data?.description || ''
 }
 
+/** 列表只展示便于阅读的简介，保留角色卡原始设定。 */
+export function cleanCharacterDescription(c: Character): string {
+  return getCharacterDescription(c)
+    .replace(/\{\{char\}\}/gi, c.name).replace(/\{\{user\}\}/gi, '你')
+    .replace(/[[\]{}"*]/g, ' ')
+    .replace(/[A-Za-z][A-Za-z'’ ]*=\s*/g, '')
+    .replace(/\s*,\s*/g, '、')
+    .replace(/\s+/g, ' ').trim()
+}
+
 /**
  * 角色封面缩略图 URL。
  * 必须走缩略图端点：原始角色卡 PNG 内嵌了完整卡片 JSON，单张常在 0.5-3 MB。

@@ -14,11 +14,16 @@ import AppButton from '@/components/ui/AppButton.vue'
 import AppEmpty from '@/components/ui/AppEmpty.vue'
 import AppSelect from '@/components/ui/AppSelect.vue'
 import AppSegmentedControl from '@/components/ui/AppSegmentedControl.vue'
+import AppDrawer from '@/components/ui/AppDrawer.vue'
+import AppCheckbox from '@/components/ui/AppCheckbox.vue'
+import AppTabs from '@/components/ui/AppTabs.vue'
+import BrowseCharacterCard from '@/components/browse/BrowseCharacterCard.vue'
+import BrowseStoryCard from '@/components/browse/BrowseStoryCard.vue'
 import SearchInput from '@/components/ui/SearchInput.vue'
 import { getApiErrorMessage } from '@/api/client'
-import { fetchRecentChats } from '@/api/chats'
-import { formatDateTime, formatRelative, stripJsonlName } from '@/lib/format'
-import { characterCover, getCharacterDescription, getCharacterTags, storyThumbnail } from '@/lib/characterMeta'
+import { useRecentChatsStore } from '@/stores/recentChats'
+import { formatRelative, stripJsonlName } from '@/lib/format'
+import { getCharacterDescription, getCharacterTags } from '@/lib/characterMeta'
 import { createChatFromCharacter } from '@/lib/storyStart'
 import { fetchCharacterForRuntime } from '@/lib/stCompatibility'
 import { useStCompatibilityGate } from '@/composables/useStCompatibilityGate'
@@ -34,16 +39,10 @@ const session = useSessionStore()
 
 const storiesStore = useStoriesStore()
 const stories = computed(() => storiesStore.stories)
-const chatEntries = ref<ChatEntry[]>([])
+const recentStore = useRecentChatsStore()
+const chatEntries = computed(() => recentStore.entries)
+const chatsLoading = computed(() => recentStore.loading)
 const loading = ref(true)
-// 聊天列表两级加载：首屏只拉少量预览（最近在聊横条 12 条足够），
-// 完整列表等用户切到“继续聊天”tab 再拉。后端 /api/chats/recent 会逐文件
-// 完整读取 max 个 JSONL，直接拉 500 会让首屏等几百次文件 IO。
-const CHATS_PREVIEW_COUNT = 60
-const CHATS_FULL_COUNT = 500
-const chatsLoading = ref(true)
-let chatsFullLoaded = false
-let chatsFullPromise: Promise<void> | null = null
 
 function normalizeTab(value: unknown): BrowseTab {
   return value === 'stories' || value === 'chats' ? value : 'characters'
@@ -52,6 +51,7 @@ function normalizeTab(value: unknown): BrowseTab {
 const activeTab = ref<BrowseTab>(normalizeTab(route.query.tab))
 const charFilter = ref<'all' | 'recent' | 'favorites' | 'withChat'>('all')
 const noImage = ref(false)
+const displayOptionsOpen = ref(false)
 const startingNewChat = ref(false)
 const startDialogOpen = ref(false)
 const startCharacter = ref<Character | null>(null)
@@ -79,10 +79,10 @@ function includesQuery(fields: Array<string | undefined | null>): boolean {
 }
 
 watch(activeTab, (tab) => {
-  router.replace({ query: { ...route.query, tab } })
+  if (route.query.tab !== tab) void router.replace({ query: { ...route.query, tab } })
   searchQuery.value = ''
-  if (tab === 'chats') void ensureFullChats()
-  if (typeof window !== 'undefined') window.scrollTo({ top: 0, behavior: 'smooth' })
+  if (tab === 'chats') void recentStore.load(true)
+  if (typeof window !== 'undefined') window.scrollTo({ top: 0, behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' })
 })
 
 function goTab(tab: BrowseTab) {
@@ -94,7 +94,7 @@ function focusTab(tab: BrowseTab) {
   if (typeof window === 'undefined') return
   window.setTimeout(() => {
     document.getElementById('browse-results')?.scrollIntoView({
-      behavior: 'smooth',
+      behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth',
       block: 'start',
     })
   }, 0)
@@ -106,7 +106,7 @@ const tabs = computed(() => [
   { key: 'chats' as const, label: '继续聊天', badge: chatEntries.value.length || undefined },
 ])
 
-const tabOptions = computed(() => tabs.value.map((t) => ({ value: t.key, label: t.label })))
+watch(() => route.query.tab, value => { activeTab.value = normalizeTab(value) })
 
 function toTimestamp(value: unknown): number {
   if (typeof value === 'number') return value
@@ -127,8 +127,6 @@ const activeModelTitle = computed(() =>
 const activeModelReady = computed(() => isProfileUsable(models.activeProfile))
 
 type TabAction = {
-  title: string
-  status: string
   actionLabel: string
   variant: 'gradient' | 'secondary'
   action: () => void
@@ -137,8 +135,6 @@ type TabAction = {
 const activeTabMeta = computed<TabAction>(() => {
   if (activeTab.value === 'stories') {
     return {
-      title: '故事开局',
-      status: stories.value.length ? `${stories.value.length} 个故事卡` : '还没有故事卡',
       actionLabel: '去创作',
       variant: 'gradient',
       action: () => router.push('/create?kind=story'),
@@ -146,16 +142,12 @@ const activeTabMeta = computed<TabAction>(() => {
   }
   if (activeTab.value === 'chats') {
     return {
-      title: '继续聊天',
-      status: sortedChats.value.length ? `${sortedChats.value.length} 条聊天记录` : '还没有聊天记录',
       actionLabel: '随机新聊天',
       variant: 'secondary',
       action: startNewChat,
     }
   }
   return {
-    title: '选角色',
-    status: store.characters.length ? `${store.characters.length} 个角色` : '还没有角色',
     actionLabel: store.characters.length ? '随机角色' : '去创作',
     variant: store.characters.length ? 'secondary' : 'gradient',
     action: () => (store.characters.length ? pickRandom() : router.push('/create?kind=character')),
@@ -295,10 +287,6 @@ function getStoryCharacter(story: StoryCard): Character | undefined {
   return store.findCharacter(story.characterAvatar)
 }
 
-function storyCover(story: StoryCard): string {
-  return storyThumbnail(story, getStoryCharacter(story))
-}
-
 function openStoryDetail(story: StoryCard) {
   router.push(`/story/${encodeURIComponent(story.id)}`)
 }
@@ -398,149 +386,67 @@ const charFilterOptions = [
   { value: 'withChat' as const, label: '有聊天' },
 ]
 
-function cleanDescription(c: Character): string {
-  let t = getCharacterDescription(c)
-  if (!t) return ''
-  t = t.replace(/\{\{char\}\}/gi, c.name).replace(/\{\{user\}\}/gi, '你')
-  // 去掉常见的设定包裹符号（方括号、引号、星号、花括号）
-  t = t.replace(/[[\]{}"*]/g, ' ')
-  // 去掉 SillyTavern 风格的「字段= 值」标签前缀，例如 "Seraphina's Personality= ..."
-  t = t.replace(/[A-Za-z][A-Za-z'’ ]*=\s*/g, '')
-  // 把因去引号产生的「 , 」碎片收成顿号
-  t = t.replace(/\s*,\s*/g, '、')
-  // 折叠多余空白与换行
-  t = t.replace(/\s+/g, ' ').trim()
-  return t
+const resultCount = computed(() => activeTab.value === 'characters'
+  ? filteredCharacters.value.length : activeTab.value === 'stories'
+    ? filteredStories.value.length : filteredChats.value.length)
+const hasActiveFilters = computed(() => Boolean(searchQuery.value.trim() || (activeTab.value === 'characters' && (charFilter.value !== 'all' || activeCharTags.value.length))))
+function resetFilters() {
+  searchQuery.value = ''
+  charFilter.value = 'all'
+  activeCharTags.value = []
 }
 
 async function loadBrowseData() {
   loading.value = true
+  // 彼此独立的资源同步启动；首屏只等待角色，其他区域有各自的加载/失败反馈。
+  void recentStore.load(activeTab.value === 'chats', true)
+  void models.loadSecrets().catch(() => undefined)
+  void storiesStore.load()
   try {
-    // 首屏骨架只等角色列表（主 tab）；模型/故事/聊天预览并行补齐
-    await (store.characters.length ? Promise.resolve() : store.load())
+    await store.load(Boolean(store.error))
   } finally {
     loading.value = false
   }
-
-  chatsLoading.value = true
-  fetchRecentChats(CHATS_PREVIEW_COUNT)
-    // 完整列表已就位时不再用预览覆盖（切 tab 快于预览返回的竞态）
-    .then((res) => {
-      if (!chatsFullLoaded) chatEntries.value = res
-    })
-    .catch(() => undefined)
-    .finally(() => {
-      chatsLoading.value = false
-      // 直接落在“继续聊天”tab 时（?tab=chats）也需要完整列表
-      if (activeTab.value === 'chats') void ensureFullChats()
-    })
-  models.loadSecrets().catch(() => undefined)
-  storiesStore.load().catch(() => undefined)
 }
-
-async function ensureFullChats() {
-  if (chatsFullLoaded) return
-  if (chatsFullPromise) return chatsFullPromise
-  chatsFullPromise = (async () => {
-    try {
-      chatEntries.value = await fetchRecentChats(CHATS_FULL_COUNT)
-      chatsFullLoaded = true
-    } catch {
-      // 保留已有预览数据，下次切 tab 重试
-    } finally {
-      chatsFullPromise = null
-    }
-  })()
-  return chatsFullPromise
-}
-
 onMounted(loadBrowseData)
-
-// 最近聊天 / 标签的横向滚动渐变提示：伪元素不需要 content 字符串
-const scrollHintLeft = 'after:absolute after:right-0 after:top-0 after:h-full after:w-8 after:bg-gradient-to-l after:from-bg after:to-transparent after:pointer-events-none'
 </script>
 
 <template>
   <div class="min-h-[100dvh] bg-bg">
-    <!-- 移动端顶部：单行布局（logo + tab + 搜索） -->
-    <header class="sticky top-0 z-20 border-b border-border-subtle bg-surface/90 backdrop-blur-md shadow-sm md:hidden">
-      <div class="mx-auto flex max-w-6xl items-center gap-2 px-4 py-3">
-        <button class="flex shrink-0 items-center gap-2.5 group" @click="goTab('characters')">
-          <div class="flex h-9 w-9 items-center justify-center rounded-lg bg-brand-gradient text-base font-bold text-white shadow-glow">
-            A
-          </div>
-          <span class="text-lg font-semibold text-ink-primary">AIBAR</span>
-        </button>
-
-        <AppSegmentedControl v-model="activeTab" :options="tabOptions" size="sm" class="flex-1" />
-      </div>
+    <header class="flex items-center justify-between border-b border-border-subtle px-4 py-3 md:hidden">
+      <span class="flex items-center gap-2 text-lg font-semibold tracking-wide"><span class="flex h-8 w-8 items-center justify-center rounded-xl bg-brand-gradient text-sm text-white">A</span>AIBAR</span>
+      <AppButton variant="secondary" size="sm" @click="router.push('/create?kind=character')">创建角色</AppButton>
     </header>
-
-    <main class="w-full flex-1">
-      <!-- 桌面端置顶工具栏 -->
-      <header class="sticky top-0 z-20 hidden border-b border-border-subtle bg-surface/90 backdrop-blur-md shadow-sm md:block">
-        <div class="px-5 lg:px-10">
-          <div class="mx-auto flex h-16 max-w-6xl items-center gap-3">
-            <AppSegmentedControl v-model="activeTab" :options="tabOptions" />
-
-            <div class="min-w-0 flex-1">
-              <SearchInput v-model="searchQuery" :placeholder="searchPlaceholder" />
-            </div>
-
-            <div class="flex shrink-0 items-center gap-2">
-              <button
-                class="inline-flex min-w-[9rem] max-w-[14rem] items-center gap-2 rounded-lg bg-surface px-3 py-2 text-sm font-medium text-ink-secondary ring-1 ring-border-subtle transition-all hover:text-ink-primary hover:ring-brand-500/40"
-                :class="modelPickerOpen ? 'bg-brand-500/10 text-ink-primary ring-brand-500/50' : ''"
-                title="选择默认模型"
-                aria-haspopup="listbox"
-                :aria-expanded="modelPickerOpen"
-                @click="modelPickerOpen = true"
-              >
-                <span
-                  class="h-2 w-2 shrink-0 rounded-full"
-                  :class="activeModelReady ? 'bg-success' : 'bg-warning'"
-                />
-                <span class="truncate" :title="activeModelTitle">{{ activeModelTitle }}</span>
-                <svg class="h-4 w-4 shrink-0 text-ink-muted" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 9l6 6 6-6" />
-                </svg>
-              </button>
-
-              <AppButton
-                size="md"
-                :variant="activeTabMeta.variant"
-                :loading="activeTab === 'chats' && startingNewChat"
-                @click="activeTabMeta.action"
-              >
-                {{ activeTabMeta.actionLabel }}
-              </AppButton>
-            </div>
+    <main class="page-shell !py-5 md:!py-8">
+      <div class="space-y-4 md:space-y-8">
+        <section class="flex flex-wrap items-end justify-between gap-4">
+          <div>
+            <h1 class="text-2xl font-semibold tracking-tight md:text-[32px] md:leading-tight">今天想和谁聊？</h1>
+            <p class="mt-2 text-sm leading-6 text-ink-secondary">遇见一个角色，开启一段属于你的故事。</p>
           </div>
-        </div>
-      </header>
-
-      <div class="px-4 py-5 md:px-8 lg:px-10">
-        <div class="mx-auto max-w-6xl space-y-5">
-          <!-- 首屏 hero -->
-          <section
-            v-if="!loading && activeTab === 'characters'"
-            class="relative overflow-hidden rounded-2xl bg-hero-radial ring-1 ring-border-subtle"
+          <AppButton variant="secondary" class="hidden md:inline-flex" @click="router.push('/create?kind=character')">
+            <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path stroke-linecap="round" d="M12 5v14M5 12h14" /></svg>
+            创建角色
+          </AppButton>
+        </section>
+        <div class="flex flex-wrap items-center gap-3">
+          <SearchInput v-model="searchQuery" :placeholder="searchPlaceholder" size="lg" class="min-w-[min(100%,16rem)] flex-1" />
+          <button
+            class="flex min-h-12 max-w-full items-center gap-2 rounded-xl border border-border bg-surface px-4 text-sm text-ink-secondary transition-colors hover:border-brand-500/50"
+            aria-label="选择默认模型"
+            aria-haspopup="dialog"
+            :aria-expanded="modelPickerOpen"
+            @click="modelPickerOpen = true"
           >
-            <div class="relative flex flex-col gap-4 p-5 sm:flex-row sm:items-center sm:justify-between lg:p-6">
-              <div class="min-w-0">
-                <h2 class="text-lg font-semibold text-ink-primary md:text-xl">今天想和谁聊？</h2>
-                <p class="mt-1 text-sm text-ink-secondary">从角色卡开始，或者让 AI 帮你挑一个。</p>
-              </div>
-              <div class="flex shrink-0 items-center gap-2">
-                <AppButton size="sm" variant="secondary" @click="pickRandom">随机角色</AppButton>
-                <AppButton size="sm" @click="router.push('/create?kind=character')">创建角色</AppButton>
-              </div>
-            </div>
-          </section>
-
+            <span class="h-1.5 w-1.5 shrink-0 rounded-full" :class="activeModelReady ? 'bg-success' : 'bg-warning'" />
+            <span class="max-w-[12rem] truncate" :title="activeModelTitle">{{ activeModelTitle }}</span>
+            <svg class="h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="m8 10 4 4 4-4" /></svg>
+          </button>
+          <AppButton :variant="activeTabMeta.variant" :loading="startingNewChat" size="lg" @click="activeTabMeta.action">{{ activeTabMeta.actionLabel }}</AppButton>
+        </div>
           <section
             v-if="models.loaded && !hasUsableModel"
-            class="flex flex-col gap-3 rounded-lg bg-warning/10 p-4 ring-1 ring-warning/35 sm:flex-row sm:items-center sm:justify-between"
+            class="flex flex-col gap-3 rounded-xl border border-warning/25 bg-warning/5 px-4 py-3 sm:flex-row sm:items-center sm:justify-between"
           >
             <div>
               <p class="text-sm font-semibold text-warning-strong">暂无可用模型</p>
@@ -552,9 +458,9 @@ const scrollHintLeft = 'after:absolute after:right-0 after:top-0 after:h-full af
           <!-- 最近在聊 -->
           <section
             v-if="!loading && recentChats.length && activeTab !== 'chats' && !searchQuery.trim()"
-            class="relative space-y-3"
+            class="relative space-y-2 md:space-y-3"
           >
-            <div class="flex items-center justify-between">
+            <div class="hidden items-center justify-between md:flex">
               <h3 class="flex items-center gap-2 text-sm font-semibold text-ink-primary">
                 <span class="h-1.5 w-1.5 rounded-full bg-brand-gradient" />
                 最近在聊
@@ -565,12 +471,12 @@ const scrollHintLeft = 'after:absolute after:right-0 after:top-0 after:h-full af
             </div>
             <div
               class="relative -mx-1 flex gap-3 overflow-x-auto px-1 pb-1"
-              :class="scrollHintLeft"
+              aria-label="最近在聊"
             >
               <button
                 v-for="entry in recentChats"
                 :key="entry.avatar ? `${entry.avatar}:${entry.file_name}` : entry.file_name"
-                class="group flex w-60 shrink-0 items-center gap-3 rounded-xl bg-surface p-3 text-left shadow-sm ring-1 ring-border-subtle transition-all duration-200 hover:-translate-y-0.5 hover:ring-brand-500/40 hover:shadow-glow"
+                class="group flex w-60 shrink-0 items-center gap-3 rounded-xl bg-surface p-2.5 md:p-3 text-left shadow-sm ring-1 ring-border-subtle transition-all duration-200 hover:-translate-y-0.5 hover:ring-brand-500/40 hover:shadow-glow"
                 @click="openChatEntry(entry)"
               >
                 <img
@@ -579,50 +485,25 @@ const scrollHintLeft = 'after:absolute after:right-0 after:top-0 after:h-full af
                   loading="lazy"
                   decoding="async"
                   alt=""
-                  class="h-14 w-14 shrink-0 rounded-lg object-cover ring-1 ring-border-subtle"
+                  class="h-10 w-10 shrink-0 rounded-lg md:h-14 md:w-14 object-cover ring-1 ring-border-subtle"
                 />
                 <div v-else class="flex h-14 w-14 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-brand-500/30 to-accent-500/20 text-xl ring-1 ring-border-subtle">💬</div>
                 <div class="min-w-0 flex-1">
                   <p class="truncate text-sm font-semibold text-ink-primary">{{ getChatCharacterName(entry) }}</p>
-                  <p class="truncate text-xs text-ink-muted">{{ entry.mes || '继续上次的对话' }}</p>
-                  <p class="mt-0.5 text-[11px] text-ink-muted">{{ formatRelative(entry.last_mes) }}</p>
+                  <p class="truncate text-xs text-ink-muted"><span class="md:hidden">继续上次的对话</span><span class="hidden md:inline">{{ entry.mes || '继续上次的对话' }}</span></p>
+                  <p class="mt-0.5 hidden text-[11px] text-ink-muted md:block">{{ formatRelative(entry.last_mes) }}</p>
                 </div>
               </button>
             </div>
           </section>
 
           <!-- 结果区 -->
-          <div id="browse-results" class="min-h-[60vh] scroll-mt-20 space-y-5">
-            <div class="md:hidden">
-              <SearchInput v-model="searchQuery" :placeholder="searchPlaceholder" />
+          <div id="browse-results" class="min-h-[60vh] scroll-mt-20 space-y-4 md:space-y-5">
+            <AppTabs v-model="activeTab" :tabs="tabs" aria-label="探索内容" />
+            <div class="hidden items-center justify-between gap-3 text-xs text-ink-muted md:flex" aria-live="polite" role="status">
+              <span>{{ activeTab === 'characters' && loading || activeTab === 'chats' && chatsLoading || activeTab === 'stories' && storiesStore.loading ? '正在加载…' : `${resultCount} ${activeTab === 'chats' ? '条聊天记录' : activeTab === 'stories' ? '个故事' : '个角色'}` }}</span>
+              <button v-if="hasActiveFilters" class="min-h-8 text-brand-300 hover:underline" @click="resetFilters">重置筛选</button>
             </div>
-
-            <div class="hidden items-baseline gap-2 md:flex">
-              <h2 class="text-lg font-semibold text-ink-primary">{{ activeTabMeta.title }}</h2>
-              <p class="text-sm text-ink-muted">{{ activeTabMeta.status }}</p>
-            </div>
-
-            <!-- 移动端：标题 + 模型 + 主操作 -->
-            <div class="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between md:hidden">
-              <div class="min-w-0">
-                <h2 class="text-2xl font-semibold text-ink-primary">{{ activeTabMeta.title }}</h2>
-                <p class="mt-1 text-sm text-ink-muted">{{ activeTabMeta.status }}</p>
-              </div>
-              <div class="flex flex-wrap items-center gap-2">
-                <AppButton size="sm" variant="secondary" @click="modelPickerOpen = true">
-                  <span class="max-w-[10rem] truncate">{{ activeModelTitle }}</span>
-                </AppButton>
-                <AppButton
-                  size="sm"
-                  :variant="activeTabMeta.variant"
-                  :loading="activeTab === 'chats' && startingNewChat"
-                  @click="activeTabMeta.action"
-                >
-                  {{ activeTabMeta.actionLabel }}
-                </AppButton>
-              </div>
-            </div>
-
             <!-- 加载骨架 -->
             <div v-if="activeTab === 'chats' && chatsLoading && !chatEntries.length" class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
               <div v-for="n in 6" :key="n" class="rounded-2xl bg-surface p-5 ring-1 ring-border-subtle">
@@ -637,9 +518,9 @@ const scrollHintLeft = 'after:absolute after:right-0 after:top-0 after:h-full af
                 <div class="skeleton mt-3 h-3 w-1/2" />
               </div>
             </div>
-            <div v-else-if="loading" class="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
+            <div v-else-if="activeTab === 'characters' && loading || activeTab === 'stories' && storiesStore.loading && !stories.length" class="resource-grid">
               <div v-for="n in 10" :key="n" class="overflow-hidden rounded-2xl bg-surface ring-1 ring-border-subtle">
-                <div class="skeleton aspect-[3/4] w-full" />
+                <div class="skeleton aspect-[4/5] w-full" />
                 <div class="space-y-2 p-3">
                   <div class="skeleton h-3 w-3/4" />
                   <div class="skeleton h-3 w-1/2" />
@@ -650,19 +531,24 @@ const scrollHintLeft = 'after:absolute after:right-0 after:top-0 after:h-full af
             <!-- 角色卡列表 -->
             <section v-if="!loading && activeTab === 'characters'">
               <!-- 筛选行：桌面端并排，移动端横向滚动 -->
-              <div class="mb-4 flex flex-wrap items-center gap-3 md:flex-nowrap">
-                <AppSegmentedControl v-model="charFilter" :options="charFilterOptions" size="sm" />
+              <div class="mb-4 flex flex-wrap items-center gap-2 md:flex-nowrap">
+                <AppSegmentedControl v-model="charFilter" :options="charFilterOptions" size="sm" aria-label="角色筛选" />
                 <div class="flex-1" />
-                <AppSelect v-model="charSort" class="w-36 shrink-0">
+                <button class="icon-button border border-border-subtle md:hidden" :class="noImage || charSort !== 'smart' ? 'bg-brand-500/10 text-brand-300' : ''" aria-label="显示与排序" @click="displayOptionsOpen = true">
+                  <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path stroke-linecap="round" d="M4 7h9m4 0h3M4 17h3m4 0h9" /><circle cx="15" cy="7" r="2" /><circle cx="9" cy="17" r="2" /></svg>
+                </button>
+                <button v-if="hasActiveFilters" class="min-h-8 text-xs text-brand-300 md:hidden" @click="resetFilters">重置</button>
+                <AppSelect v-model="charSort" class="hidden w-36 shrink-0 md:block" aria-label="角色排序">
                   <option v-for="o in charSortOptions" :key="o.key" :value="o.key">排序 · {{ o.label }}</option>
                 </AppSelect>
                 <button
                   :class="[
-                    'inline-flex h-9 shrink-0 items-center rounded-lg px-3 text-sm font-medium ring-1 transition-all',
+                    'hidden h-10 shrink-0 items-center rounded-xl px-3 md:inline-flex text-sm font-medium ring-1 transition-all',
                     noImage
                       ? 'bg-brand-500/20 text-brand-200 ring-brand-500/40'
                       : 'text-ink-secondary ring-border-subtle hover:bg-ink-primary/5 hover:text-ink-primary',
                   ]"
+                  :aria-pressed="noImage"
                   @click="noImage = !noImage"
                 >
                   无图模式
@@ -673,7 +559,6 @@ const scrollHintLeft = 'after:absolute after:right-0 after:top-0 after:h-full af
               <div
                 v-if="popularTags.length"
                 class="relative -mx-1 mb-5 flex gap-2 overflow-x-auto px-1 pb-1"
-                :class="scrollHintLeft"
                 role="group"
                 aria-label="标签筛选"
               >
@@ -733,56 +618,18 @@ const scrollHintLeft = 'after:absolute after:right-0 after:top-0 after:h-full af
                 </template>
               </AppEmpty>
 
-              <!-- 角色卡片网格 -->
-              <div v-else class="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
-                <button
-                  v-for="c in filteredCharacters"
-                  :key="c.avatar"
-                  class="group flex h-full flex-col overflow-hidden rounded-2xl bg-surface text-left shadow-sm ring-1 ring-border-subtle transition-all duration-200 hover:-translate-y-0.5 hover:ring-brand-500/50 hover:shadow-glow focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500"
-                  @click="openCharacter(c)"
-                >
-                  <div class="relative aspect-[3/4] w-full overflow-hidden bg-gradient-to-br from-brand-500/10 to-accent-500/5">
-                    <img
-                      v-if="!noImage && c.avatar && c.avatar !== 'none'"
-                      :src="characterCover(c.avatar)"
-                      loading="lazy"
-                      decoding="async"
-                      alt=""
-                      class="h-full w-full object-cover transition-transform duration-300 group-hover:scale-105"
-                    />
-                    <div v-else class="flex h-full w-full items-center justify-center text-6xl text-brand-300/70">🎭</div>
-                    <div class="pointer-events-none absolute inset-x-0 bottom-0 h-3/5 bg-gradient-to-t from-black/80 via-black/40 to-transparent" />
-                    <span
-                      v-if="c.fav === 'true'"
-                      class="absolute right-2 top-2 rounded-full bg-black/50 px-1.5 py-0.5 text-sm text-accent-400 backdrop-blur-sm"
-                    >
-                      ★
-                    </span>
-                    <div class="absolute inset-x-0 bottom-0 p-3">
-                      <h4 class="truncate text-sm font-semibold text-white [text-shadow:0_1px_3px_rgba(0,0,0,0.7)]">{{ c.name }}</h4>
-                      <p class="mt-0.5 text-xs text-white/80 [text-shadow:0_1px_2px_rgba(0,0,0,0.6)]">{{ c.chat_size ? `${c.chat_size} 条聊天` : '未开始' }}</p>
-                    </div>
-                  </div>
-                  <div class="flex flex-1 flex-col p-3">
-                    <p class="line-clamp-2 min-h-[2.25rem] text-xs leading-relaxed text-ink-secondary">
-                      {{ cleanDescription(c) || '这个角色还没有简介。' }}
-                    </p>
-                    <div v-if="getCharacterTags(c).length" class="mt-auto flex flex-wrap gap-1 pt-2">
-                      <span
-                        v-for="tag in getCharacterTags(c).slice(0, 3)"
-                        :key="tag"
-                        class="rounded bg-brand-500/10 px-1.5 py-0.5 text-[11px] font-medium text-brand-300"
-                      >{{ tag }}</span>
-                    </div>
-                  </div>
-                </button>
+              <div v-else :class="noImage ? 'grid gap-3 sm:grid-cols-2 lg:grid-cols-3' : 'resource-grid'">
+                <BrowseCharacterCard v-for="(c, index) in filteredCharacters" :key="c.avatar" :character="c" :compact="noImage" :eager="index < 4" @click="openCharacter(c)" />
               </div>
             </section>
 
             <!-- 故事卡列表 -->
             <section v-if="!loading && activeTab === 'stories'">
+              <AppEmpty v-if="storiesStore.error" icon="book" title="故事加载失败" :description="storiesStore.error">
+                <template #actions><AppButton variant="secondary" @click="storiesStore.load(true)">重新加载</AppButton></template>
+              </AppEmpty>
               <AppEmpty
-                v-if="storiesStore.loaded && !stories.length"
+                v-else-if="storiesStore.loaded && !stories.length"
                 icon="book"
                 title="还没有故事卡"
                 description="故事卡是可复用开局模板 — 绑定角色、场景、开场消息和默认 MOD。创建后每次都能基于同一设定快速开新存档。"
@@ -803,54 +650,22 @@ const scrollHintLeft = 'after:absolute after:right-0 after:top-0 after:h-full af
                 </template>
               </AppEmpty>
 
-              <!-- 故事卡：更宽的比例 + 书页 icon -->
-              <div v-else class="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
-                <button
-                  v-for="story in filteredStories"
-                  :key="story.id"
-                  class="group flex h-full flex-col overflow-hidden rounded-2xl bg-surface text-left shadow-sm ring-1 ring-border-subtle transition-all duration-200 hover:-translate-y-0.5 hover:ring-brand-500/50 hover:shadow-glow focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500"
-                  @click="openStoryDetail(story)"
-                >
-                  <div class="relative aspect-[4/3] w-full overflow-hidden bg-gradient-to-br from-brand-500/10 to-accent-500/5">
-                    <img
-                      v-if="storyCover(story)"
-                      :src="storyCover(story)"
-                      loading="lazy"
-                      decoding="async"
-                      alt=""
-                      class="h-full w-full object-cover transition-transform duration-300 group-hover:scale-105"
-                    />
-                    <div v-else class="flex h-full w-full items-center justify-center text-6xl text-brand-300/70">📖</div>
-                    <div class="pointer-events-none absolute inset-x-0 bottom-0 h-3/5 bg-gradient-to-t from-black/80 via-black/40 to-transparent" />
-                    <span class="absolute left-2 top-2 rounded-md bg-brand-gradient px-2 py-0.5 text-xs font-medium text-white shadow-glow">故事</span>
-                    <div class="absolute inset-x-0 bottom-0 p-3">
-                      <h4 class="truncate text-sm font-semibold text-white [text-shadow:0_1px_3px_rgba(0,0,0,0.7)]">{{ story.title }}</h4>
-                      <p class="mt-0.5 truncate text-xs text-white/80 [text-shadow:0_1px_2px_rgba(0,0,0,0.6)]">{{ getStoryCharacter(story)?.name || '角色已缺失' }}</p>
-                    </div>
-                  </div>
-                  <div class="flex flex-1 flex-col p-3">
-                    <p class="line-clamp-2 min-h-[2.25rem] text-xs leading-relaxed text-ink-secondary">
-                      {{ story.summary || story.scenario || '这个故事卡还没有简介。' }}
-                    </p>
-                    <div class="mt-auto flex items-center justify-between gap-2 pt-2">
-                      <div v-if="story.tags?.length" class="flex flex-wrap gap-1">
-                        <span
-                          v-for="tag in story.tags.slice(0, 2)"
-                          :key="tag"
-                          class="rounded bg-brand-500/10 px-1.5 py-0.5 text-[11px] font-medium text-brand-300"
-                        >{{ tag }}</span>
-                      </div>
-                      <span class="shrink-0 text-[11px] text-ink-muted">{{ formatDateTime(story.updatedAt || story.createdAt) }}</span>
-                    </div>
-                  </div>
-                </button>
+              <div v-else class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                <BrowseStoryCard v-for="(story, index) in filteredStories" :key="story.id" :story="story" :character="getStoryCharacter(story)" :eager="index < 3" @click="openStoryDetail(story)" />
               </div>
             </section>
 
             <!-- 聊天记录列表 -->
             <section v-if="!loading && activeTab === 'chats'">
+              <AppEmpty v-if="recentStore.error && !chatEntries.length" icon="chat" title="聊天记录加载失败" :description="recentStore.error">
+                <template #actions><AppButton variant="secondary" @click="recentStore.load(true, true)">重新加载</AppButton></template>
+              </AppEmpty>
+              <div v-else-if="recentStore.error" class="mb-4 flex items-center justify-between gap-3 rounded-xl border border-warning/25 p-3 text-sm text-ink-secondary" role="alert">
+                <span>未能加载完整记录，当前显示最近的聊天。</span>
+                <AppButton size="sm" variant="secondary" @click="recentStore.load(true, true)">重试</AppButton>
+              </div>
               <AppEmpty
-                v-if="!sortedChats.length"
+                v-if="!chatsLoading && !recentStore.error && !sortedChats.length"
                 icon="chat"
                 title="还没有聊天记录"
                 description="选一张角色卡或故事卡开始第一段对话吧。"
@@ -860,7 +675,7 @@ const scrollHintLeft = 'after:absolute after:right-0 after:top-0 after:h-full af
                 </template>
               </AppEmpty>
               <AppEmpty
-                v-else-if="!filteredChats.length"
+                v-else-if="!chatsLoading && sortedChats.length && !filteredChats.length"
                 icon="search"
                 title="没有匹配的聊天"
                 description="换个关键词试试。"
@@ -903,9 +718,16 @@ const scrollHintLeft = 'after:absolute after:right-0 after:top-0 after:h-full af
               </div>
             </section>
           </div>
-        </div>
       </div>
 
+      <AppDrawer v-model="displayOptionsOpen" title="显示与排序" padded>
+        <div class="space-y-5">
+          <div><label for="browse-mobile-sort" class="mb-2 block text-sm font-medium">角色排序</label><AppSelect id="browse-mobile-sort" v-model="charSort"><option v-for="o in charSortOptions" :key="o.key" :value="o.key">{{ o.label }}</option></AppSelect></div>
+          <AppCheckbox v-model="noImage">无图模式</AppCheckbox>
+          <p class="text-xs leading-5 text-ink-muted">隐藏封面，以更紧凑的列表浏览角色。</p>
+        </div>
+        <template #footer><AppButton class="w-full" @click="displayOptionsOpen = false">完成</AppButton></template>
+      </AppDrawer>
       <DefaultModelPicker v-model="modelPickerOpen" />
       <CharacterStartDialog
         v-model="startDialogOpen"

@@ -1,10 +1,11 @@
 
 <script setup lang="ts">
 import { computed } from 'vue'
-import { useRoute, useRouter, type RouteLocationRaw } from 'vue-router'
+import { RouterLink, useRoute, useRouter, type RouteLocationRaw } from 'vue-router'
 import { useSessionStore } from '@/stores/session'
 import { useBillingStore } from '@/stores/billing'
 import { useUiStore } from '@/stores/ui'
+import { getNavSection } from '@/lib/navigation'
 import { formatPoints } from '@/lib/points'
 
 const route = useRoute()
@@ -58,7 +59,7 @@ const libraryNav: Array<{ label: string; to: RouteLocationRaw; isActive: () => b
   },
 ]
 
-const activeMain = computed(() => mainNav.find((item) => item.names.includes(String(route.name)))?.key)
+const activeMain = computed(() => getNavSection(route.name))
 const activeLibrary = computed(() => libraryNav.find((item) => item.isActive())?.label)
 const settingsActive = computed(() => route.name === 'settings')
 const accountActive = computed(() => route.name === 'account' || route.name === 'admin')
@@ -69,66 +70,68 @@ function toggleTheme() {
 </script>
 
 <template>
-  <aside class="hidden md:flex h-[100dvh] w-72 shrink-0 flex-col overflow-y-auto border-r border-border-subtle bg-surface/70 px-5 py-6 sticky top-0">
+  <aside class="hidden md:flex h-[100dvh] w-56 lg:w-60 shrink-0 flex-col overflow-y-auto border-r border-border-subtle bg-surface/60 px-4 py-6 sticky top-0">
     <button class="flex items-center gap-3 text-left" aria-label="返回探索" @click="router.push('/browse')">
-      <div class="flex h-11 w-11 items-center justify-center rounded-xl bg-brand-gradient text-lg font-bold text-white shadow-glow">
+      <div class="flex h-10 w-10 items-center justify-center rounded-xl bg-brand-gradient text-lg font-bold text-white">
         A
       </div>
       <div class="leading-tight">
-        <h1 class="text-xl font-semibold text-ink-primary">AIBAR</h1>
+        <h1 class="text-xl font-semibold tracking-wide text-ink-primary">AIBAR</h1>
         <p class="text-xs text-ink-muted">选角色，开聊</p>
       </div>
     </button>
 
-    <nav class="mt-10 space-y-1" aria-label="主导航">
-      <button
+    <nav class="mt-9 space-y-1.5" aria-label="主导航">
+      <RouterLink
         v-for="item in mainNav"
         :key="item.key"
         :aria-label="item.label"
+        :aria-current="activeMain === item.key ? 'page' : undefined"
         :class="[
-          'w-full flex items-center gap-3 rounded-lg px-3 py-2.5 text-left text-sm font-semibold transition-all',
+          'w-full flex items-center gap-3 min-h-11 rounded-xl px-3 py-2.5 text-left text-sm font-semibold transition-all',
           activeMain === item.key
-            ? 'bg-brand-500/15 text-brand-200 ring-1 ring-brand-500/35'
+            ? 'bg-brand-500/10 text-brand-200'
             : 'text-ink-secondary hover:bg-ink-primary/[0.06] hover:text-ink-primary',
         ]"
-        @click="router.push(item.to)"
+        :to="item.to"
       >
         <svg class="h-5 w-5 shrink-0 opacity-80" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" :d="item.icon" />
         </svg>
         <span>{{ item.label }}</span>
-      </button>
+      </RouterLink>
     </nav>
 
     <nav class="mt-6 space-y-1" aria-label="资料库">
       <p class="px-3 text-[11px] font-semibold uppercase tracking-wider text-ink-muted">资料库</p>
       <div class="mt-1.5 space-y-0.5 pl-1">
-        <button
+        <RouterLink
           v-for="item in libraryNav"
           :key="item.label"
           :aria-label="item.label"
+        :aria-current="item.isActive() ? 'page' : undefined"
           :class="[
-            'flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left text-sm transition-colors',
+            'flex w-full items-center gap-3 min-h-10 rounded-xl px-3 py-2 text-left text-sm transition-colors',
             activeLibrary === item.label
-              ? 'bg-brand-500/15 text-brand-200 ring-1 ring-brand-500/35'
+              ? 'bg-brand-500/10 text-brand-200'
               : 'text-ink-secondary hover:bg-ink-primary/[0.06] hover:text-ink-primary',
           ]"
-          @click="router.push(item.to)"
+          :to="item.to"
         >
           <svg class="h-4 w-4 shrink-0 opacity-70" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" :d="item.icon" />
           </svg>
           {{ item.label }}
-        </button>
+        </RouterLink>
       </div>
     </nav>
 
     <div class="mt-auto space-y-4 border-t border-border-subtle pt-4">
       <button
         :class="[
-          'flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left text-sm font-semibold transition-colors',
+          'flex w-full items-center gap-3 min-h-11 rounded-xl px-3 py-2.5 text-left text-sm font-semibold transition-colors',
           accountActive
-            ? 'bg-brand-500/15 text-brand-200 ring-1 ring-brand-500/35'
+            ? 'bg-brand-500/10 text-brand-200'
             : 'text-ink-secondary hover:bg-ink-primary/[0.06] hover:text-ink-primary',
         ]"
         aria-label="我的账号"
@@ -146,9 +149,9 @@ function toggleTheme() {
 
       <button
         :class="[
-          'flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left text-sm font-semibold transition-colors',
+          'flex w-full items-center gap-3 min-h-11 rounded-xl px-3 py-2.5 text-left text-sm font-semibold transition-colors',
           settingsActive
-            ? 'bg-brand-500/15 text-brand-200 ring-1 ring-brand-500/35'
+            ? 'bg-brand-500/10 text-brand-200'
             : 'text-ink-secondary hover:bg-ink-primary/[0.06] hover:text-ink-primary',
         ]"
         aria-label="设置"
@@ -168,7 +171,7 @@ function toggleTheme() {
 
       <button
         type="button"
-        class="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left text-sm text-ink-secondary transition-colors hover:bg-ink-primary/[0.06] hover:text-ink-primary"
+        class="flex w-full items-center gap-3 min-h-10 rounded-xl px-3 py-2 text-left text-sm text-ink-secondary transition-colors hover:bg-ink-primary/[0.06] hover:text-ink-primary"
         :aria-label="ui.theme === 'dark' ? '切换到浅色模式' : '切换到深色模式'"
         @click="toggleTheme"
       >

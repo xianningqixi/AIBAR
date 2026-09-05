@@ -6,13 +6,19 @@ export interface CharacterImportResponse {
   file_name?: string
 }
 
+function normalizeCharacter(character: Character): Character {
+  // ST 新建卡返回布尔值，旧卡可能保存字符串；在 API 边界统一，避免刷新后收藏消失。
+  const favorite = character.fav ?? character.data?.extensions?.fav
+  return { ...character, fav: String(String(favorite) === 'true') }
+}
+
 export async function fetchCharacters(): Promise<Character[]> {
   const chars = await apiPost('/api/characters/all')
-  return Array.isArray(chars) ? chars.filter((c: Character) => c && c.name) : []
+  return Array.isArray(chars) ? chars.filter((c: Character) => c && c.name).map(normalizeCharacter) : []
 }
 
 export async function fetchCharacter(avatar: string): Promise<Character> {
-  return apiPost('/api/characters/get', { avatar_url: avatar })
+  return normalizeCharacter(await apiPost<Character>('/api/characters/get', { avatar_url: avatar }))
 }
 
 export async function createCharacter(data: Record<string, unknown>): Promise<unknown> {

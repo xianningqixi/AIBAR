@@ -1,9 +1,11 @@
 
 <script setup lang="ts">
-import { useRoute, useRouter } from 'vue-router'
+import { RouterLink, useRoute } from 'vue-router'
+
+import { getNavSection } from '@/lib/navigation'
 
 const route = useRoute()
-const router = useRouter()
+
 
 const tabs = [
   {
@@ -28,7 +30,7 @@ const tabs = [
     key: 'library',
     label: '资料库',
     to: '/characters',
-    icon: 'M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z',
+    icon: 'M4 4h6v16H4zM14 4h6v16h-6zM4 8h6m4 0h6',
   },
   {
     key: 'account',
@@ -39,21 +41,7 @@ const tabs = [
 ]
 
 function isActive(key: string): boolean {
-  const path = route.path
-  switch (key) {
-    case 'browse':
-      return path.startsWith('/browse') || path.startsWith('/chat') || path.startsWith('/character/')
-    case 'create':
-      return path.startsWith('/create') || path.startsWith('/story')
-    case 'hub':
-      return path.startsWith('/hub') || path.startsWith('/publish')
-    case 'library':
-      return path === '/characters' || path.startsWith('/worlds') || path.startsWith('/mods')
-    case 'account':
-      return path.startsWith('/account') || path.startsWith('/settings') || path.startsWith('/admin')
-    default:
-      return false
-  }
+  return getNavSection(route.name) === key
 }
 </script>
 
@@ -65,13 +53,14 @@ function isActive(key: string): boolean {
   >
     <!-- 内容区固定 h-16（4rem），加上 safe-area 内边距即为总高度；App.vue 的 pb 与之一致 -->
     <div class="grid h-16 grid-cols-5">
-      <button
+      <RouterLink
         v-for="tab in tabs"
         :key="tab.key"
         :aria-label="tab.label"
         class="relative flex h-full flex-col items-center justify-center gap-0.5 transition-all duration-150 active:scale-95"
-        :class="isActive(tab.key) ? 'text-brand-300' : 'text-ink-muted hover:text-ink-secondary'"
-        @click="router.push(tab.to)"
+        :class="isActive(tab.key) ? 'text-brand-300' : 'text-ink-secondary hover:text-ink-secondary'"
+        :to="tab.to"
+        :aria-current="isActive(tab.key) ? 'page' : undefined"
       >
         <span
           v-if="isActive(tab.key)"
@@ -88,7 +77,7 @@ function isActive(key: string): boolean {
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" :d="tab.icon" />
         </svg>
         <span class="text-xs font-medium">{{ tab.label }}</span>
-      </button>
+      </RouterLink>
     </div>
   </nav>
 </template>

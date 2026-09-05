@@ -462,17 +462,7 @@ watch(() => route.fullPath, initChat)
       <div class="space-y-3">
         <p class="text-xs text-ink-muted">切换只影响当前聊天，不会改其他存档。</p>
 
-        <div v-if="session.isAdmin" class="rounded-lg bg-surface-sunken/55 px-3 py-2.5 ring-1 ring-border-subtle">
-          <div class="flex flex-wrap items-center gap-3 text-xs">
-            <span class="font-medium text-ink-secondary">模型状态</span>
-            <span class="rounded-full bg-success/10 px-2.5 py-1 text-success-strong">通畅</span>
-            <span class="inline-flex items-center gap-1 text-ink-muted"><span class="h-1.5 w-1.5 rounded-full bg-success" />可测</span>
-            <span class="inline-flex items-center gap-1 text-ink-muted"><span class="h-1.5 w-1.5 rounded-full bg-warning" />待配置</span>
-            <span class="inline-flex items-center gap-1 text-ink-muted"><span class="h-1.5 w-1.5 rounded-full bg-danger" />异常</span>
-          </div>
-        </div>
-
-        <AppInput v-model="modelSearch" placeholder="搜索模型或 Profile" />
+        <AppInput v-model="modelSearch" placeholder="搜索模型名称" />
 
         <div class="max-h-[52vh] overflow-y-auto pr-1">
           <button
@@ -533,7 +523,7 @@ watch(() => route.fullPath, initChat)
         </div>
 
         <div v-if="session.isAdmin" class="flex flex-wrap items-center justify-between gap-3 border-t border-border-subtle pt-3">
-          <p class="text-xs text-ink-muted">需要新增或修改 Key 时，进入模型设置向导。</p>
+          <p class="text-xs text-ink-muted">需要添加模型或修改连接时，前往模型设置。</p>
           <AppButton size="sm" variant="secondary" @click="router.push({ path: '/settings', query: { tab: 'model' } })">
             管理模型
           </AppButton>

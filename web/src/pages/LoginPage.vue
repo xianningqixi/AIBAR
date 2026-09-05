@@ -64,11 +64,11 @@ async function submit() {
         <h2 class="mt-2 text-2xl font-semibold text-ink-primary">继续上次的故事</h2>
 
         <form class="mt-8 space-y-4" @submit.prevent="submit">
-          <AppFormField label="账号" required>
-            <AppInput v-model="handle" autocomplete="username" placeholder="your-handle" />
+          <AppFormField label="账号" for="login-handle" required>
+            <AppInput id="login-handle" v-model="handle" autocomplete="username" placeholder="your-handle" />
           </AppFormField>
-          <AppFormField label="密码" required>
-            <AppInput v-model="password" type="password" autocomplete="current-password" placeholder="输入密码" />
+          <AppFormField label="密码" for="login-password" required>
+            <AppInput id="login-password" v-model="password" type="password" autocomplete="current-password" placeholder="输入密码" />
           </AppFormField>
           <p v-if="error" class="flex items-start gap-2 rounded-lg border border-danger/20 bg-danger-soft px-3 py-2 text-sm text-danger-strong">
             <svg class="mt-0.5 h-4 w-4 shrink-0" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">

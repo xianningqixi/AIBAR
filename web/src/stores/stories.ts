@@ -14,8 +14,8 @@ export const useStoriesStore = defineStore('stories', () => {
   let loadPromise: Promise<void> | null = null
 
   async function load(force = false) {
+    if (loadPromise && !force) return loadPromise
     if (loaded.value && !force) return
-    if (loadPromise) return loadPromise
     const version = ++requestVersion
     loading.value = true
     error.value = ''
@@ -29,8 +29,10 @@ export const useStoriesStore = defineStore('stories', () => {
       } catch (e: unknown) {
         if (version === requestVersion) error.value = getApiErrorMessage(e, '故事列表加载失败')
       } finally {
-        if (version === requestVersion) loading.value = false
-        loadPromise = null
+        if (version === requestVersion) {
+          loading.value = false
+          loadPromise = null
+        }
       }
     })()
     loadPromise = promise
@@ -39,6 +41,9 @@ export const useStoriesStore = defineStore('stories', () => {
 
   // 故事被创建/更新/删除后调用：下一次 load 会重新拉取
   function invalidate() {
+    requestVersion += 1
+    loadPromise = null
+    loading.value = false
     loaded.value = false
   }
 

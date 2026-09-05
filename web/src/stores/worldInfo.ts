@@ -15,8 +15,8 @@ export const useWorldInfoStore = defineStore('worldInfo', () => {
   let loadPromise: Promise<void> | null = null
 
   async function load(force = false) {
-    if (loaded.value && !force) return
     if (loadPromise && !force) return loadPromise
+    if (loaded.value && !force) return
     const version = ++requestVersion
     loading.value = true
     error.value = ''
@@ -31,8 +31,10 @@ export const useWorldInfoStore = defineStore('worldInfo', () => {
         if (version === requestVersion) error.value = getApiErrorMessage(e, '世界书列表加载失败')
         throw e
       } finally {
-        if (version === requestVersion) loading.value = false
-        loadPromise = null
+        if (version === requestVersion) {
+          loading.value = false
+          loadPromise = null
+        }
       }
     })()
     loadPromise = promise

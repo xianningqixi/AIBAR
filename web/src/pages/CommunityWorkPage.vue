@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useSessionStore } from '@/stores/session'
 import { useCharactersStore } from '@/stores/characters'
@@ -28,6 +28,7 @@ import StCompatibilityDialog from '@/components/chat/StCompatibilityDialog.vue'
 import AppButton from '@/components/ui/AppButton.vue'
 import AppEmpty from '@/components/ui/AppEmpty.vue'
 import AppPageHeader from '@/components/ui/AppPageHeader.vue'
+import ResourceCover from '@/components/ui/ResourceCover.vue'
 import AppSpinner from '@/components/ui/AppSpinner.vue'
 import AppTextarea from '@/components/ui/AppTextarea.vue'
 import { getApiErrorMessage } from '@/api/client'
@@ -49,7 +50,9 @@ const commenting = ref(false)
 const managing = ref(false)
 const startDialogOpen = ref(false)
 const selectedVersionId = ref('')
+let pageEpoch = 0
 const pendingCharacterLaunch = ref<{
+  pageEpoch: number
   accountHandle: string
   character: Character
   launch: CommunityLaunchResult
@@ -57,6 +60,7 @@ const pendingCharacterLaunch = ref<{
 const compatDialogOpen = ref(false)
 const compatAnalysis = ref<CharacterRuntimeAnalysis | null>(null)
 const pendingCompatLaunch = ref<{
+  pageEpoch: number
   accountHandle: string
   character: Character
   launch: CommunityLaunchResult
@@ -80,15 +84,33 @@ function typeLabel(type: CommunityWorkDetail['type']): string {
 }
 
 async function load() {
+  const epoch = ++pageEpoch
+  work.value = null
+  selectedVersionId.value = ''
+  pendingCharacterLaunch.value = null
+  pendingCompatLaunch.value = null
+  startDialogOpen.value = false
+  compatDialogOpen.value = false
+  compatAnalysis.value = null
+  starting.value = false
+  managing.value = false
+  commenting.value = false
+  favoritePending = false
+  comment.value = ''
+  if (!session.user) {
+    loading.value = false
+    return
+  }
   loading.value = true
   try {
-    work.value = await getCommunityWork(workId.value)
-    selectedVersionId.value = ''
+    const result = await getCommunityWork(workId.value)
+    if (epoch === pageEpoch) work.value = result
   } catch (e: unknown) {
+    if (epoch !== pageEpoch) return
     ui.addToast(`加载作品失败：${getApiErrorMessage(e)}`, 'error')
     router.replace('/hub')
   } finally {
-    loading.value = false
+    if (epoch === pageEpoch) loading.value = false
   }
 }
 
@@ -96,94 +118,116 @@ async function load() {
 let favoritePending = false
 async function toggleFavorite() {
   if (!work.value || favoritePending) return
+  const epoch = pageEpoch
   favoritePending = true
   const previous = work.value
   work.value = { ...work.value, favorite: !work.value.favorite }
   try {
     const updated = await setCommunityFavorite(previous.id, !previous.favorite)
+    if (epoch !== pageEpoch) return
     work.value = { ...work.value, ...updated }
   } catch (e: unknown) {
+    if (epoch !== pageEpoch) return
     work.value = previous
     ui.addToast(`收藏失败：${getApiErrorMessage(e)}`, 'error')
   } finally {
-    favoritePending = false
+    if (epoch === pageEpoch) favoritePending = false
   }
 }
 
 async function rate(score: number) {
   if (!work.value) return
+  const epoch = pageEpoch
   try {
     const updated = await rateCommunityWork(work.value.id, score)
+    if (epoch !== pageEpoch) return
     work.value = { ...work.value, ...updated }
   } catch (e: unknown) {
+    if (epoch !== pageEpoch) return
     ui.addToast(`评分失败：${getApiErrorMessage(e)}`, 'error')
   }
 }
 
 async function submitComment() {
-  if (!work.value || !comment.value.trim()) return
+  if (!work.value || commenting.value || !comment.value.trim()) return
+  const epoch = pageEpoch
   commenting.value = true
   try {
     const created = await addCommunityComment(work.value.id, comment.value)
+    if (epoch !== pageEpoch || !work.value) return
     work.value.comments.unshift(created)
     work.value.commentCount += 1
     comment.value = ''
   } catch (e: unknown) {
+    if (epoch !== pageEpoch) return
     // 评论正文保留在输入框里，用户可修改后重试
     ui.addToast(`评论失败：${getApiErrorMessage(e)}`, 'error')
   } finally {
-    commenting.value = false
+    if (epoch === pageEpoch) commenting.value = false
   }
 }
 
 async function removeComment(id: string) {
   if (!work.value) return
+  const epoch = pageEpoch
   if (!await confirmDialog({ title: '删除评论', message: '删除这条评论？', danger: true, confirmText: '删除' })) return
+  if (epoch !== pageEpoch) return
   try {
     await deleteCommunityComment(id)
+    if (epoch !== pageEpoch || !work.value) return
     work.value.comments = work.value.comments.filter(item => item.id !== id)
     work.value.commentCount = Math.max(0, work.value.commentCount - 1)
   } catch (e: unknown) {
+    if (epoch !== pageEpoch) return
     ui.addToast(`删除评论失败：${getApiErrorMessage(e)}`, 'error')
   }
 }
 
 async function toggleVisibility() {
   if (!work.value || managing.value) return
+  const epoch = pageEpoch
   managing.value = true
   try {
     const status = work.value.status === 'published' ? 'hidden' : 'published'
     const updated = await setCommunityWorkStatus(work.value.id, status)
+    if (epoch !== pageEpoch) return
     work.value = { ...work.value, ...updated }
     ui.addToast(status === 'hidden' ? '作品已下架' : '作品已重新上架', 'success')
   } catch (error: unknown) {
+    if (epoch !== pageEpoch) return
     ui.addToast(`操作失败：${getApiErrorMessage(error)}`, 'error')
   } finally {
-    managing.value = false
+    if (epoch === pageEpoch) managing.value = false
   }
 }
 
 async function removeWork() {
   if (!work.value || managing.value) return
+  const epoch = pageEpoch
+  const target = work.value
   if (!await confirmDialog({ title: '删除社区作品', message: `永久删除社区作品「${work.value.title}」及其全部版本？`, danger: true, confirmText: '永久删除' })) return
+  if (epoch !== pageEpoch) return
   managing.value = true
   try {
-    await deleteCommunityWork(work.value.id)
+    await deleteCommunityWork(target.id)
+    if (epoch !== pageEpoch) return
     ui.addToast('社区作品已删除', 'success')
     await router.replace('/hub')
   } catch (error: unknown) {
+    if (epoch !== pageEpoch) return
     ui.addToast(`删除失败：${getApiErrorMessage(error)}`, 'error')
   } finally {
-    managing.value = false
+    if (epoch === pageEpoch) managing.value = false
   }
 }
 
-async function finishLaunch(launch: CommunityLaunchResult, chatId: string) {
+async function finishLaunch(launch: CommunityLaunchResult, chatId: string, epoch: number) {
   try {
     await completeCommunityLaunch(launch.launchId, chatId)
   } catch (error) {
     console.warn('Community launch completion tracking failed', error)
   }
+  if (epoch !== pageEpoch) return
   ui.addToast('已复制到私人资料库并创建聊天', 'success')
   await router.push({
     path: `/chat/${encodeURIComponent(launch.avatar || '')}`,
@@ -193,8 +237,9 @@ async function finishLaunch(launch: CommunityLaunchResult, chatId: string) {
 
 async function useWork(versionId?: string) {
   if (!work.value || starting.value) return
+  const epoch = pageEpoch
   const accountHandle = session.user?.handle || ''
-  const accountIsCurrent = () => accountHandle && session.user?.handle === accountHandle
+  const accountIsCurrent = () => epoch === pageEpoch && accountHandle && session.user?.handle === accountHandle
   starting.value = true
   try {
     const launched = await launchCommunityWork(work.value.id, versionId)
@@ -227,22 +272,23 @@ async function useWork(versionId?: string) {
     if (!launched.story) {
       const analysis = analyzeCharacterRuntime(character)
       if (analysis.requiresCompatibility) {
-        pendingCompatLaunch.value = { accountHandle, character, launch: launched }
+        pendingCompatLaunch.value = { pageEpoch: epoch, accountHandle, character, launch: launched }
         compatAnalysis.value = analysis
         compatDialogOpen.value = true
         return
       }
-      pendingCharacterLaunch.value = { accountHandle, character, launch: launched }
+      pendingCharacterLaunch.value = { pageEpoch: epoch, accountHandle, character, launch: launched }
       startDialogOpen.value = true
       return
     }
     const chatId = await createChatFromStory(launched.story, character)
     if (!accountIsCurrent()) return
-    await finishLaunch(launched, chatId)
+    await finishLaunch(launched, chatId, epoch)
   } catch (e: unknown) {
+    if (epoch !== pageEpoch) return
     ui.addToast(`${isMod.value ? '导入提示词' : '开始聊天'}失败：${getApiErrorMessage(e)}`, 'error')
   } finally {
-    starting.value = false
+    if (epoch === pageEpoch) starting.value = false
   }
 }
 
@@ -251,18 +297,20 @@ function selectVersion(id: string) {
 }
 
 async function confirmUseVersion(versionId: string) {
+  const epoch = pageEpoch
   if (!await confirmDialog({
     title: isMod.value ? '导入提示词' : '开始使用',
     message: isMod.value ? '将该版本提示词导入私人资料库？' : '复制该版本到私人资料库并开始聊天？',
     confirmText: isMod.value ? '导入' : '开始',
   })) return
+  if (epoch !== pageEpoch) return
   await useWork(versionId)
 }
 
 async function confirmCompatibilityLaunch() {
   const pending = pendingCompatLaunch.value
   if (!pending || starting.value) return
-  const accountIsCurrent = () => pending.accountHandle && session.user?.handle === pending.accountHandle
+  const accountIsCurrent = () => pending.pageEpoch === pageEpoch && pending.accountHandle && session.user?.handle === pending.accountHandle
   starting.value = true
   try {
     if (!accountIsCurrent()) {
@@ -277,8 +325,10 @@ async function confirmCompatibilityLaunch() {
     } catch (error) {
       console.warn('Community compatibility launch tracking failed', error)
     }
+    if (!accountIsCurrent()) return
     await launchStCompatibility(pending.character, { chat: chatId })
   } catch (error: unknown) {
+    if (!accountIsCurrent()) return
     starting.value = false
     ui.addToast(`进入兼容模式失败：${getApiErrorMessage(error)}`, 'error')
   }
@@ -293,7 +343,7 @@ function abortCommunityStart(message: string) {
 async function confirmCommunityStart(selection: CharacterStartSelection) {
   const pending = pendingCharacterLaunch.value
   if (!pending || starting.value) return
-  const accountIsCurrent = () => pending.accountHandle && session.user?.handle === pending.accountHandle
+  const accountIsCurrent = () => pending.pageEpoch === pageEpoch && pending.accountHandle && session.user?.handle === pending.accountHandle
   starting.value = true
   try {
     if (!accountIsCurrent()) {
@@ -306,16 +356,18 @@ async function confirmCommunityStart(selection: CharacterStartSelection) {
       persona: selection.persona,
     })
     if (!accountIsCurrent()) {
+      if (pending.pageEpoch !== pageEpoch) return
       abortCommunityStart('登录账号已变化，请重新打开该作品')
       return
     }
     startDialogOpen.value = false
     pendingCharacterLaunch.value = null
-    await finishLaunch(pending.launch, chatId)
+    await finishLaunch(pending.launch, chatId, pending.pageEpoch)
   } catch (error: unknown) {
+    if (!accountIsCurrent()) return
     ui.addToast(`开始聊天失败：${getApiErrorMessage(error)}`, 'error')
   } finally {
-    starting.value = false
+    if (pending.pageEpoch === pageEpoch) starting.value = false
   }
 }
 
@@ -326,7 +378,8 @@ watch(startDialogOpen, (open) => {
   ui.addToast('角色已复制到私人资料库，可稍后在「角色」页开始聊天')
 })
 
-onMounted(load)
+watch([workId, () => session.user?.handle], load, { immediate: true })
+onBeforeUnmount(() => { pageEpoch += 1 })
 </script>
 
 <template>
@@ -335,6 +388,7 @@ onMounted(load)
       :title="work?.title || '社区作品'"
       :subtitle="work ? `作者 ${work.authorName}` : ''"
       back-to="/hub"
+      mobile-actions-below
     >
       <template #actions>
         <template v-if="work && (isOwner || session.isAdmin)">
@@ -355,15 +409,8 @@ onMounted(load)
 
       <!-- hero：背景卡包裹 -->
       <section class="rounded-2xl bg-surface ring-1 ring-border-subtle shadow-sm">
-        <div class="grid gap-6 p-5 md:p-7 lg:grid-cols-[17rem_minmax(0,1fr)]">
-          <!-- 封面 -->
-          <div v-if="isMod" class="flex aspect-[3/4] w-full max-w-[17rem] flex-col items-center justify-center rounded-2xl bg-surface-sunken text-ink-primary ring-1 ring-border">
-            <svg class="h-16 w-16 text-brand-300" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true">
-              <path stroke-linecap="round" stroke-linejoin="round" d="m8 9-4 3 4 3m8-6 4 3-4 3M13 5l-2 14" />
-            </svg>
-            <span class="mt-3 rounded-md bg-brand-500/10 px-2 py-1 text-xs font-medium text-brand-300">提示词 MOD</span>
-          </div>
-          <img v-else :src="work.coverUrl" :alt="work.title" class="aspect-[3/4] w-full max-w-[17rem] rounded-2xl object-cover ring-1 ring-border" />
+        <div class="grid gap-6 p-5 md:p-7 sm:grid-cols-[12rem_minmax(0,1fr)] lg:grid-cols-[15rem_minmax(0,1fr)]">
+          <ResourceCover :src="work.coverUrl" :title="work.title" :kind="work.type" eager class="w-full rounded-xl" :class="isMod ? 'h-28 lg:h-full lg:min-h-48' : 'aspect-[4/3] max-h-64 sm:aspect-[4/5] lg:max-h-none'" />
 
           <div class="min-w-0">
             <div class="flex flex-wrap items-center gap-2 text-xs text-ink-muted">
@@ -371,7 +418,7 @@ onMounted(load)
               <span>v{{ work.versionNumber }}</span>
               <span>{{ formatDate(work.publishedAt) }}</span>
             </div>
-            <h1 class="mt-4 text-3xl font-semibold text-ink-primary">{{ work.title }}</h1>
+            <h1 class="mt-3 text-2xl font-semibold md:text-3xl text-ink-primary">{{ work.title }}</h1>
             <p class="mt-2 text-sm text-ink-muted">作者 {{ work.authorName }} · @{{ work.authorHandle }}</p>
             <p class="mt-5 max-w-3xl whitespace-pre-wrap text-sm leading-7 text-ink-secondary">{{ work.summary || '暂无简介' }}</p>
             <div class="mt-4 flex flex-wrap gap-2">
@@ -382,21 +429,21 @@ onMounted(load)
               <AppButton variant="secondary" size="lg" @click="toggleFavorite">{{ work.favorite ? '已收藏' : '收藏' }} · {{ work.favoriteCount }}</AppButton>
             </div>
 
-            <!-- 统计：4 个独立小卡片 -->
-            <div class="mt-6 grid grid-cols-2 gap-3 sm:grid-cols-4">
-              <div class="rounded-xl border border-border-subtle bg-surface-sunken px-4 py-3">
+            <!-- 统计横排展示，移动端优先留出正文空间 -->
+            <div class="mt-6 grid grid-cols-4 gap-2 border-t border-border-subtle pt-4">
+              <div class="min-w-0 px-1">
                 <p class="text-xs text-ink-muted">{{ isMod ? '导入' : '启动' }}</p>
                 <p class="mt-1 text-lg font-semibold text-ink-primary">{{ work.launchCount }}</p>
               </div>
-              <div class="rounded-xl border border-border-subtle bg-surface-sunken px-4 py-3">
+              <div class="min-w-0 px-1">
                 <p class="text-xs text-ink-muted">评分</p>
                 <p class="mt-1 text-lg font-semibold text-ink-primary">{{ work.ratingAverage.toFixed(1) }}</p>
               </div>
-              <div class="rounded-xl border border-border-subtle bg-surface-sunken px-4 py-3">
+              <div class="min-w-0 px-1">
                 <p class="text-xs text-ink-muted">收藏</p>
                 <p class="mt-1 text-lg font-semibold text-ink-primary">{{ work.favoriteCount }}</p>
               </div>
-              <div class="rounded-xl border border-border-subtle bg-surface-sunken px-4 py-3">
+              <div class="min-w-0 px-1">
                 <p class="text-xs text-ink-muted">评论</p>
                 <p class="mt-1 text-lg font-semibold text-ink-primary">{{ work.commentCount }}</p>
               </div>

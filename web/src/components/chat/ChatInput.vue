@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import type { ReplyDraftOption } from '@/lib/replyDraft'
 
 const props = defineProps<{
@@ -25,7 +25,7 @@ const emit = defineEmits<{
 
 const text = ref(props.modelValue || '')
 const textarea = ref<HTMLTextAreaElement>()
-const focused = ref(false)
+const composing = ref(false)
 const draftPanelOpen = computed(() =>
   props.draftLoading || !!props.draftError || !!props.draftOptions?.length,
 )
@@ -42,17 +42,15 @@ watch(() => props.modelValue, (value) => {
 
 function handleSend() {
   const trimmed = text.value.trim()
-  if (!trimmed || props.disabled) return
-  if (props.isStreaming) {
-    emit('stop')
-    return
-  }
+  if (!trimmed || props.disabled || props.isStreaming || composing.value) return
   emit('send', trimmed)
   setText('')
 }
 
 function onKeydown(e: KeyboardEvent) {
-  if (e.key === 'Enter' && !e.shiftKey) {
+  // 中文候选词确认不能触发发送；229 兼容 Safari 的 compositionend 时序。
+  if (e.isComposing || composing.value || e.keyCode === 229) return
+  if (e.key === 'Enter' && !e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey) {
     e.preventDefault()
     handleSend()
   }
@@ -91,12 +89,12 @@ function selectDraft(option: ReplyDraftOption) {
   emit('clearDrafts')
 }
 
-const showHint = computed(() => focused.value || text.value.trim().length > 0 || props.isStreaming || props.busyLabel)
+onMounted(resizeSoon)
 </script>
 
 <template>
   <!-- 输入区停靠栏：加深背景、上边框，与页面内容形成明确分界 -->
-  <div class="border-t border-border-subtle bg-bg/95 px-4 pb-[calc(.875rem+env(safe-area-inset-bottom))] pt-3 shadow-[0_-4px_24px_-8px_rgb(var(--c-shadow)/0.12)] backdrop-blur md:px-6 md:pb-[calc(1rem+env(safe-area-inset-bottom))] md:pt-4">
+  <div class="bg-bg/95 px-4 pb-[calc(.875rem+env(safe-area-inset-bottom))] pt-3 backdrop-blur md:px-6 md:pb-[calc(1rem+env(safe-area-inset-bottom))] md:pt-4">
     <div class="relative mx-auto max-w-4xl">
       <!-- AI 拟回复面板锚定在输入区上方，输入框长高时不会被遮住 -->
       <div
@@ -156,24 +154,25 @@ const showHint = computed(() => focused.value || text.value.trim().length > 0 ||
       </div>
 
       <div
-        class="flex items-end gap-1.5 rounded-2xl border border-border bg-surface-elevated/80 p-2 shadow-sm transition-all focus-within:border-brand-500/60 focus-within:shadow-glow"
+        class="flex items-end gap-1.5 rounded-2xl border border-border bg-surface p-2 shadow-elevated transition-[border-color,box-shadow] focus-within:border-brand-500/60 focus-within:ring-2 focus-within:ring-brand-500/10"
       >
         <textarea
           ref="textarea"
           v-model="text"
           :disabled="disabled"
           rows="1"
-          class="min-h-[2.75rem] flex-1 resize-none overflow-y-auto bg-transparent px-4 py-3 text-sm leading-snug text-ink-primary placeholder-ink-muted/80 focus:outline-none"
+          class="min-h-[2.75rem] min-w-0 flex-1 resize-none overflow-y-auto bg-transparent px-3 py-3 text-base leading-relaxed text-ink-primary placeholder-ink-muted focus:outline-none"
           :placeholder="placeholder"
-          @focus="focused = true"
-          @blur="focused = false"
+          aria-label="消息内容"
+          @compositionstart="composing = true"
+          @compositionend="composing = false"
           @keydown="onKeydown"
           @input="handleInput"
         />
         <button
           v-if="!isStreaming"
           :disabled="draftDisabled || draftLoading"
-          class="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl text-ink-secondary transition-colors hover:bg-brand-500/10 hover:text-brand-300 disabled:cursor-not-allowed disabled:opacity-30"
+          class="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl text-ink-secondary transition-colors hover:bg-brand-500/10 hover:text-brand-300 disabled:cursor-not-allowed disabled:opacity-30"
           :title="draftLoading ? 'AI 正在拟回复' : 'AI 拟回复'"
           :aria-label="draftLoading ? 'AI 正在拟回复' : 'AI 拟回复'"
           @click="requestDrafts"
@@ -188,10 +187,10 @@ const showHint = computed(() => focused.value || text.value.trim().length > 0 ||
         </button>
         <button
           v-if="isStreaming"
-          class="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-danger/30 bg-danger/10 text-danger transition-colors hover:bg-danger/20 hover:text-danger-strong"
+          class="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-danger/30 bg-danger/10 text-danger transition-colors hover:bg-danger/20 hover:text-danger-strong"
           title="停止生成 (Esc)"
           aria-label="停止生成"
-          @click="handleSend"
+          @click="emit('stop')"
         >
           <svg class="h-4 w-4" fill="currentColor" viewBox="0 0 24 24">
             <rect x="6" y="6" width="12" height="12" rx="1.5" />
@@ -200,7 +199,7 @@ const showHint = computed(() => focused.value || text.value.trim().length > 0 ||
         <button
           v-else
           :disabled="!text.trim() || disabled"
-          class="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-brand-gradient text-white shadow-glow transition-all hover:brightness-110 active:scale-95 disabled:cursor-not-allowed disabled:opacity-30 disabled:shadow-none"
+          class="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-brand-gradient text-white shadow-glow transition-all hover:brightness-110 active:scale-95 disabled:cursor-not-allowed disabled:opacity-30 disabled:shadow-none"
           title="发送 (Enter)"
           aria-label="发送"
           @click="handleSend"
@@ -211,12 +210,11 @@ const showHint = computed(() => focused.value || text.value.trim().length > 0 ||
         </button>
       </div>
       <p
-        v-if="showHint"
-        class="mt-1.5 px-1 text-left text-xs text-ink-muted/80 transition-opacity duration-150"
+        class="mt-2 min-h-4 px-1 text-center text-[11px] text-ink-muted transition-opacity duration-150"
       >
         <template v-if="busyLabel">{{ busyLabel }}</template>
         <template v-else-if="isStreaming">生成中 · 按 Esc 或点按钮停止</template>
-        <template v-else>Enter 发送 · Shift+Enter 换行</template>
+        <template v-else><span class="hidden sm:inline">Enter 发送 · Shift+Enter 换行</span><span class="sm:hidden">写下回复，继续你们的故事</span></template>
       </p>
     </div>
   </div>
