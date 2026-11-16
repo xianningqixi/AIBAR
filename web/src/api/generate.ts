@@ -88,6 +88,8 @@ function contentText(value: unknown): string {
     .map((part) => {
       if (typeof part === 'string') return part
       if (!part || typeof part !== 'object') return ''
+      const type = (part as { type?: unknown }).type
+      if (typeof type === 'string' && type !== 'text' && type !== 'output_text') return ''
       const text = (part as { text?: unknown; content?: unknown }).text
         ?? (part as { content?: unknown }).content
       return typeof text === 'string' ? text : ''
@@ -135,12 +137,15 @@ export async function generateReply(payload: Record<string, unknown>, signal?: A
     )
     const apiError = responseError(data)
     if (apiError) throw new Error(apiError)
-    return contentText(
-      data?.choices?.[0]?.message?.content
-      ?? data?.choices?.[0]?.text
-      ?? data?.content
-      ?? data?.response,
-    )
+    // 兼容层可能提供空的 choices，同时在原始 content 中保留有效正文。
+    const reply = [
+      data?.choices?.[0]?.message?.content,
+      data?.choices?.[0]?.text,
+      data?.content,
+      data?.response,
+    ].map(contentText).find(text => text.trim())
+    if (!reply) throw new Error('模型未返回正文，请重试或切换模型')
+    return reply
   } catch (error) {
     throw new Error(explainGenerateError(error, payload), { cause: error })
   } finally {
